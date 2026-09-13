@@ -4,6 +4,23 @@
 
 Build the foundation as thin, deployable vertical slices. Every slice leaves the repository runnable, adds tests at the seam it introduces, and avoids domain-specific engineering code. A later ticket may depend only on slices listed before it.
 
+## Tracking
+
+All slices belong to the [Agent Hub foundation milestone](https://github.com/samgregson/agent-hub/milestone/1). GitHub native dependencies enforce the order below; only the first incomplete slice should be unblocked.
+
+| Slice | Build ticket |
+| --- | --- |
+| 0 | [#11 — Repository and contract spine](https://github.com/samgregson/agent-hub/issues/11) |
+| 1 | [#21 — Identity, Projects, and project-scoped shell](https://github.com/samgregson/agent-hub/issues/21) |
+| 2 | [#12 — Persisted Deep Agent Threads through AG-UI](https://github.com/samgregson/agent-hub/issues/12) |
+| 3 | [#15 — Interrupts, cancellation, and Run recovery](https://github.com/samgregson/agent-hub/issues/15) |
+| 4 | [#22 — Project-scoped Virtual Filesystem](https://github.com/samgregson/agent-hub/issues/22) |
+| 5 | [#17 — Curated MCP Gateway and fixture Plugin](https://github.com/samgregson/agent-hub/issues/17) |
+| 6 | [#19 — Portable Artifact lifecycle](https://github.com/samgregson/agent-hub/issues/19) |
+| 7 | [#23 — Sandboxed MCP App Artifact pane](https://github.com/samgregson/agent-hub/issues/23) |
+| 8 | [#18 — Cross-Thread Artifact discovery](https://github.com/samgregson/agent-hub/issues/18) |
+| 9 | [#20 — Deployment and foundation acceptance](https://github.com/samgregson/agent-hub/issues/20) |
+
 ## Slice 0 — Repository and contract spine
 
 **Outcome:** one reproducible monorepo with empty runnable web/API shells and a language-neutral contract pipeline.
