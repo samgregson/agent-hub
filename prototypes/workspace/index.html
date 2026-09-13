@@ -224,15 +224,21 @@
     .source-card span { color: #77736c; font-size: 9px; }
 
     /* Variant D — Hub + Plugin Pane */
-    .d-shell { display: grid; grid-template-columns: 58px 214px minmax(410px, 1fr) minmax(390px, .92fr); height: 100%; background: #11110f; }
+    .d-shell { display: grid; grid-template-columns: 58px 238px minmax(410px, 1fr) minmax(390px, .92fr); height: 100%; background: #11110f; }
     .d-rail { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 12px 0; border-right: 1px solid #302f2a; background: #121311; }
     .d-rail .brand-mark { margin-bottom: 10px; }
     .d-rail .rail-button.active { border-color: #5a5d38; background: #27291d; color: var(--accent); }
     .d-context { display: flex; min-width: 0; flex-direction: column; border-right: 1px solid #302f2a; background: #171714; }
-    .d-context-head { padding: 18px 14px 14px; border-bottom: 1px solid #2d2c27; }
-    .d-context-head strong { display: block; margin-top: 6px; font-size: 13px; }
+    .d-context-head { display: flex; height: 58px; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid #2d2c27; }
+    .d-context-head strong { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+    .d-context-head button { color: #77746e; }
     .d-context-scroll { flex: 1; overflow: auto; padding: 12px 8px; }
     .d-section { margin: 9px 8px 7px; color: #706d66; font: 700 9px ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .d-project { display: flex; align-items: center; gap: 7px; margin: 0 3px 4px; padding: 8px 7px; border-radius: 7px; color: #d5d2cb; font-size: 11px; font-weight: 650; }
+    .d-project::before { content: "⌄"; color: #77746e; font-size: 10px; }
+    .d-project.secondary { color: #827f78; font-weight: 500; }
+    .d-project.secondary::before { content: "›"; }
+    .d-tree-branch { margin: 0 0 10px 14px; padding-left: 8px; border-left: 1px solid #36352f; }
     .d-nav-item { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 8px; color: #aaa69e; font-size: 11px; }
     .d-nav-item.active { background: #25251f; color: #f2f0e9; }
     .d-nav-item.active::before { content: ""; width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
@@ -281,7 +287,7 @@
       .b-shell { grid-template-columns: 58px 170px 1fr; }
       .c-workspace { grid-template-columns: 54px minmax(300px, .8fr) minmax(390px, 1.2fr); }
       .c-left .wide-only { display: none; }
-      .d-shell { grid-template-columns: 54px 170px minmax(360px, 1fr) minmax(350px, .9fr); }
+      .d-shell { grid-template-columns: 54px 200px minmax(360px, 1fr) minmax(350px, .9fr); }
     }
 
     @media (max-width: 720px) {
@@ -293,8 +299,8 @@
       .c-workspace, .c-shell.focus .c-workspace { grid-template-columns: 1fr; }
       .c-left, .c-chat { display: none; }
       .mode-group { display: none; }
-      .d-shell { grid-template-columns: 1fr; }
-      .d-rail, .d-context, .d-chat { display: none; }
+      .d-shell { grid-template-columns: 54px clamp(150px, 30vw, 200px) minmax(0, 1fr); }
+      .d-chat { display: none; }
       .state-readout { display: none; }
       .switcher { bottom: 10px; }
     }
@@ -358,19 +364,24 @@
       </nav>
 
       <aside class="d-context">
-        <div class="d-context-head"><span class="eyebrow">Active project</span><strong>Portal frame study</strong></div>
+        <div class="d-context-head"><strong>Explorer</strong><button class="icon-button" aria-label="More navigator actions">•••</button></div>
         <div class="d-context-scroll">
-          <div class="d-section">Chats</div>
-          <div class="d-nav-item active"><span class="truncate">Preliminary sizing</span></div>
-          <div class="d-nav-item"><span class="truncate">Load assumptions</span></div>
-          <div class="d-nav-item"><span class="truncate">Connection sketch</span></div>
-          <div class="d-section">Artifacts</div>
-          <div class="d-nav-item active"><span class="truncate">Portal frame check</span><span class="count">v7</span></div>
-          <div class="d-nav-item"><span class="truncate">Frame geometry</span><span class="count">v3</span></div>
-          <div class="d-nav-item"><span class="truncate">Load schedule</span><span class="count">v2</span></div>
-          <div class="d-section">Sources</div>
-          <div class="d-nav-item"><span class="truncate">Basis of design.pdf</span></div>
-          <div class="d-nav-item"><span class="truncate">Architect GA.pdf</span></div>
+          <div class="d-section">Projects</div>
+          <div class="d-project">Portal frame study</div>
+          <div class="d-tree-branch">
+            <div class="d-section">Chats</div>
+            <div class="d-nav-item active"><span class="truncate">Preliminary sizing</span></div>
+            <div class="d-nav-item"><span class="truncate">Load assumptions</span></div>
+            <div class="d-nav-item"><span class="truncate">Connection sketch</span></div>
+            <div class="d-section">Artifacts</div>
+            <div class="d-nav-item active"><span class="truncate">Portal frame check</span><span class="count">v7</span></div>
+            <div class="d-nav-item"><span class="truncate">Frame geometry</span><span class="count">v3</span></div>
+            <div class="d-nav-item"><span class="truncate">Load schedule</span><span class="count">v2</span></div>
+            <div class="d-section">Sources</div>
+            <div class="d-nav-item"><span class="truncate">Basis of design.pdf</span></div>
+            <div class="d-nav-item"><span class="truncate">Architect GA.pdf</span></div>
+          </div>
+          <div class="d-project secondary">Research sandbox</div>
         </div>
       </aside>
 
