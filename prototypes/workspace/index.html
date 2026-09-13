@@ -224,28 +224,31 @@
     .source-card span { color: #77736c; font-size: 9px; }
 
     /* Variant D — Hub + Plugin Pane */
-    .d-shell { display: grid; grid-template-columns: 58px 238px minmax(410px, 1fr) minmax(390px, .92fr); height: 100%; background: #11110f; }
-    .d-rail { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 12px 0; border-right: 1px solid #302f2a; background: #121311; }
-    .d-rail .brand-mark { margin-bottom: 10px; }
+    .d-shell { display: grid; grid-template-areas: "title title title title" "rail context chat artifact"; grid-template-columns: 58px 238px minmax(410px, 1fr) minmax(390px, .92fr); grid-template-rows: 42px minmax(0, 1fr); height: 100%; background: #11110f; }
+    .d-titlebar { grid-area: title; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid #302f2a; background: #181816; }
+    .d-titlebar .brand-mark { width: 25px; height: 25px; border-radius: 7px; }
+    .d-project-switcher { display: flex; align-items: center; gap: 7px; min-width: 196px; padding: 6px 9px; border: 1px solid #3b3933; border-radius: 7px; background: #22221e; color: #e2dfd8; font-size: 11px; cursor: pointer; }
+    .d-project-switcher svg { width: 13px; height: 13px; color: var(--amber); }
+    .d-project-switcher span:last-child { margin-left: auto; color: #77746e; }
+    .d-titlebar-label { color: #716e68; font: 9px ui-monospace, monospace; letter-spacing: .1em; text-transform: uppercase; }
+    .d-titlebar-spacer { flex: 1; }
+    .d-rail { grid-area: rail; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 12px 0; border-right: 1px solid #302f2a; background: #121311; }
     .d-rail .rail-button.active { border-color: #5a5d38; background: #27291d; color: var(--accent); }
-    .d-context { display: flex; min-width: 0; flex-direction: column; border-right: 1px solid #302f2a; background: #171714; }
+    .d-rail-divider { width: 26px; height: 1px; margin: 2px 0; background: #34332e; }
+    .d-plugin-button { color: var(--amber); font: 700 16px Georgia, serif; }
+    .d-context { grid-area: context; display: flex; min-width: 0; flex-direction: column; border-right: 1px solid #302f2a; background: #171714; }
     .d-context-head { display: flex; height: 58px; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid #2d2c27; }
     .d-context-head strong { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
     .d-context-head button { color: #77746e; }
     .d-context-scroll { flex: 1; overflow: auto; padding: 12px 8px; }
     .d-section { margin: 9px 8px 7px; color: #706d66; font: 700 9px ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
-    .d-project { display: flex; align-items: center; gap: 7px; margin: 0 3px 4px; padding: 8px 7px; border-radius: 7px; color: #d5d2cb; font-size: 11px; font-weight: 650; }
-    .d-project::before { content: "⌄"; color: #77746e; font-size: 10px; }
-    .d-project.secondary { color: #827f78; font-weight: 500; }
-    .d-project.secondary::before { content: "›"; }
-    .d-tree-branch { margin: 0 0 10px 14px; padding-left: 8px; border-left: 1px solid #36352f; }
     .d-nav-item { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 8px 9px; border-radius: 8px; color: #aaa69e; font-size: 11px; }
     .d-nav-item.active { background: #25251f; color: #f2f0e9; }
     .d-nav-item.active::before { content: ""; width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: var(--accent); }
     .d-nav-item .count { margin-left: auto; color: #66635d; font: 9px ui-monospace, monospace; }
-    .d-chat { display: grid; min-width: 0; grid-template-rows: 58px 1fr auto; border-right: 1px solid #302f2a; background: #11110f; }
+    .d-chat { grid-area: chat; display: grid; min-width: 0; grid-template-rows: 58px 1fr auto; border-right: 1px solid #302f2a; background: #11110f; }
     .d-chat .messages { padding-right: clamp(28px, 6vw, 84px); padding-left: clamp(28px, 6vw, 84px); }
-    .d-artifact-host { display: grid; min-width: 0; grid-template-rows: 58px auto 1fr; background: #191917; }
+    .d-artifact-host { grid-area: artifact; display: grid; min-width: 0; grid-template-rows: 58px auto 1fr; background: #191917; }
     .d-host-head { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 0 13px; border-bottom: 1px solid #33322d; }
     .d-host-head svg { color: var(--amber); }
     .d-host-head strong { font-size: 11px; }
@@ -299,8 +302,9 @@
       .c-workspace, .c-shell.focus .c-workspace { grid-template-columns: 1fr; }
       .c-left, .c-chat { display: none; }
       .mode-group { display: none; }
-      .d-shell { grid-template-columns: 54px clamp(150px, 30vw, 200px) minmax(0, 1fr); }
+      .d-shell { grid-template-areas: "title title title" "rail context artifact"; grid-template-columns: 54px clamp(150px, 30vw, 200px) minmax(0, 1fr); }
       .d-chat { display: none; }
+      .d-titlebar-label { display: none; }
       .state-readout { display: none; }
       .switcher { bottom: 10px; }
     }
@@ -354,34 +358,29 @@
 
   <main id="variant-D" class="variant" aria-label="Variant D, Hub plus Plugin Pane">
     <div class="d-shell">
-      <nav class="d-rail" aria-label="Primary navigation">
+      <header class="d-titlebar">
         <div class="brand-mark">A</div>
-        <button class="rail-button" aria-label="Projects"><svg viewBox="0 0 24 24"><path d="M4 6.5h6l2 2h8v10H4z"/></svg></button>
+        <button class="d-project-switcher" aria-label="Switch project"><svg viewBox="0 0 24 24"><path d="M4 6.5h6l2 2h8v10H4z"/></svg><strong>Portal frame study</strong><span>⌄</span></button>
+        <span class="d-titlebar-label">Project workspace</span><div class="d-titlebar-spacer"></div><span class="pill"><span class="dot" style="color:var(--cyan)"></span>Saved</span>
+      </header>
+      <nav class="d-rail" aria-label="Primary navigation">
         <button class="rail-button active" aria-label="Chats"><svg viewBox="0 0 24 24"><path d="M5 5h14v11H9l-4 3z"/></svg></button>
         <button class="rail-button" aria-label="Artifacts"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM14 3v4h4"/></svg></button>
-        <button class="rail-button" aria-label="Plugins"><svg viewBox="0 0 24 24"><path d="M12 3l2 4 4 .5-3 3 .8 4.3-3.8-2-3.8 2 .8-4.3-3-3L10 7z"/></svg></button>
+        <button class="rail-button" aria-label="Sources"><svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg></button>
+        <button class="rail-button" aria-label="Manage plugins"><svg viewBox="0 0 24 24"><path d="M12 3l2 4 4 .5-3 3 .8 4.3-3.8-2-3.8 2 .8-4.3-3-3L10 7z"/></svg></button>
+        <div class="d-rail-divider"></div>
+        <button class="rail-button d-plugin-button" aria-label="Calculation plugin view">∑</button>
         <div class="rail-spacer"></div><div class="avatar">SG</div>
       </nav>
 
       <aside class="d-context">
-        <div class="d-context-head"><strong>Explorer</strong><button class="icon-button" aria-label="More navigator actions">•••</button></div>
+        <div class="d-context-head"><strong>Chats</strong><button class="icon-button" aria-label="New chat">+</button></div>
         <div class="d-context-scroll">
-          <div class="d-section">Projects</div>
-          <div class="d-project">Portal frame study</div>
-          <div class="d-tree-branch">
-            <div class="d-section">Chats</div>
-            <div class="d-nav-item active"><span class="truncate">Preliminary sizing</span></div>
-            <div class="d-nav-item"><span class="truncate">Load assumptions</span></div>
-            <div class="d-nav-item"><span class="truncate">Connection sketch</span></div>
-            <div class="d-section">Artifacts</div>
-            <div class="d-nav-item active"><span class="truncate">Portal frame check</span><span class="count">v7</span></div>
-            <div class="d-nav-item"><span class="truncate">Frame geometry</span><span class="count">v3</span></div>
-            <div class="d-nav-item"><span class="truncate">Load schedule</span><span class="count">v2</span></div>
-            <div class="d-section">Sources</div>
-            <div class="d-nav-item"><span class="truncate">Basis of design.pdf</span></div>
-            <div class="d-nav-item"><span class="truncate">Architect GA.pdf</span></div>
-          </div>
-          <div class="d-project secondary">Research sandbox</div>
+          <div class="d-section">Recent</div>
+          <div class="d-nav-item active"><span class="truncate">Preliminary sizing</span></div>
+          <div class="d-nav-item"><span class="truncate">Load assumptions</span></div>
+          <div class="d-nav-item"><span class="truncate">Connection sketch</span></div>
+          <div class="d-nav-item"><span class="truncate">Design basis review</span></div>
         </div>
       </aside>
 
@@ -389,13 +388,13 @@
         <header class="chat-head"><div class="chat-title"><strong>Preliminary sizing</strong><span>Portal frame study · Agent run 06 complete</span></div><div class="head-actions"><span class="pill"><span class="dot" style="color:var(--cyan)"></span>Saved</span><button class="icon-button" aria-label="Thread menu">•••</button></div></header>
         <div class="messages">
           <div class="message user"><div class="bubble">Review the assumptions and create a preliminary member check I can inspect.</div></div>
-          <div class="message agent-row"><div class="agent-glyph">AH</div><div class="agent-copy"><p>I created and validated the preliminary check. The right column governs under LC3 with utilisation 0.82.</p><div class="tool-card"><div class="tool-head"><span class="dot"></span> calculation.create_artifact <span class="status">Completed</span></div><div class="tool-body"><div><strong>Portal frame check</strong><span>Project artifact · saved as version 7</span></div><button class="open-button">Viewing</button></div></div></div></div>
+          <div class="message agent-row"><div class="agent-glyph">AH</div><div class="agent-copy"><p>I created and validated the preliminary check. The right column governs under LC3 with utilisation 0.82.</p><div class="tool-card"><div class="tool-head"><span class="dot"></span> calculation.create_artifact <span class="status">Completed</span></div><div class="tool-body"><div><strong>Portal frame check</strong><span>Project artifact · saved</span></div><button class="open-button">Viewing</button></div></div></div></div>
         </div>
         <div class="composer-wrap"><div class="composer"><textarea placeholder="Ask Agent Hub…"></textarea><div class="composer-foot"><span class="pill">Deep Agent · project context</span><button class="send" aria-label="Send">↑</button></div></div></div>
       </section>
 
       <aside class="d-artifact-host">
-        <header class="d-host-head"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM14 3v4h4"/></svg><strong class="truncate">Portal frame check</strong><span class="eyebrow">v7</span><div class="spacer"></div><button class="icon-button" aria-label="Artifact details">ⓘ</button><button class="icon-button" aria-label="Close artifact">×</button></header>
+        <header class="d-host-head"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6zM14 3v4h4"/></svg><strong class="truncate">Portal frame check</strong><div class="spacer"></div><button class="icon-button" aria-label="Artifact details">ⓘ</button><button class="icon-button" aria-label="Close artifact">×</button></header>
         <div class="host-trust-strip"><span class="trusted">● Agent Hub host</span><span>·</span><span>Sandboxed Plugin App iframe</span><span>·</span><span>calculation@1.2</span></div>
         <div class="iframe-wrap"><iframe class="plugin-frame" src="plugin-calculation.html" title="Calculation Plugin App" sandbox="allow-scripts"></iframe></div>
       </aside>
