@@ -1,0 +1,10 @@
+{
+  "name": "@agent-hub/test-fixture-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "catalog:",
+    "@modelcontextprotocol/sdk": "catalog:"
+  }
+}

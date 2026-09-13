@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-hub.dev/contracts/foundation.schema.json",
+  "title": "FoundationContracts",
+  "description": "Registry of the language-neutral Agent Hub foundation contracts.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "agentRun": { "$ref": "#/$defs/AgentRun" },
+    "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
+    "error": { "$ref": "#/$defs/ErrorEnvelope" }
+  },
+  "$defs": {
+    "EntityId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "An opaque stable Agent Hub identifier. Clients must not parse it."
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "requestId", "retryable"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "requestId": { "$ref": "#/$defs/EntityId" },
+        "retryable": { "type": "boolean" },
+        "details": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "ArtifactSchemaBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ArtifactPluginBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ArtifactProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["createdByThreadId", "createdByRunId", "lastChangedByThreadId", "lastChangedByRunId"],
+      "properties": {
+        "createdByThreadId": { "$ref": "#/$defs/EntityId" },
+        "createdByRunId": { "$ref": "#/$defs/EntityId" },
+        "lastChangedByThreadId": { "$ref": "#/$defs/EntityId" },
+        "lastChangedByRunId": { "$ref": "#/$defs/EntityId" }
+      }
+    },
+    "ArtifactRelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "targetArtifactId"],
+      "properties": {
+        "type": { "type": "string", "minLength": 1 },
+        "targetArtifactId": { "$ref": "#/$defs/EntityId" }
+      }
+    },
+    "ArtifactEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "documentVersion", "title", "schema", "plugin", "provenance", "relations"],
+      "properties": {
+        "id": { "$ref": "#/$defs/EntityId" },
+        "type": { "type": "string", "minLength": 1 },
+        "documentVersion": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "summary": { "type": "string", "maxLength": 2000 },
+        "schema": { "$ref": "#/$defs/ArtifactSchemaBinding" },
+        "plugin": { "$ref": "#/$defs/ArtifactPluginBinding" },
+        "provenance": { "$ref": "#/$defs/ArtifactProvenance" },
+        "relations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ArtifactRelation" }
+        }
+      }
+    },
+    "ArtifactDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "payload"],
+      "properties": {
+        "artifact": { "$ref": "#/$defs/ArtifactEnvelope" },
+        "payload": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "AgentRunStatus": {
+      "type": "string",
+      "enum": ["queued", "running", "interrupted", "cancelling", "cancelled", "succeeded", "failed"]
+    },
+    "AgentRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "threadId", "status", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/EntityId" },
+        "threadId": { "$ref": "#/$defs/EntityId" },
+        "status": { "$ref": "#/$defs/AgentRunStatus" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "error": { "$ref": "#/$defs/ErrorEnvelope" }
+      }
+    }
+  }
+}
