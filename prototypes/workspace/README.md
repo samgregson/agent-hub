@@ -8,7 +8,9 @@ Run from the repository root:
 make prototype-workspace
 ```
 
-Then open <http://localhost:4173>. Use the floating switcher or the left/right arrow keys to compare:
+Then open <http://localhost:4174>. Use the floating switcher or the left/right arrow keys to compare:
+
+The server binds to `127.0.0.1`, so it is reachable only from the same computer and is not shared over the local network.
 
 - `?variant=A` — Conversation Spine
 - `?variant=B` — Artifact Studio
