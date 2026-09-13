@@ -2,7 +2,7 @@
 
 Agent Hub is a hosted, extensible agent workspace. This repository currently contains the general-purpose foundation; structural-engineering Plugins are later work.
 
-Read [FOUNDATION.md](FOUNDATION.md) for the product direction and [the system architecture](docs/architecture/system-architecture.md) before changing the implementation.
+Read [FOUNDATION.md](FOUNDATION.md) for the product direction, [the system architecture](docs/architecture/system-architecture.md), and [the code structure contract](docs/architecture/code-structure.md) before changing the implementation.
 
 ## Prerequisites
 

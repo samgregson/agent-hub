@@ -6,6 +6,8 @@ This is the decision-complete architecture for the general-purpose Agent Hub fou
 
 The word **Module** means a cohesive capability behind one small Interface. Internal classes and packages are implementation details unless they cross a seam described below.
 
+The repository-level dependency rules, composition roots, testing surfaces, and change checklist are defined in `code-structure.md` and form part of this architecture.
+
 ## Deployment topology
 
 ```text
@@ -55,19 +57,19 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 
 ## Domain ownership
 
-| Concept | Authority | Persistence |
-| --- | --- | --- |
-| User subject | Platform identity, consumed by Agent Hub | Agent Hub user record keyed by stable external subject |
-| Project | Agent Hub | Application tables |
-| Thread metadata | Agent Hub | Application tables |
-| Thread runtime state | LangGraph | PostgreSQL checkpointer tables keyed by the Agent Hub Thread ID |
-| Agent Run lifecycle | Agent Hub | Application tables |
-| Approval | Agent Hub policy plus LangGraph interrupt | Application record and checkpointed interrupt state |
-| Project Virtual Filesystem | Agent Hub | Project-scoped PostgreSQL records exposed through a Deep Agents backend |
-| Artifact Document | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
-| Plugin definition | Deployment-controlled catalog | Version-controlled manifest |
-| Plugin enablement | Agent Hub Project configuration | Application tables |
-| Plugin/provider secret | Secret boundary | Encrypted server-side storage or external secret reference |
+| Concept                    | Authority                                       | Persistence                                                                          |
+| -------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| User subject               | Platform identity, consumed by Agent Hub        | Agent Hub user record keyed by stable external subject                               |
+| Project                    | Agent Hub                                       | Application tables                                                                   |
+| Thread metadata            | Agent Hub                                       | Application tables                                                                   |
+| Thread runtime state       | LangGraph                                       | PostgreSQL checkpointer tables keyed by the Agent Hub Thread ID                      |
+| Agent Run lifecycle        | Agent Hub                                       | Application tables                                                                   |
+| Approval                   | Agent Hub policy plus LangGraph interrupt       | Application record and checkpointed interrupt state                                  |
+| Project Virtual Filesystem | Agent Hub                                       | Project-scoped PostgreSQL records exposed through a Deep Agents backend              |
+| Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
+| Plugin definition          | Deployment-controlled catalog                   | Version-controlled manifest                                                          |
+| Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
+| Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
 
 The Artifact catalog projection may repeat queryable envelope fields, but it is not a second authoritative document. It and the canonical VFS document update in one database transaction. LangGraph checkpoints are runtime history, not Artifact revision history.
 
@@ -184,20 +186,20 @@ The agent discovers a calculation Artifact summary, loads it on demand, and pass
 
 ## Failure contract
 
-| Failure | Required outcome |
-| --- | --- |
-| Missing/untrusted identity | Reject before Project data is read |
-| Unauthorized Project or cross-Project ID | Indistinguishable not-found/forbidden response; audit the attempt |
-| Browser stream disconnect | Run continues or interrupts independently; reload can reconcile |
-| Model/provider failure | Explicit failed or retryable Run; no fabricated assistant completion |
-| Cancellation | Best-effort runtime cancellation followed by durable reconciliation |
-| Pending approval | Checkpointed interrupted Run that can resume exactly once per accepted response |
-| MCP timeout/unavailable server | Normalized retryable/terminal tool error; current Artifact unchanged |
-| Malformed or schema-invalid Plugin result | Reject and quarantine diagnostic metadata; current Artifact unchanged |
-| Stale Artifact token | Explicit conflict; reload current document before retrying the semantic operation |
-| Database failure during Artifact save | Transaction rolls back document, index, provenance, and change record together |
-| MCP App resource or bridge failure | Trusted error state and generic Artifact fallback remain available |
-| Oversized input/result/resource | Reject at the owning seam with an explicit size error; do not partially persist |
+| Failure                                   | Required outcome                                                                  |
+| ----------------------------------------- | --------------------------------------------------------------------------------- |
+| Missing/untrusted identity                | Reject before Project data is read                                                |
+| Unauthorized Project or cross-Project ID  | Indistinguishable not-found/forbidden response; audit the attempt                 |
+| Browser stream disconnect                 | Run continues or interrupts independently; reload can reconcile                   |
+| Model/provider failure                    | Explicit failed or retryable Run; no fabricated assistant completion              |
+| Cancellation                              | Best-effort runtime cancellation followed by durable reconciliation               |
+| Pending approval                          | Checkpointed interrupted Run that can resume exactly once per accepted response   |
+| MCP timeout/unavailable server            | Normalized retryable/terminal tool error; current Artifact unchanged              |
+| Malformed or schema-invalid Plugin result | Reject and quarantine diagnostic metadata; current Artifact unchanged             |
+| Stale Artifact token                      | Explicit conflict; reload current document before retrying the semantic operation |
+| Database failure during Artifact save     | Transaction rolls back document, index, provenance, and change record together    |
+| MCP App resource or bridge failure        | Trusted error state and generic Artifact fallback remain available                |
+| Oversized input/result/resource           | Reject at the owning seam with an explicit size error; do not partially persist   |
 
 ## Security baseline
 
