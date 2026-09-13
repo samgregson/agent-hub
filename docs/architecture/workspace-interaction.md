@@ -4,7 +4,7 @@
 
 How should Agent Hub adapt the useful parts of the Codex and VS Code workspace pattern while making durable, project-owned engineering Artifacts more prominent than they are in a coding chat client?
 
-No production UI or throwaway application code was created. The alternatives below are structural wireframes.
+A throwaway UI prototype was used to compare the alternatives. Its validated direction is preserved on branch `prototype/workspace-layout` at commit `b3e8c60`; it is a design source, not production application code.
 
 ## Alternatives considered
 
@@ -53,19 +53,44 @@ Artifact focus
 
 This keeps chat central by default but lets a calculation, diagram, or report become the main surface temporarily without opening a separate page. It adds one explicit layout state but fits both conversational and engineering work.
 
+### D. Project-scoped workbench
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Agent Hub  [selected Project ▾]                              Project status │
+├────────┬──────────────────┬────────────────────────┬────────────────────────┤
+│ view   │ current view     │ Thread chat            │ Artifact host          │
+│ rail   │ Chats list       │                        │ trusted host chrome    │
+│        │ Artifacts list   │                        │ ┌────────────────────┐ │
+│ Chat   │ Sources list     │                        │ │ sandboxed MCP App  │ │
+│ Art.   │ Plugins/config   │                        │ │ iframe             │ │
+│ Source │ or plugin view   │                        │ └────────────────────┘ │
+└────────┴──────────────────┴────────────────────────┴────────────────────────┘
+```
+
+Project selection sits above the workspace. The activity rail changes the project-scoped navigation view rather than mixing every collection into one tree. A Plugin may contribute a rail view when it provides a substantial workspace surface, but Plugins do not receive an icon automatically.
+
 ## Decision
 
-Adopt alternative C: a chat-centred three-panel workspace with an explicit Artifact focus mode.
+Adopt alternative D: a project-scoped, chat-centred workbench with an explicit Artifact focus mode.
 
-The product borrows the stable navigation/chat/inspector structure from Codex and VS Code, but differs in one important respect: the right workspace is Project-persistent and can expand into the primary surface because Artifacts are first-class project work products rather than transient tool output.
+The product borrows the stable navigation/chat/inspector structure from Codex and VS Code, but differs in two important respects: Project selection is above the workspace, and the right workspace is Project-persistent and can expand into the primary surface because Artifacts are first-class project work products rather than transient tool output.
 
 ## Desktop behavior
 
-### Left: Project navigator
+### Top: Project selection
 
-- Shows Projects and, within the selected Project, its Threads.
-- Exposes enabled Plugins and access to the curated Plugin Catalog as Project configuration.
-- Collapses to a narrow rail without losing the selected Project or Thread.
+- Selects the active Project before the user navigates Chats, Artifacts, Sources, or Plugins.
+- Changing Project changes the scope of every workspace view.
+- An Artifact from one Project is never carried visually into another.
+
+### Left: Project-scoped activity rail and navigator
+
+- Provides separate core views for Chats, Artifacts, Sources, and Plugin management.
+- The adjacent navigator shows only the collection or controls for the selected rail view.
+- Exposes enabled Plugins and the curated Plugin Catalog through the shared Plugin management view.
+- Allows a Plugin to contribute an optional rail view when it provides a substantial, frequently used workspace surface; installation alone does not add an icon.
+- Collapses without losing the selected Project, Thread, Artifact, or view.
 - Does not pretend that the Virtual Filesystem is the user's computer filesystem.
 
 ### Centre: Thread chat
@@ -77,9 +102,9 @@ The product borrows the stable navigation/chat/inspector structure from Codex an
 
 ### Right: Artifact workspace
 
-- Has top-level `Artifacts` and `Sources` views; these are not mixed into the message transcript.
+- Displays the Artifact or Source selected through its corresponding project-scoped rail view; neither is mixed into the message transcript.
 - Renders the selected portable Artifact using its MCP App when available, with a generic document/JSON fallback.
-- Shows provenance and current-version status in host chrome outside the untrusted MCP App iframe.
+- Shows Artifact identity, provenance, validation state, Plugin identity, and trusted controls in host chrome outside the untrusted MCP App iframe.
 - Supports collapsed, split, and focus states.
 - Keeps the selected Artifact open when switching Threads inside the same Project because the Artifact belongs to the Project.
 - Clears or restores an appropriate selection when switching Projects; an Artifact from one Project is never carried visually into another.
@@ -99,7 +124,7 @@ Panel sizes and collapse state are presentation preferences. They may be kept lo
 ## Thread and Artifact interaction
 
 - Artifact creation selects the saved Artifact only after Agent Hub has validated and persisted it.
-- An MCP App edit remains pending until the Plugin result passes the Artifact Host Adapter and the new document version is saved.
+- An MCP App edit remains pending until the Plugin result passes the Artifact Host Adapter and the updated current document is saved.
 - When another Thread changes the open Artifact, the host marks it stale with a compact notice. The user or agent can reload it; live merging is not implied.
 - The Artifact catalog is discoverable on demand. Its full contents are not injected into every Thread prompt.
 - A Source can open beside chat through the same workspace, but it is never mislabeled as an Artifact.
@@ -125,6 +150,7 @@ Below the usable three-column width, show one primary surface at a time:
 ## Deferred questions
 
 - Exact visual styling, dimensions, icons, animation, and breakpoint values.
+- Detailed small-screen interaction and responsive implementation; the foundation requirement remains one primary surface at a time with preserved workspace state.
 - Multiple Artifacts visible simultaneously.
 - Detachable windows or browser tabs.
 - Real-time co-editing and live cross-Thread refresh.
