@@ -34,7 +34,7 @@ The foundation milestone should provide:
 
 This milestone does **not** include a production calculation engine, unit-conversion engine, diagram editor, structural design codes, or engineering verification logic.
 
-## Proposed high-level architecture
+## High-level architecture
 
 ```text
 Platform Nginx ingress (sign-in handled outside Agent Hub)
@@ -73,7 +73,7 @@ Use Next.js with React and TypeScript. assistant-ui should supply the conversati
 
 The frontend should not receive MCP credentials. A backend route or the Python API should act as the MCP client and authorization boundary. MCP-provided UI must run in an appropriately sandboxed frame with a narrow host bridge and explicit capabilities.
 
-The default workspace has a collapsible Project navigator on the left, Thread chat in the centre, and an Artifact/Sources workspace on the right. The right workspace remains selected across Thread switches inside the same Project and can enter an explicit Artifact focus mode for calculation- or diagram-heavy work. On narrow screens, navigation becomes a drawer and chat/artifacts become peer full-width surfaces. The detailed interaction decision is recorded in `docs/architecture/workspace-interaction.md`.
+The selected Project sits above the workspace. A left activity rail switches between project-scoped Chats, Artifacts, Sources, Plugin management, and optional reviewed Plugin views; the adjacent navigator shows the selected collection. Thread chat remains central and the Artifact/Sources workspace opens on the right. The right workspace remains selected across Thread switches inside the same Project and can enter an explicit Artifact focus mode. Detailed small-screen interaction is deferred, with one primary surface visible at a time and workspace state preserved. The decision is recorded in `docs/architecture/workspace-interaction.md`.
 
 ### Backend
 
@@ -118,7 +118,7 @@ The platform-level MCP gateway/registry should:
 
 MCP provides discovery and invocation, but seamless app-to-app composition requires an Agent Hub contract above the individual app UIs. Apps should not call one another by reaching into frames or depending on presentation details.
 
-The proposed composition model is:
+The composition model is:
 
 1. An MCP tool returns a concise model-visible result plus structured output.
 2. If the result represents durable work, Agent Hub stores one portable **Artifact Document** containing a host-controlled envelope and plugin-controlled payload.
@@ -157,9 +157,9 @@ For engineering artifacts, numerical values should never be represented as untyp
 - **Artifact:** a stable logical work product represented by one current portable Artifact Document.
 - **Artifact relation:** typed lineage or reference between Artifacts.
 
-These are application concepts. Their storage representation and exact API shapes remain open.
+These are application concepts. Their ownership, persistence, and Module Interfaces are defined in `docs/architecture/system-architecture.md`.
 
-## Suggested repository shape
+## Repository shape
 
 ```text
 agent-hub/
@@ -176,7 +176,7 @@ agent-hub/
     integration/
 ```
 
-This is a proposed monorepo layout, not an implementation commitment. Python and TypeScript should share contracts through a language-neutral source such as JSON Schema or OpenAPI-generated types rather than hand-maintained duplicate models.
+This is the implementation layout. Python and TypeScript share contracts through language-neutral JSON Schema/OpenAPI sources rather than hand-maintained duplicate models. Use pnpm for the JavaScript workspace and uv for Python dependency and lockfile management.
 
 ## Security and reliability baseline
 
@@ -207,7 +207,9 @@ The first tests should focus on externally visible seams:
 
 Model-quality evaluation should be separate from deterministic software tests. Recorded scenarios and trace-based evaluations can be added once the basic run loop is stable.
 
-## Delivery phases
+## Delivery sequence
+
+The build-ready vertical slices, dependencies, and acceptance gates are defined in `docs/architecture/implementation-plan.md`. The summary phases are:
 
 ### Phase 0: decisions and contracts
 
@@ -244,12 +246,12 @@ Model-quality evaluation should be separate from deterministic software tests. R
 - Add deterministic numerical verification and audit trails.
 - Only then begin structural-engineering-specific calculations and diagram flows.
 
-## Open decisions
+## Implementation parameters and later decisions
 
-1. Which Python and JavaScript package/workspace managers should the repository standardize on?
-2. What is the minimum local-development identity stub for the platform-authenticated deployment boundary?
-3. At what measured payload threshold should large Artifact content move from PostgreSQL to object storage?
-4. Which calculation/unit library and quantity serialization will eventually become authoritative? This belongs to the later engineering vertical slice.
+- Exact dependency versions and configured payload limits are selected, pinned, and contract-tested in the first applicable build slice.
+- Local development uses an explicitly development-only fixed identity adapter; production trusts only the platform ingress after it replaces client-supplied identity headers.
+- Oversized Artifacts are rejected explicitly during the foundation. Object storage is introduced only with a supported large/binary use case.
+- Calculation/unit libraries and quantity serialization belong to the later engineering Plugin design, not the general foundation.
 
 ## Decisions already made
 

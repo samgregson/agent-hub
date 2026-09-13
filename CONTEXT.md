@@ -17,7 +17,7 @@ The portable stored representation of an artifact, comprising a host-controlled 
 _Avoid_: Plugin record, artifact revision
 
 **Artifact Envelope**:
-The part of an artifact document whose identity, provenance, relationships, and current version are authoritative in Agent Hub.
+The part of an artifact document whose identity, provenance, relationships, and current concurrency version are authoritative in Agent Hub. The version detects stale writes; it does not imply retained revision history.
 _Avoid_: Payload, plugin state
 
 **Artifact Payload**:
@@ -27,6 +27,14 @@ _Avoid_: Envelope, host metadata
 **Virtual Filesystem**:
 The project-shared hierarchical working state available to agents without providing access to the user's computer filesystem.
 _Avoid_: Local filesystem, user filesystem, thread filesystem
+
+**Source**:
+A durable project input or reference that a thread or artifact can inspect on demand. A source is not an agent-produced work product and its full contents are not automatically injected into every thread.
+_Avoid_: Artifact, attachment in chat context
+
+**Instruction**:
+Durable project-scoped guidance applied to agent work in that project. It is configuration for future runs, not a message or source.
+_Avoid_: System message, source, chat message
 
 **Thread**:
 A resumable agent work stream within a project, backed by one persistent LangGraph thread. It contains a conversation and the agent state accumulated across its runs.
