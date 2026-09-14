@@ -1,8 +1,16 @@
 "use client";
 
-import { FormEvent, useEffect, useReducer, useState } from "react";
+import { FormEvent, useEffect, useReducer, useRef, useState } from "react";
 
-import { createProject, listProjects, type Project } from "@/modules/projects";
+import { AgentChat } from "@/modules/agent-ui";
+import {
+  createProject,
+  createThread,
+  listProjects,
+  listThreads,
+  type Project,
+  type Thread,
+} from "@/modules/projects";
 
 import styles from "./workspace.module.css";
 import {
@@ -26,6 +34,9 @@ export function ProjectWorkspace() {
     createWorkspaceState,
   );
   const [newProjectName, setNewProjectName] = useState("");
+  const [threadsByProject, setThreadsByProject] = useState<
+    Record<string, Thread[]>
+  >({});
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +65,38 @@ export function ProjectWorkspace() {
     ? workspace.projects[workspace.selectedProjectId]
     : undefined;
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
+  const selectedThreads = workspace.selectedProjectId
+    ? (threadsByProject[workspace.selectedProjectId] ?? [])
+    : [];
+  const selectedThread = selectedThreads.find(
+    (thread) => thread.id === selectedWorkspace?.selectedThreadId,
+  );
+  const selectedThreadId = selectedWorkspace?.selectedThreadId;
+  const selectedThreadIdRef = useRef(selectedThreadId);
+
+  useEffect(() => {
+    selectedThreadIdRef.current = selectedThreadId;
+  }, [selectedThreadId]);
+
+  useEffect(() => {
+    if (!workspace.selectedProjectId) return;
+    const projectId = workspace.selectedProjectId;
+    let active = true;
+    listThreads(projectId)
+      .then((loaded) => {
+        if (!active) return;
+        setThreadsByProject((current) => ({ ...current, [projectId]: loaded }));
+        if (!selectedThreadIdRef.current && loaded[0]) {
+          dispatch({ threadId: loaded[0].id, type: "selectThread" });
+        }
+      })
+      .catch(() => {
+        if (active) setError("Threads are temporarily unavailable.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspace.selectedProjectId]);
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -71,6 +114,24 @@ export function ProjectWorkspace() {
       setError("The Project could not be created.");
     } finally {
       setIsCreating(false);
+    }
+  }
+
+  async function handleCreateThread() {
+    if (!workspace.selectedProjectId) return;
+    setError(null);
+    try {
+      const thread = await createThread(
+        workspace.selectedProjectId,
+        `New Thread ${selectedThreads.length + 1}`,
+      );
+      setThreadsByProject((current) => ({
+        ...current,
+        [thread.projectId]: [thread, ...(current[thread.projectId] ?? [])],
+      }));
+      dispatch({ threadId: thread.id, type: "selectThread" });
+    } catch {
+      setError("The Thread could not be created.");
     }
   }
 
@@ -135,24 +196,60 @@ export function ProjectWorkspace() {
 
       <aside className={styles.navigator}>
         <strong>{activityLabels[selectedActivity]}</strong>
-        <p>
-          {selectedProject
-            ? `${activityLabels[selectedActivity]} in ${selectedProject.name}`
-            : "Create or select a Project to begin."}
-        </p>
+        {selectedActivity === "chats" && selectedProject ? (
+          <>
+            <button
+              className={styles.newThread}
+              onClick={handleCreateThread}
+              type="button"
+            >
+              + New Thread
+            </button>
+            <div className={styles.threadList}>
+              {selectedThreads.map((thread) => (
+                <button
+                  aria-pressed={selectedThread?.id === thread.id}
+                  key={thread.id}
+                  onClick={() =>
+                    dispatch({ threadId: thread.id, type: "selectThread" })
+                  }
+                  type="button"
+                >
+                  {thread.title}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p>
+            {selectedProject
+              ? `${activityLabels[selectedActivity]} in ${selectedProject.name}`
+              : "Create or select a Project to begin."}
+          </p>
+        )}
       </aside>
 
       <section className={styles.chat}>
-        <div>
-          <p className={styles.eyebrow}>Agent Hub</p>
-          <h1>{selectedProject?.name ?? "Choose a Project"}</h1>
-          <p>
-            {selectedProject
-              ? "This workspace is scoped to the selected Project. Agent streaming arrives in Slice 2."
-              : "Projects keep conversations, files, sources, Plugins, and Artifacts together."}
-          </p>
-          {error ? <p className={styles.error}>{error}</p> : null}
-        </div>
+        {selectedProject && selectedThread && selectedActivity === "chats" ? (
+          <AgentChat
+            key={selectedThread.id}
+            projectId={selectedProject.id}
+            threadId={selectedThread.id}
+          />
+        ) : (
+          <div className={styles.chatPlaceholder}>
+            <p className={styles.eyebrow}>Agent Hub</p>
+            <h1>{selectedProject?.name ?? "Choose a Project"}</h1>
+            <p>
+              {selectedProject
+                ? selectedActivity === "chats"
+                  ? "Create or select a Thread to start a conversation."
+                  : `${activityLabels[selectedActivity]} will appear in this Project workspace.`
+                : "Projects keep conversations, files, sources, Plugins, and Artifacts together."}
+            </p>
+            {error ? <p className={styles.error}>{error}</p> : null}
+          </div>
+        )}
       </section>
 
       <aside className={styles.artifact}>

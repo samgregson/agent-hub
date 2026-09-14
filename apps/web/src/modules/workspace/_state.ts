@@ -21,7 +21,8 @@ export interface WorkspaceState {
 
 export type WorkspaceAction =
   | { projectId: string | null; type: "selectProject" }
-  | { activity: ActivityView; type: "selectActivity" };
+  | { activity: ActivityView; type: "selectActivity" }
+  | { threadId: string | null; type: "selectThread" };
 
 function initialProjectState(): ProjectWorkspaceState {
   return {
@@ -54,6 +55,18 @@ export function workspaceReducer(
   }
 
   if (state.selectedProjectId === null) return state;
+  if (action.type === "selectThread") {
+    return {
+      ...state,
+      projects: {
+        ...state.projects,
+        [state.selectedProjectId]: {
+          ...state.projects[state.selectedProjectId],
+          selectedThreadId: action.threadId,
+        },
+      },
+    };
+  }
   return {
     ...state,
     projects: {

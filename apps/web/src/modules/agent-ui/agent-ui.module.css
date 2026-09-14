@@ -1,0 +1,135 @@
+.thread,
+.viewport {
+  min-height: 0;
+  height: 100%;
+}
+
+.viewport {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 28px clamp(20px, 5vw, 64px) 18px;
+}
+
+.empty {
+  display: grid;
+  min-height: 60vh;
+  place-content: center;
+  max-width: 620px;
+  margin: auto;
+}
+
+.empty h1 {
+  margin: 8px 0;
+  font-size: clamp(28px, 5vw, 52px);
+  letter-spacing: -0.04em;
+}
+
+.empty p,
+.message,
+.runError {
+  color: #aaa69d;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.eyebrow {
+  color: #e9ff70 !important;
+  font:
+    700 10px ui-monospace,
+    monospace !important;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.message {
+  width: min(100%, 760px);
+  margin: 0 auto 18px;
+}
+
+.message[data-role="user"] {
+  width: fit-content;
+  max-width: min(80%, 680px);
+  margin-right: clamp(0px, 3vw, 40px);
+  padding: 10px 14px;
+  border: 1px solid #3b3933;
+  border-radius: 14px 14px 3px 14px;
+  background: #22221e;
+  color: #eeece7;
+}
+
+.message p {
+  margin: 0;
+}
+
+.messageError,
+.runError {
+  color: #ff9b86;
+}
+
+.runError {
+  width: min(100%, 760px);
+  margin: 0 auto 12px;
+}
+
+.footer {
+  position: sticky;
+  bottom: -18px;
+  width: min(100%, 760px);
+  margin: auto auto 0;
+  padding: 12px 0 18px;
+  background: linear-gradient(transparent, #11110f 20%);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #3b3933;
+  border-radius: 14px;
+  background: #1b1b18;
+}
+
+.input {
+  min-height: 46px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f4f1eb;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  align-items: end;
+  gap: 6px;
+}
+
+.send,
+.cancel {
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid #46443e;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.send {
+  border-color: #e9ff70;
+  background: #e9ff70;
+  color: #15160c;
+  font-weight: 700;
+}
+
+.cancel {
+  background: transparent;
+  color: #aaa69d;
+}
+
+.send:disabled,
+.cancel:disabled {
+  display: none;
+}

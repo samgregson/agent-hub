@@ -9,7 +9,8 @@
     "agentRun": { "$ref": "#/$defs/AgentRun" },
     "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
     "error": { "$ref": "#/$defs/ErrorEnvelope" },
-    "project": { "$ref": "#/$defs/Project" }
+    "project": { "$ref": "#/$defs/Project" },
+    "thread": { "$ref": "#/$defs/Thread" }
   },
   "$defs": {
     "EntityId": {
@@ -142,6 +143,18 @@
       "properties": {
         "id": { "$ref": "#/$defs/EntityId" },
         "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Thread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "projectId", "title", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/EntityId" },
+        "projectId": { "$ref": "#/$defs/EntityId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       }

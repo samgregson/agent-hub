@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, model_validator
+from pydantic import Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     trusted_identity_header: str = Field(
         default="X-Agent-Hub-Subject", min_length=1, max_length=120
     )
+    openai_api_key: SecretStr | None = None
+    openai_model: str = Field(default="gpt-5.1", min_length=1, max_length=120)
+    agent_recursion_limit: int = Field(default=100, ge=10, le=1000)
 
     @model_validator(mode="after")
     def require_trusted_identity_in_production(self) -> "Settings":

@@ -24,6 +24,8 @@ services:
       AGENT_HUB_ENVIRONMENT: development
       AGENT_HUB_FIXED_IDENTITY_SUBJECT: local-user
       AGENT_HUB_IDENTITY_MODE: fixed
+      AGENT_HUB_OPENAI_API_KEY: ${AGENT_HUB_OPENAI_API_KEY:-}
+      AGENT_HUB_OPENAI_MODEL: ${AGENT_HUB_OPENAI_MODEL:-gpt-5.1}
     depends_on:
       postgres:
         condition: service_healthy

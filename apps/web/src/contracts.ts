@@ -14,6 +14,7 @@ export interface FoundationContracts {
   artifactDocument?: ArtifactDocument;
   error?: ErrorEnvelope;
   project?: Project;
+  thread?: Thread;
 }
 export interface AgentRun {
   id: EntityId;
@@ -70,6 +71,13 @@ export interface ArtifactRelation {
 export interface Project {
   id: EntityId;
   name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface Thread {
+  id: EntityId;
+  projectId: EntityId;
+  title: string;
   createdAt: string;
   updatedAt: string;
 }

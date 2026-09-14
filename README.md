@@ -34,4 +34,8 @@ Copy `.env.example` to `.env` only when running services outside Docker. The fou
 
 Liveness reports that the process can serve requests. Readiness also checks required dependencies, so it can fail while liveness remains healthy.
 
+Project and Thread management run without a model credential. Set
+`AGENT_HUB_OPENAI_API_KEY` on the API service to execute the Deep Agent; the key
+stays behind the same-origin web proxy and is never exposed to browser code.
+
 Production identity is supplied by the hosting platform. See [the platform identity contract](docs/deployment/identity.md) before exposing Agent Hub through an ingress.

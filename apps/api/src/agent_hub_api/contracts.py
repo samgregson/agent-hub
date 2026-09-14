@@ -120,6 +120,17 @@ class Project(BaseModel):
     updated_at: Annotated[AwareDatetime, Field(alias="updatedAt")]
 
 
+class Thread(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    id: EntityId
+    project_id: Annotated[EntityId, Field(alias="projectId")]
+    title: Annotated[str, Field(max_length=160, min_length=1)]
+    created_at: Annotated[AwareDatetime, Field(alias="createdAt")]
+    updated_at: Annotated[AwareDatetime, Field(alias="updatedAt")]
+
+
 class FoundationContracts(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -128,3 +139,4 @@ class FoundationContracts(BaseModel):
     artifact_document: Annotated[ArtifactDocument | None, Field(alias="artifactDocument")] = None
     error: ErrorEnvelope | None = None
     project: Project | None = None
+    thread: Thread | None = None

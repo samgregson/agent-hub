@@ -72,3 +72,27 @@ async def test_missing_platform_identity_is_rejected() -> None:
         response = await client.get("/api/projects")
 
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_threads_are_scoped_to_their_project_and_subject() -> None:
+    projects = create_memory_project_module()
+
+    async with client_for("subject-a", projects) as alice:
+        first = (await alice.post("/api/projects", json={"name": "First"})).json()
+        second = (await alice.post("/api/projects", json={"name": "Second"})).json()
+        created = await alice.post(
+            f"/api/projects/{first['id']}/threads",
+            json={"title": "  Load combinations  "},
+        )
+        thread_id = created.json()["id"]
+        wrong_project = await alice.get(f"/api/projects/{second['id']}/threads/{thread_id}")
+
+    async with client_for("subject-b", projects) as bob:
+        guessed = await bob.get(f"/api/projects/{first['id']}/threads/{thread_id}")
+
+    assert created.status_code == 201
+    assert created.json()["title"] == "Load combinations"
+    assert created.json()["projectId"] == first["id"]
+    assert wrong_project.status_code == 404
+    assert guessed.status_code == 404

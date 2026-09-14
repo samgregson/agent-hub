@@ -2,6 +2,8 @@ from agent_hub_api.modules.projects._application import (
     Project,
     ProjectModule,
     ProjectNotFound,
+    Thread,
+    ThreadNotFound,
     create_memory_project_module,
     create_postgres_project_module,
 )
@@ -11,6 +13,8 @@ __all__ = [
     "Project",
     "ProjectModule",
     "ProjectNotFound",
+    "Thread",
+    "ThreadNotFound",
     "create_memory_project_module",
     "create_postgres_project_module",
     "create_project_router",

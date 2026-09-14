@@ -36,5 +36,5 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["psycopg.*"]
+module = ["ag_ui_langgraph.*", "langgraph.checkpoint.postgres.*", "psycopg.*"]
 ignore_missing_imports = true

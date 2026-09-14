@@ -125,16 +125,55 @@
   line-height: 1.6;
 }
 
+.newThread,
+.threadList button {
+  width: 100%;
+  border: 1px solid #35342f;
+  border-radius: 8px;
+  background: transparent;
+  color: #aaa69d;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.newThread {
+  margin: 16px 0 10px;
+  padding: 9px 10px;
+}
+
+.threadList {
+  display: grid;
+  gap: 6px;
+}
+
+.threadList button {
+  overflow: hidden;
+  padding: 9px 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.threadList button[aria-pressed="true"] {
+  border-color: #5b5a4f;
+  background: #25251f;
+  color: #f0eee8;
+}
+
 .chat {
   grid-area: chat;
-  display: grid;
-  place-items: center;
-  padding: 40px;
+  min-width: 0;
+  min-height: 0;
   background: #11110f;
 }
 
-.chat > div {
+.chatPlaceholder {
+  display: grid;
+  height: 100%;
+  place-content: center;
   max-width: 620px;
+  margin: auto;
+  padding: 40px;
 }
 
 .chat h1 {

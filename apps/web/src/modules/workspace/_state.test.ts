@@ -14,6 +14,10 @@ test("project switching restores each project's scoped workspace state", () => {
     type: "selectActivity",
   });
   state = workspaceReducer(state, {
+    threadId: "thread-a",
+    type: "selectThread",
+  });
+  state = workspaceReducer(state, {
     projectId: "project-b",
     type: "selectProject",
   });
@@ -30,6 +34,7 @@ test("project switching restores each project's scoped workspace state", () => {
   });
 
   assert.equal(state.projects["project-a"].activity, "artifacts");
+  assert.equal(state.projects["project-a"].selectedThreadId, "thread-a");
   assert.equal(state.projects["project-b"].activity, "sources");
 });
 

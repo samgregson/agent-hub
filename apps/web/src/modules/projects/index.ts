@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { Project } from "@/contracts";
+import type { Project, Thread } from "@/contracts";
 
 const projectSchema = z.object({
   id: z.string().min(1),
@@ -10,6 +10,14 @@ const projectSchema = z.object({
 });
 
 const projectListSchema = z.array(projectSchema);
+const threadSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  title: z.string().min(1).max(160),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+const threadListSchema = z.array(threadSchema);
 
 async function projectRequest(
   input: RequestInfo | URL,
@@ -36,4 +44,26 @@ export async function createProject(name: string): Promise<Project> {
   return projectSchema.parse(await response.json());
 }
 
-export type { Project };
+export async function listThreads(projectId: string): Promise<Thread[]> {
+  const response = await projectRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/threads`,
+  );
+  return threadListSchema.parse(await response.json());
+}
+
+export async function createThread(
+  projectId: string,
+  title: string,
+): Promise<Thread> {
+  const response = await projectRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/threads`,
+    {
+      body: JSON.stringify({ title }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    },
+  );
+  return threadSchema.parse(await response.json());
+}
+
+export type { Project, Thread };
