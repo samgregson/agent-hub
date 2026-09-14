@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from typing import Annotated
 
@@ -21,6 +22,8 @@ from agent_hub_api.modules.identity import (
     IdentityUnavailable,
     RequestContext,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ThreadHistoryResponse(BaseModel):
@@ -132,6 +135,10 @@ def create_agent_transport_router(
                 async for event in events:
                     yield encoder.encode(event)
             except Exception:
+                logger.exception(
+                    "Agent Run stream failed",
+                    extra={"run_id": input_data.run_id, "thread_id": thread_id},
+                )
                 yield encoder.encode(
                     RunErrorEvent(
                         message="The agent run failed. Retry or inspect its status.",

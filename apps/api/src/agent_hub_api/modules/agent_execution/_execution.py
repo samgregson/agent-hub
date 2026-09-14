@@ -7,6 +7,7 @@ from typing import Protocol
 from ag_ui.core import BaseEvent, Message, RunAgentInput, RunErrorEvent, RunFinishedEvent
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from agent_hub_api.contracts import ErrorEnvelope
 from agent_hub_api.settings import Settings
@@ -153,6 +154,12 @@ class PostgresAgentRunStore:
             row_factory=dict_row,
         )
 
+    @staticmethod
+    def _serialized_error(error: ErrorEnvelope | None) -> Jsonb | None:
+        if error is None:
+            return None
+        return Jsonb(error.model_dump(mode="json", by_alias=True))
+
     async def create(self, run: AgentRun) -> bool:
         connection = await self._connect()
         async with connection:
@@ -170,7 +177,7 @@ class PostgresAgentRunStore:
                     run.status.value,
                     run.created_at,
                     run.updated_at,
-                    None if run.error is None else run.error.model_dump(mode="json", by_alias=True),
+                    self._serialized_error(run.error),
                 ),
             )
             return await cursor.fetchone() is not None
@@ -187,7 +194,7 @@ class PostgresAgentRunStore:
                 (
                     run.status.value,
                     run.updated_at,
-                    None if run.error is None else run.error.model_dump(mode="json", by_alias=True),
+                    self._serialized_error(run.error),
                     run.id,
                 ),
             )
