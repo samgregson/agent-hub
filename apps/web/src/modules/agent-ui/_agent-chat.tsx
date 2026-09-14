@@ -80,7 +80,7 @@ function RunStatus({ runsUrl }: { runsUrl: string }) {
     let active = true;
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
-    async function loadLatestRun() {
+    async function loadLatestRun(attempt: number) {
       try {
         const response = await fetch(runsUrl, { cache: "no-store" });
         if (!response.ok) {
@@ -91,19 +91,22 @@ function RunStatus({ runsUrl }: { runsUrl: string }) {
         if (!active) return;
         setLatestRun(latest);
         if (
-          isRunning ||
-          latest?.status === "queued" ||
-          latest?.status === "running" ||
-          latest?.status === "cancelling"
+          attempt < 2 &&
+          (latest?.status === "queued" ||
+            latest?.status === "running" ||
+            latest?.status === "cancelling")
         ) {
-          refreshTimer = setTimeout(loadLatestRun, 750);
+          refreshTimer = setTimeout(
+            () => void loadLatestRun(attempt + 1),
+            attempt === 0 ? 500 : 1500,
+          );
         }
       } catch {
         if (active) setLatestRun(null);
       }
     }
 
-    void loadLatestRun();
+    if (!isRunning) void loadLatestRun(0);
     return () => {
       active = false;
       if (refreshTimer) clearTimeout(refreshTimer);
@@ -116,7 +119,7 @@ function RunStatus({ runsUrl }: { runsUrl: string }) {
   return (
     <div aria-live="polite" className={styles.runStatus}>
       <span>Run: {status}</span>
-      {latestRun?.error ? (
+      {!isRunning && latestRun?.error ? (
         <span className={styles.runFailure}>{latestRun.error.message}</span>
       ) : null}
     </div>
