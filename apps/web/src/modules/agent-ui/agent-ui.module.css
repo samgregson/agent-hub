@@ -67,6 +67,34 @@
   color: #ff9b86;
 }
 
+.toolCall {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #38372f;
+  border-radius: 10px;
+  background: #181815;
+}
+
+.toolCall pre {
+  overflow-x: auto;
+  color: #aaa69d;
+  font-size: 12px;
+}
+
+.approvalActions {
+  display: flex;
+  gap: 8px;
+}
+
+.approvalActions button {
+  padding: 7px 10px;
+  border: 1px solid #5b5a4f;
+  border-radius: 7px;
+  background: #25251f;
+  color: #f0eee8;
+  cursor: pointer;
+}
+
 .runError {
   width: min(100%, 760px);
   margin: 0 auto 12px;

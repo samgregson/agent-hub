@@ -27,11 +27,14 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_model: str = Field(default="gpt-5.1", min_length=1, max_length=120)
     agent_recursion_limit: int = Field(default=100, ge=10, le=1000)
+    enable_foundation_test_tool: bool = False
 
     @model_validator(mode="after")
     def require_trusted_identity_in_production(self) -> "Settings":
         if self.environment == "production" and self.identity_mode != "trusted_header":
             raise ValueError("production requires identity_mode='trusted_header'")
+        if self.environment == "production" and self.enable_foundation_test_tool:
+            raise ValueError("the foundation test tool cannot be enabled in production")
         return self
 
 

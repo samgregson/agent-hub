@@ -5,9 +5,17 @@ from ag_ui.core import BaseEvent, Message, RunAgentInput
 from ag_ui_langgraph import LangGraphAgent
 from ag_ui_langgraph.utils import langchain_messages_to_agui
 from deepagents import create_deep_agent
+from langchain.agents.middleware import InterruptOnConfig
+from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from agent_hub_api.settings import Settings
+
+
+@tool
+def foundation_protected_action(note: str) -> str:
+    """Echo a note after human approval to verify the interrupt transport."""
+    return f"Approved foundation action: {note}"
 
 
 class PostgresDeepAgentRunner:
@@ -40,7 +48,23 @@ class PostgresDeepAgentRunner:
             api_key=self._settings.openai_api_key,
             model=self._settings.openai_model,
         )
-        graph = create_deep_agent(model=model, tools=[], checkpointer=checkpointer)
+        tools = [foundation_protected_action] if self._settings.enable_foundation_test_tool else []
+        interrupt_on: dict[str, bool | InterruptOnConfig] | None = (
+            {
+                "foundation_protected_action": {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Run the harmless foundation approval test action?",
+                }
+            }
+            if self._settings.enable_foundation_test_tool
+            else None
+        )
+        graph = create_deep_agent(
+            model=model,
+            tools=tools,
+            interrupt_on=interrupt_on,
+            checkpointer=checkpointer,
+        )
         self._agent = LangGraphAgent(
             name="agent-hub",
             graph=graph,

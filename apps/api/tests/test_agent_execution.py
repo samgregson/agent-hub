@@ -3,9 +3,11 @@ from collections.abc import AsyncIterator
 import pytest
 from ag_ui.core import (
     BaseEvent,
+    Interrupt,
     Message,
     RunAgentInput,
     RunFinishedEvent,
+    RunFinishedInterruptOutcome,
     RunStartedEvent,
     TextMessageContentEvent,
 )
@@ -51,6 +53,22 @@ class FailingRunner:
         raise RuntimeError("provider unavailable")
 
 
+class InterruptingRunner:
+    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
+        del thread_id
+        return ()
+
+    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+        yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+        yield RunFinishedEvent(
+            thread_id=input_data.thread_id,
+            run_id=input_data.run_id,
+            outcome=RunFinishedInterruptOutcome(
+                interrupts=[Interrupt(id="approval-1", reason="tool_call")]
+            ),
+        )
+
+
 @pytest.mark.asyncio
 async def test_run_lifecycle_is_durable_and_thread_scoped() -> None:
     execution = create_memory_agent_execution(DeterministicRunner())
@@ -87,3 +105,14 @@ async def test_failed_stream_updates_run_status() -> None:
     run = (await execution.list_runs("a"))[0]
     assert run.status is AgentRunStatus.FAILED
     assert run.error == {"message": "provider unavailable"}
+
+
+@pytest.mark.asyncio
+async def test_interrupt_is_a_durable_non_failure_outcome() -> None:
+    execution = create_memory_agent_execution(InterruptingRunner())
+
+    _ = [event async for event in await execution.start(input_for("a", "run-1"))]
+
+    run = (await execution.list_runs("a"))[0]
+    assert run.status is AgentRunStatus.INTERRUPTED
+    assert run.error is None

@@ -17,3 +17,12 @@ def test_settings_reject_non_postgres_database_url() -> None:
 def test_production_requires_trusted_header_identity() -> None:
     with pytest.raises(ValidationError):
         Settings(environment="production")
+
+
+def test_production_rejects_foundation_test_tool() -> None:
+    with pytest.raises(ValidationError):
+        Settings(
+            environment="production",
+            identity_mode="trusted_header",
+            enable_foundation_test_tool=True,
+        )

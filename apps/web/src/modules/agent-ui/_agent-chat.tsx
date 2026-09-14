@@ -9,16 +9,59 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
   type ThreadHistoryAdapter,
+  type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { fromAgUiMessages, useAgUiRuntime } from "@assistant-ui/react-ag-ui";
 import { useMemo, useState } from "react";
 
 import styles from "./agent-ui.module.css";
 
+function ToolCall({
+  args,
+  approval,
+  result,
+  respondToApproval,
+  toolName,
+}: ToolCallMessagePartProps) {
+  const waitingForDecision =
+    approval !== undefined &&
+    approval.approved === undefined &&
+    approval.resolution === undefined;
+
+  return (
+    <section className={styles.toolCall}>
+      <strong>{toolName}</strong>
+      <pre>{JSON.stringify(args, null, 2)}</pre>
+      {waitingForDecision ? (
+        <div className={styles.approvalActions}>
+          <button
+            onClick={() => respondToApproval?.({ approved: true })}
+            type="button"
+          >
+            Approve
+          </button>
+          <button
+            onClick={() =>
+              respondToApproval?.({
+                approved: false,
+                reason: "Rejected by the user",
+              })
+            }
+            type="button"
+          >
+            Reject
+          </button>
+        </div>
+      ) : null}
+      {result !== undefined ? <p>{String(result)}</p> : null}
+    </section>
+  );
+}
+
 function Message() {
   return (
     <MessagePrimitive.Root className={styles.message}>
-      <MessagePrimitive.Parts />
+      <MessagePrimitive.Parts components={{ tools: { Fallback: ToolCall } }} />
       <span className={styles.messageError}>
         <MessagePrimitive.Error />
       </span>
