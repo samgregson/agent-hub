@@ -32,3 +32,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_hub_api"]
+exclude = ["**/*_test.py"]

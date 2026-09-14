@@ -38,6 +38,18 @@ for (const path of await files(webRoot, new Set([".ts", ".tsx"]))) {
       report(path, `imports private implementation from Module '${match[1]}'`);
     }
   }
+
+  for (const match of source.matchAll(
+    /from\s+["']@\/modules\/([^/"']+)\/([^"']+)["']/g,
+  )) {
+    const [, importedModule, entryPoint] = match;
+    if (importedModule !== moduleName && entryPoint !== "server") {
+      report(
+        path,
+        `bypasses the package-root Interface of Module '${importedModule}'`,
+      );
+    }
+  }
 }
 
 for (const path of await files(apiRoot, new Set([".py"]))) {
@@ -47,6 +59,14 @@ for (const path of await files(apiRoot, new Set([".py"]))) {
 
   if (moduleName && /(?:from|import)\s+agent_hub_api\.main\b/.test(source)) {
     report(path, "API Modules cannot import from the FastAPI composition root");
+  }
+
+  if (
+    moduleName &&
+    !path.endsWith("_http.py") &&
+    /from\s+fastapi\s+import[^\n]*\bRequest\b/.test(source)
+  ) {
+    report(path, "only HTTP adapters may depend on FastAPI Request objects");
   }
 
   for (const match of source.matchAll(

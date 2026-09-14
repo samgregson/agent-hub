@@ -1,4 +1,5 @@
 from agent_hub_api.modules.identity._identity import (
+    IdentityEvidence,
     IdentityModule,
     IdentityUnavailable,
     RequestContext,
@@ -6,6 +7,7 @@ from agent_hub_api.modules.identity._identity import (
 )
 
 __all__ = [
+    "IdentityEvidence",
     "IdentityModule",
     "IdentityUnavailable",
     "RequestContext",

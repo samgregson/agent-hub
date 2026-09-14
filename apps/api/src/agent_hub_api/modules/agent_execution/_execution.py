@@ -4,10 +4,11 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol
 
-from ag_ui.core import BaseEvent, EventType, Message, RunAgentInput, RunFinishedEvent
+from ag_ui.core import BaseEvent, Message, RunAgentInput, RunErrorEvent, RunFinishedEvent
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from agent_hub_api.contracts import ErrorEnvelope
 from agent_hub_api.settings import Settings
 
 
@@ -25,7 +26,7 @@ class AgentRun:
     status: AgentRunStatus
     created_at: datetime
     updated_at: datetime
-    error: dict[str, object] | None = None
+    error: ErrorEnvelope | None = None
 
 
 class DuplicateAgentRun(Exception):
@@ -53,7 +54,9 @@ class AgentExecutionModule:
         self._runner = runner
         self._store = store
 
-    async def start(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def start(
+        self, input_data: RunAgentInput, *, request_id: str
+    ) -> AsyncIterator[BaseEvent]:
         now = datetime.now(UTC)
         run = AgentRun(
             id=input_data.run_id,
@@ -64,14 +67,25 @@ class AgentExecutionModule:
         )
         if not await self._store.create(run):
             raise DuplicateAgentRun
-        return self._stream(run, input_data)
+        return self._stream(run, input_data, request_id)
 
-    async def _stream(self, run: AgentRun, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def _stream(
+        self, run: AgentRun, input_data: RunAgentInput, request_id: str
+    ) -> AsyncIterator[BaseEvent]:
         terminal_status = AgentRunStatus.SUCCEEDED
+        terminal_error: ErrorEnvelope | None = None
         try:
             async for event in self._runner.run(input_data):
-                if event.type == EventType.RUN_ERROR:
+                if isinstance(event, RunErrorEvent):
                     terminal_status = AgentRunStatus.FAILED
+                    terminal_error = ErrorEnvelope.model_validate(
+                        {
+                            "code": event.code or "AGENT_RUN_FAILED",
+                            "message": event.message,
+                            "requestId": request_id,
+                            "retryable": True,
+                        }
+                    )
                 elif isinstance(event, RunFinishedEvent) and event.outcome is not None:
                     outcome = event.outcome
                     if getattr(outcome, "type", None) == "interrupt":
@@ -82,13 +96,25 @@ class AgentExecutionModule:
                 run,
                 status=AgentRunStatus.FAILED,
                 updated_at=datetime.now(UTC),
-                error={"message": str(error) or error.__class__.__name__},
+                error=ErrorEnvelope.model_validate(
+                    {
+                        "code": "AGENT_RUN_FAILED",
+                        "message": str(error) or error.__class__.__name__,
+                        "requestId": request_id,
+                        "retryable": True,
+                    }
+                ),
             )
             await self._store.update(failed)
             raise
         else:
             await self._store.update(
-                replace(run, status=terminal_status, updated_at=datetime.now(UTC))
+                replace(
+                    run,
+                    status=terminal_status,
+                    updated_at=datetime.now(UTC),
+                    error=terminal_error,
+                )
             )
 
     async def list_runs(self, thread_id: str) -> tuple[AgentRun, ...]:
@@ -144,7 +170,7 @@ class PostgresAgentRunStore:
                     run.status.value,
                     run.created_at,
                     run.updated_at,
-                    run.error,
+                    None if run.error is None else run.error.model_dump(mode="json", by_alias=True),
                 ),
             )
             return await cursor.fetchone() is not None
@@ -158,7 +184,12 @@ class PostgresAgentRunStore:
                 SET status = %s, updated_at = %s, error = %s
                 WHERE id = %s
                 """,
-                (run.status.value, run.updated_at, run.error, run.id),
+                (
+                    run.status.value,
+                    run.updated_at,
+                    None if run.error is None else run.error.model_dump(mode="json", by_alias=True),
+                    run.id,
+                ),
             )
 
     async def list(self, thread_id: str) -> tuple[AgentRun, ...]:
@@ -180,7 +211,9 @@ class PostgresAgentRunStore:
                     status=AgentRunStatus(str(row["status"])),
                     created_at=row["created_at"],  # type: ignore[arg-type]
                     updated_at=row["updated_at"],  # type: ignore[arg-type]
-                    error=row["error"],  # type: ignore[arg-type]
+                    error=(
+                        None if row["error"] is None else ErrorEnvelope.model_validate(row["error"])
+                    ),
                 )
                 for row in await cursor.fetchall()
             )

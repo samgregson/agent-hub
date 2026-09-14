@@ -1,5 +1,6 @@
 from agent_hub_api.modules.projects._application import (
     Project,
+    ProjectAccess,
     ProjectModule,
     ProjectNotFound,
     Thread,
@@ -11,6 +12,7 @@ from agent_hub_api.modules.projects._http import create_project_router
 
 __all__ = [
     "Project",
+    "ProjectAccess",
     "ProjectModule",
     "ProjectNotFound",
     "Thread",

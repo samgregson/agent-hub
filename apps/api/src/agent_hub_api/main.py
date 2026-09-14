@@ -10,7 +10,10 @@ from agent_hub_api.modules.agent_execution import (
     PostgresDeepAgentRunner,
     create_postgres_agent_execution,
 )
-from agent_hub_api.modules.agent_transport import create_agent_transport_router
+from agent_hub_api.modules.agent_transport import (
+    AgentTransportModule,
+    create_agent_transport_router,
+)
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.projects import (
     ProjectModule,
@@ -60,7 +63,8 @@ def create_app(
     )
     application.include_router(
         create_agent_transport_router(
-            resolved_identity, resolved_projects, resolved_agent_execution
+            resolved_identity,
+            AgentTransportModule(resolved_projects, resolved_agent_execution),
         ),
         prefix="/api",
     )

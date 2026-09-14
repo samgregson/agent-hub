@@ -1,4 +1,4 @@
-import { forwardProjectRequest } from "@/modules/projects/index.server";
+import { forwardProjectRequest } from "@/modules/workspace/server";
 
 interface RouteContext {
   params: Promise<{ projectId: string }>;

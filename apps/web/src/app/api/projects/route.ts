@@ -1,4 +1,4 @@
-import { forwardProjectRequest } from "@/modules/projects/index.server";
+import { forwardProjectRequest } from "@/modules/workspace/server";
 
 export async function GET(request: Request): Promise<Response> {
   return forwardProjectRequest(request);

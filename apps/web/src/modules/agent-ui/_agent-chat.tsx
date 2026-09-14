@@ -10,9 +10,12 @@ import {
   ThreadPrimitive,
   type ThreadHistoryAdapter,
   type ToolCallMessagePartProps,
+  useAuiState,
 } from "@assistant-ui/react";
 import { fromAgUiMessages, useAgUiRuntime } from "@assistant-ui/react-ag-ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import type { AgentRun } from "@/contracts";
 
 import styles from "./agent-ui.module.css";
 
@@ -66,6 +69,57 @@ function Message() {
         <MessagePrimitive.Error />
       </span>
     </MessagePrimitive.Root>
+  );
+}
+
+function RunStatus({ runsUrl }: { runsUrl: string }) {
+  const isRunning = useAuiState((state) => state.thread.isRunning);
+  const [latestRun, setLatestRun] = useState<AgentRun | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+    async function loadLatestRun() {
+      try {
+        const response = await fetch(runsUrl, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Run status failed with status ${response.status}`);
+        }
+        const runs = (await response.json()) as AgentRun[];
+        const latest = runs[0] ?? null;
+        if (!active) return;
+        setLatestRun(latest);
+        if (
+          isRunning ||
+          latest?.status === "queued" ||
+          latest?.status === "running" ||
+          latest?.status === "cancelling"
+        ) {
+          refreshTimer = setTimeout(loadLatestRun, 750);
+        }
+      } catch {
+        if (active) setLatestRun(null);
+      }
+    }
+
+    void loadLatestRun();
+    return () => {
+      active = false;
+      if (refreshTimer) clearTimeout(refreshTimer);
+    };
+  }, [isRunning, runsUrl]);
+
+  const status = isRunning ? "running" : latestRun?.status;
+  if (!status) return null;
+
+  return (
+    <div aria-live="polite" className={styles.runStatus}>
+      <span>Run: {status}</span>
+      {latestRun?.error ? (
+        <span className={styles.runFailure}>{latestRun.error.message}</span>
+      ) : null}
+    </div>
   );
 }
 
@@ -126,6 +180,7 @@ export function AgentChat({
     agent,
     onError: () => setError("The agent run failed. You can try sending again."),
   });
+  const runsUrl = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/runs`;
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -141,6 +196,7 @@ export function AgentChat({
             </div>
           </ThreadPrimitive.Empty>
           <ThreadPrimitive.Messages components={{ Message }} />
+          <RunStatus runsUrl={runsUrl} />
           {error ? <p className={styles.runError}>{error}</p> : null}
           <ThreadPrimitive.ViewportFooter className={styles.footer}>
             <ComposerPrimitive.Root className={styles.composer}>

@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useReducer, useRef, useState } from "react";
 
 import { AgentChat } from "@/modules/agent-ui";
+
+import styles from "./workspace.module.css";
 import {
   createProject,
   createThread,
@@ -10,9 +12,7 @@ import {
   listThreads,
   type Project,
   type Thread,
-} from "@/modules/projects";
-
-import styles from "./workspace.module.css";
+} from "./_projects";
 import {
   activityViews,
   createWorkspaceState,

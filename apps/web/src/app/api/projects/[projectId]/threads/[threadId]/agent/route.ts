@@ -1,4 +1,4 @@
-import { forwardAgentRequest } from "@/modules/agent-ui/index.server";
+import { forwardAgentRequest } from "@/modules/agent-ui/server";
 
 interface RouteContext {
   params: Promise<{ projectId: string; threadId: string }>;

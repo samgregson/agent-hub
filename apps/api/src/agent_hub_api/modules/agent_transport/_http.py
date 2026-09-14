@@ -1,36 +1,26 @@
 from collections.abc import AsyncIterator
-from datetime import datetime
 from typing import Annotated
 
 from ag_ui.core import RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
-from agent_hub_api.modules.agent_execution import (
-    AgentExecutionModule,
-    AgentRun,
-    DuplicateAgentRun,
+from agent_hub_api.contracts import AgentRun as AgentRunResponse
+from agent_hub_api.modules.agent_execution import AgentRun
+from agent_hub_api.modules.agent_transport._application import (
+    AgentThreadAccess,
+    AgentThreadNotFound,
+    AgentTransportModule,
+    DuplicateAgentTransportRun,
 )
-from agent_hub_api.modules.identity import IdentityModule, IdentityUnavailable, RequestContext
-from agent_hub_api.modules.projects import ProjectModule, ThreadNotFound
-
-
-def _camel_case(name: str) -> str:
-    first, *rest = name.split("_")
-    return first + "".join(part.title() for part in rest)
-
-
-class AgentRunResponse(BaseModel):
-    model_config = ConfigDict(alias_generator=_camel_case, populate_by_name=True)
-
-    id: str
-    thread_id: str
-    status: str
-    created_at: datetime
-    updated_at: datetime
-    error: dict[str, object] | None
+from agent_hub_api.modules.identity import (
+    IdentityEvidence,
+    IdentityModule,
+    IdentityUnavailable,
+    RequestContext,
+)
 
 
 class ThreadHistoryResponse(BaseModel):
@@ -38,26 +28,27 @@ class ThreadHistoryResponse(BaseModel):
 
 
 def _run_response(run: AgentRun) -> AgentRunResponse:
-    return AgentRunResponse(
-        id=run.id,
-        thread_id=run.thread_id,
-        status=run.status.value,
-        created_at=run.created_at,
-        updated_at=run.updated_at,
-        error=run.error,
+    return AgentRunResponse.model_validate(
+        {
+            "id": run.id,
+            "threadId": run.thread_id,
+            "status": run.status.value,
+            "createdAt": run.created_at,
+            "updatedAt": run.updated_at,
+            "error": run.error,
+        }
     )
 
 
 def create_agent_transport_router(
     identity: IdentityModule,
-    projects: ProjectModule,
-    execution: AgentExecutionModule,
+    agent_transport: AgentTransportModule,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}/threads/{thread_id}", tags=["agent"])
 
     async def request_context(request: Request) -> RequestContext:
         try:
-            return identity.resolve(request)
+            return identity.resolve(IdentityEvidence(headers=request.headers))
         except IdentityUnavailable as error:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -66,28 +57,36 @@ def create_agent_transport_router(
 
     Context = Annotated[RequestContext, Depends(request_context)]
 
-    async def authorize_thread(project_id: str, thread_id: str, context: RequestContext) -> None:
-        try:
-            await projects.load_thread(context, project_id, thread_id)
-        except ThreadNotFound as error:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Thread not found",
-            ) from error
+    def access(project_id: str, thread_id: str, context: RequestContext) -> AgentThreadAccess:
+        return AgentThreadAccess(
+            subject=context.subject,
+            request_id=context.request_id,
+            project_id=project_id,
+            thread_id=thread_id,
+        )
 
     @router.get("/runs", response_model=list[AgentRunResponse])
     async def list_runs(
         project_id: str, thread_id: str, context: Context
     ) -> list[AgentRunResponse]:
-        await authorize_thread(project_id, thread_id, context)
-        return [_run_response(run) for run in await execution.list_runs(thread_id)]
+        try:
+            runs = await agent_transport.list_runs(access(project_id, thread_id, context))
+        except AgentThreadNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found"
+            ) from error
+        return [_run_response(run) for run in runs]
 
     @router.get("/history", response_model=ThreadHistoryResponse)
     async def load_history(
         project_id: str, thread_id: str, context: Context
     ) -> ThreadHistoryResponse:
-        await authorize_thread(project_id, thread_id, context)
-        messages = await execution.load_messages(thread_id)
+        try:
+            messages = await agent_transport.load_messages(access(project_id, thread_id, context))
+        except AgentThreadNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found"
+            ) from error
         return ThreadHistoryResponse(
             messages=[
                 message.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -103,7 +102,6 @@ def create_agent_transport_router(
         request: Request,
         context: Context,
     ) -> StreamingResponse:
-        await authorize_thread(project_id, thread_id, context)
         if input_data.thread_id != thread_id:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -116,8 +114,12 @@ def create_agent_transport_router(
             )
 
         try:
-            events = await execution.start(input_data)
-        except DuplicateAgentRun as error:
+            events = await agent_transport.start(access(project_id, thread_id, context), input_data)
+        except AgentThreadNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found"
+            ) from error
+        except DuplicateAgentTransportRun as error:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Agent Run already exists",

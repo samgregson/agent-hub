@@ -2,12 +2,16 @@ from collections.abc import AsyncIterator
 
 import pytest
 from ag_ui.core import BaseEvent, Message, RunAgentInput, RunFinishedEvent, RunStartedEvent
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from agent_hub_api.main import create_app
 from agent_hub_api.modules.agent_execution import create_memory_agent_execution
-from agent_hub_api.modules.identity import RequestContext, create_identity_module
-from agent_hub_api.modules.projects import create_memory_project_module
+from agent_hub_api.modules.agent_transport import (
+    AgentTransportModule,
+    create_agent_transport_router,
+)
+from agent_hub_api.modules.identity import create_identity_module
+from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.settings import Settings
 
 
@@ -19,10 +23,6 @@ class DeterministicRunner:
     async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
-
-
-async def ready(_: Settings) -> None:
-    return None
 
 
 def run_body(thread_id: str, run_id: str = "run-1") -> dict[str, object]:
@@ -40,15 +40,16 @@ def run_body(thread_id: str, run_id: str = "run-1") -> dict[str, object]:
 async def test_agent_stream_requires_owned_matching_thread() -> None:
     settings = Settings(environment="test", fixed_identity_subject="subject-a")
     projects = create_memory_project_module()
-    context = RequestContext(subject="subject-a", request_id="request-1")
-    project = await projects.create(context, "First")
-    thread = await projects.create_thread(context, project.id, "Conversation")
-    app = create_app(
-        settings=settings,
-        readiness_check=ready,
-        identity=create_identity_module(settings),
-        projects=projects,
-        agent_execution=create_memory_agent_execution(DeterministicRunner()),
+    access = ProjectAccess(subject="subject-a")
+    project = await projects.create(access, "First")
+    thread = await projects.create_thread(access, project.id, "Conversation")
+    app = FastAPI()
+    app.include_router(
+        create_agent_transport_router(
+            create_identity_module(settings),
+            AgentTransportModule(projects, create_memory_agent_execution(DeterministicRunner())),
+        ),
+        prefix="/api",
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -65,12 +66,13 @@ async def test_agent_stream_requires_owned_matching_thread() -> None:
         history = await client.get(f"/api/projects/{project.id}/threads/{thread.id}/history")
 
     bob_settings = Settings(environment="test", fixed_identity_subject="subject-b")
-    bob_app = create_app(
-        settings=bob_settings,
-        readiness_check=ready,
-        identity=create_identity_module(bob_settings),
-        projects=projects,
-        agent_execution=create_memory_agent_execution(DeterministicRunner()),
+    bob_app = FastAPI()
+    bob_app.include_router(
+        create_agent_transport_router(
+            create_identity_module(bob_settings),
+            AgentTransportModule(projects, create_memory_agent_execution(DeterministicRunner())),
+        ),
+        prefix="/api",
     )
     async with AsyncClient(transport=ASGITransport(app=bob_app), base_url="http://test") as bob:
         unauthorized = await bob.post(

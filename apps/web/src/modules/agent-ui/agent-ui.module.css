@@ -63,8 +63,19 @@
 }
 
 .messageError,
-.runError {
+.runError,
+.runFailure {
   color: #ff9b86;
+}
+
+.runStatus {
+  display: flex;
+  width: min(100%, 760px);
+  margin: 0 auto 12px;
+  gap: 12px;
+  color: #aaa69d;
+  font-size: 12px;
+  text-transform: capitalize;
 }
 
 .toolCall {

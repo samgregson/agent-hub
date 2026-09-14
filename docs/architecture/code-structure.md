@@ -26,6 +26,7 @@ apps/web/src/
     artifact-view-host/        # trusted chrome, sandbox host and fallback view
   shared/
     config/                    # validated browser/server configuration
+    http/                      # shared same-origin backend forwarding
     ui/                        # genuinely shared presentation primitives
 
 apps/api/src/agent_hub_api/
@@ -34,7 +35,7 @@ apps/api/src/agent_hub_api/
     identity/                  # trusted request identity
     projects/                  # Projects, Threads metadata and enablement
     agent_execution/           # Deep Agent construction and Run lifecycle
-    agent_transport/           # AG-UI transport adapter
+    agent_transport/           # Project-authorized AG-UI orchestration and transport
     project_files/             # project-scoped Deep Agents filesystem
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
@@ -58,6 +59,8 @@ They must not own domain decisions, persistence queries, agent state machines, P
 ## Module Interfaces
 
 Each Module exposes one intentional Interface from its package root. Internal files are implementation details and use an underscore prefix where that makes accidental imports less likely.
+
+Web Modules may expose `index.ts` and `server.ts` at the package root when Next.js requires separate browser-safe and server-only entry points. These are runtime-specific views of the same Module Interface; callers must not import underscore-prefixed implementation files.
 
 - Callers import from the Module root, never its implementation files.
 - Inputs and results use Module-owned types or generated cross-process contracts, not database rows or framework request objects.

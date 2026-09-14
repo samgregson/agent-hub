@@ -3,10 +3,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic.alias_generators import to_camel
 
-from agent_hub_api.modules.identity import IdentityModule, IdentityUnavailable, RequestContext
+from agent_hub_api.modules.identity import (
+    IdentityEvidence,
+    IdentityModule,
+    IdentityUnavailable,
+    RequestContext,
+)
 from agent_hub_api.modules.projects._application import (
     Project,
+    ProjectAccess,
     ProjectModule,
     ProjectNotFound,
     Thread,
@@ -26,13 +33,8 @@ class ProjectCreateRequest(BaseModel):
         return normalized
 
 
-def _camel_case(name: str) -> str:
-    first, *rest = name.split("_")
-    return first + "".join(part.title() for part in rest)
-
-
 class ProjectResponse(BaseModel):
-    model_config = ConfigDict(alias_generator=lambda name: _camel_case(name), populate_by_name=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str
     name: str
@@ -53,7 +55,7 @@ class ThreadCreateRequest(BaseModel):
 
 
 class ThreadResponse(BaseModel):
-    model_config = ConfigDict(alias_generator=lambda name: _camel_case(name), populate_by_name=True)
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
     id: str
     project_id: str
@@ -89,7 +91,7 @@ def create_project_router(
 
     async def request_context(request: Request) -> RequestContext:
         try:
-            return identity.resolve(request)
+            return identity.resolve(IdentityEvidence(headers=request.headers))
         except IdentityUnavailable as error:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -98,18 +100,21 @@ def create_project_router(
 
     Context = Annotated[RequestContext, Depends(request_context)]
 
+    def project_access(context: RequestContext) -> ProjectAccess:
+        return ProjectAccess(subject=context.subject)
+
     @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
     async def create_project(body: ProjectCreateRequest, context: Context) -> ProjectResponse:
-        return _response(await projects.create(context, body.name))
+        return _response(await projects.create(project_access(context), body.name))
 
     @router.get("", response_model=list[ProjectResponse])
     async def list_projects(context: Context) -> list[ProjectResponse]:
-        return [_response(project) for project in await projects.list(context)]
+        return [_response(project) for project in await projects.list(project_access(context))]
 
     @router.get("/{project_id}", response_model=ProjectResponse)
     async def load_project(project_id: str, context: Context) -> ProjectResponse:
         try:
-            return _response(await projects.load(context, project_id))
+            return _response(await projects.load(project_access(context), project_id))
         except ProjectNotFound as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -125,7 +130,9 @@ def create_project_router(
         project_id: str, body: ThreadCreateRequest, context: Context
     ) -> ThreadResponse:
         try:
-            return _thread_response(await projects.create_thread(context, project_id, body.title))
+            return _thread_response(
+                await projects.create_thread(project_access(context), project_id, body.title)
+            )
         except ProjectNotFound as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -137,7 +144,7 @@ def create_project_router(
         try:
             return [
                 _thread_response(thread)
-                for thread in await projects.list_threads(context, project_id)
+                for thread in await projects.list_threads(project_access(context), project_id)
             ]
         except ProjectNotFound as error:
             raise HTTPException(
@@ -148,7 +155,9 @@ def create_project_router(
     @router.get("/{project_id}/threads/{thread_id}", response_model=ThreadResponse)
     async def load_thread(project_id: str, thread_id: str, context: Context) -> ThreadResponse:
         try:
-            return _thread_response(await projects.load_thread(context, project_id, thread_id))
+            return _thread_response(
+                await projects.load_thread(project_access(context), project_id, thread_id)
+            )
         except ThreadNotFound as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

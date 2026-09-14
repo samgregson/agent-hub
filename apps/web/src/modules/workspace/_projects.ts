@@ -8,7 +8,6 @@ const projectSchema = z.object({
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
-
 const projectListSchema = z.array(projectSchema);
 const threadSchema = z.object({
   id: z.string().min(1),

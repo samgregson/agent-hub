@@ -1,23 +1,23 @@
+"""Interface tests for the Projects Module and its HTTP adapter."""
+
 import pytest
+from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from agent_hub_api.main import create_app
 from agent_hub_api.modules.identity import create_identity_module
-from agent_hub_api.modules.projects import ProjectModule, create_memory_project_module
+from agent_hub_api.modules.projects import (
+    ProjectModule,
+    create_memory_project_module,
+    create_project_router,
+)
 from agent_hub_api.settings import Settings
-
-
-async def ready(_: Settings) -> None:
-    return None
 
 
 def client_for(subject: str, projects: ProjectModule) -> AsyncClient:
     settings = Settings(environment="test", fixed_identity_subject=subject)
-    app = create_app(
-        settings=settings,
-        readiness_check=ready,
-        identity=create_identity_module(settings),
-        projects=projects,
+    app = FastAPI()
+    app.include_router(
+        create_project_router(create_identity_module(settings), projects), prefix="/api"
     )
     return AsyncClient(
         transport=ASGITransport(app=app),
@@ -62,11 +62,9 @@ async def test_missing_platform_identity_is_rejected() -> None:
     settings = Settings(environment="test", identity_mode="trusted_header")
     projects = create_memory_project_module()
 
-    app = create_app(
-        settings=settings,
-        readiness_check=ready,
-        identity=create_identity_module(settings),
-        projects=projects,
+    app = FastAPI()
+    app.include_router(
+        create_project_router(create_identity_module(settings), projects), prefix="/api"
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/projects")

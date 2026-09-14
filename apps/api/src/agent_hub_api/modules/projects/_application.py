@@ -7,7 +7,6 @@ from uuid import uuid4
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from agent_hub_api.modules.identity import RequestContext
 from agent_hub_api.settings import Settings
 
 
@@ -26,6 +25,13 @@ class Thread:
     title: str
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectAccess:
+    """Identity scope required for Project operations."""
+
+    subject: str
 
 
 class ProjectNotFound(Exception):
@@ -56,14 +62,14 @@ class ProjectModule:
     def __init__(self, store: ProjectStore) -> None:
         self._store = store
 
-    async def create(self, context: RequestContext, name: str) -> Project:
+    async def create(self, access: ProjectAccess, name: str) -> Project:
         normalized_name = name.strip()
         if not normalized_name or len(normalized_name) > 120:
             raise ValueError("Project name must contain between 1 and 120 characters")
 
         now = datetime.now(UTC)
         return await self._store.create(
-            context.subject,
+            access.subject,
             Project(
                 id=str(uuid4()),
                 name=normalized_name,
@@ -72,23 +78,23 @@ class ProjectModule:
             ),
         )
 
-    async def list(self, context: RequestContext) -> Sequence[Project]:
-        return await self._store.list(context.subject)
+    async def list(self, access: ProjectAccess) -> Sequence[Project]:
+        return await self._store.list(access.subject)
 
-    async def load(self, context: RequestContext, project_id: str) -> Project:
-        project = await self._store.load(context.subject, project_id)
+    async def load(self, access: ProjectAccess, project_id: str) -> Project:
+        project = await self._store.load(access.subject, project_id)
         if project is None:
             raise ProjectNotFound
         return project
 
-    async def create_thread(self, context: RequestContext, project_id: str, title: str) -> Thread:
+    async def create_thread(self, access: ProjectAccess, project_id: str, title: str) -> Thread:
         normalized_title = title.strip()
         if not normalized_title or len(normalized_title) > 160:
             raise ValueError("Thread title must contain between 1 and 160 characters")
 
         now = datetime.now(UTC)
         thread = await self._store.create_thread(
-            context.subject,
+            access.subject,
             Thread(
                 id=str(uuid4()),
                 project_id=project_id,
@@ -101,12 +107,12 @@ class ProjectModule:
             raise ProjectNotFound
         return thread
 
-    async def list_threads(self, context: RequestContext, project_id: str) -> Sequence[Thread]:
-        await self.load(context, project_id)
-        return await self._store.list_threads(context.subject, project_id)
+    async def list_threads(self, access: ProjectAccess, project_id: str) -> Sequence[Thread]:
+        await self.load(access, project_id)
+        return await self._store.list_threads(access.subject, project_id)
 
-    async def load_thread(self, context: RequestContext, project_id: str, thread_id: str) -> Thread:
-        thread = await self._store.load_thread(context.subject, project_id, thread_id)
+    async def load_thread(self, access: ProjectAccess, project_id: str, thread_id: str) -> Thread:
+        thread = await self._store.load_thread(access.subject, project_id, thread_id)
         if thread is None:
             raise ThreadNotFound
         return thread

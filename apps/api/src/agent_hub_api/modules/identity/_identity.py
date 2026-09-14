@@ -1,8 +1,7 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 from uuid import uuid4
-
-from fastapi import Request
 
 from agent_hub_api.settings import Settings
 
@@ -17,8 +16,21 @@ class RequestContext:
     request_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class IdentityEvidence:
+    """Trusted transport evidence presented to the Identity Module."""
+
+    headers: Mapping[str, str]
+
+    def header(self, name: str) -> str:
+        expected = name.casefold()
+        return next(
+            (value for key, value in self.headers.items() if key.casefold() == expected), ""
+        )
+
+
 class IdentityAdapter(Protocol):
-    def resolve_subject(self, request: Request) -> str: ...
+    def resolve_subject(self, evidence: IdentityEvidence) -> str: ...
 
 
 class IdentityModule:
@@ -27,9 +39,9 @@ class IdentityModule:
     def __init__(self, adapter: IdentityAdapter) -> None:
         self._adapter = adapter
 
-    def resolve(self, request: Request) -> RequestContext:
+    def resolve(self, evidence: IdentityEvidence) -> RequestContext:
         return RequestContext(
-            subject=self._adapter.resolve_subject(request),
+            subject=self._adapter.resolve_subject(evidence),
             request_id=str(uuid4()),
         )
 
@@ -38,8 +50,8 @@ class FixedIdentityAdapter:
     def __init__(self, subject: str) -> None:
         self._subject = subject
 
-    def resolve_subject(self, request: Request) -> str:
-        del request
+    def resolve_subject(self, evidence: IdentityEvidence) -> str:
+        del evidence
         return self._subject
 
 
@@ -47,8 +59,8 @@ class TrustedHeaderIdentityAdapter:
     def __init__(self, header_name: str) -> None:
         self._header_name = header_name
 
-    def resolve_subject(self, request: Request) -> str:
-        subject = request.headers.get(self._header_name, "").strip()
+    def resolve_subject(self, evidence: IdentityEvidence) -> str:
+        subject = evidence.header(self._header_name).strip()
         if not subject or len(subject) > 240:
             raise IdentityUnavailable
         return subject

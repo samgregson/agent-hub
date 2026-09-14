@@ -28,7 +28,7 @@ known-first-party = ["agent_hub_api"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
-testpaths = ["apps/api/tests", "tests"]
+testpaths = ["apps/api/src", "apps/api/tests", "tests"]
 
 [tool.mypy]
 python_version = "3.12"
