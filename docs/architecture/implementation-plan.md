@@ -90,8 +90,9 @@ All slices belong to the [Agent Hub foundation milestone](https://github.com/sam
 - Normalize paths, enforce Project context, and add configurable content/operation limits.
 - Reserve the Artifact namespace against generic writes.
 - Surface file tool errors in the run stream.
+- Resolve Project File links from chat into safe previews without registering an Artifact.
 
-**Acceptance:** Thread A writes and Thread B reads a Project file; neither can escape its Project namespace or reach server paths; stale exact-string edits return an explicit error; registered Artifact paths reject generic writes.
+**Acceptance:** Thread A writes and Thread B reads a Project file; a chat link opens that file in a safe preview without adding it to the Artifact catalog; neither can escape its Project namespace or reach server paths; stale exact-string edits return an explicit error; registered Artifact paths reject generic writes.
 
 ## Slice 5 — Curated MCP Gateway and portable fixture Plugin
 
@@ -116,10 +117,11 @@ All slices belong to the [Agent Hub foundation milestone](https://github.com/sam
 - Implement the Artifact Module Interface and schema/authority validation.
 - Store one canonical current document in the reserved Project VFS namespace with a transactional catalog projection, provenance, concurrency token, and change record.
 - Add Artifact discovery/load application queries and a generic safe renderer.
+- Add explicit file-to-Artifact elevation through an approved agent action or a directly user-initiated Plugin save command; agent invocation of either path requires approval.
 - Extend the fixture Plugin with create, validate, and semantic-edit tools accepting/returning the complete inline document.
 - Prevent direct payload persistence from model output or generic file tools.
 
-**Acceptance:** create, reopen, and edit work after reload; malformed Plugin replacements leave the current document untouched; host fields cannot be forged; a stale token conflicts explicitly; generic MCP use remains functional without Agent Hub persistence.
+**Acceptance:** approved agent elevation and directly user-initiated Plugin save both create catalogued Artifacts through the same host boundary; agent-initiated saves pause for approval while direct user saves do not ask twice; preview alone never elevates a file; create, reopen, and edit work after reload; malformed Plugin replacements leave the current document untouched; host fields cannot be forged; a stale token conflicts explicitly; generic MCP use remains functional without Agent Hub persistence.
 
 ## Slice 7 — Sandboxed MCP App artifact pane
 

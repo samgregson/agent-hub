@@ -9,8 +9,12 @@ A durable workspace that groups related threads, artifacts, sources, instruction
 _Avoid_: Local project, project folder
 
 **Artifact**:
-A durable, self-describing, serializable work product owned by a project. It carries provenance linking it to the thread and agent run that produced it and may be inspected or reused by other threads in the project.
+A durable, self-describing, serializable work product owned by a project. It carries provenance linking it to the thread and agent run that produced it and may be inspected or reused by other threads in the project. A project file becomes an artifact only through an explicit, reviewable elevation action.
 _Avoid_: Attachment, thread output, working file
+
+**Project File**:
+A durable file in the project's virtual filesystem used as agent working material. It may be linked from chat and previewed without becoming an artifact. Elevation to an artifact is explicit: an agent-initiated elevation requires human approval, while a user-initiated plugin save is direct authorization.
+_Avoid_: Artifact, source, local file
 
 **Artifact Document**:
 The portable stored representation of an artifact, comprising a host-controlled envelope and a plugin-controlled payload.

@@ -10,6 +10,21 @@ An Artifact is stored as one self-describing JSON-compatible document. Its envel
 
 The Plugin remains stateless with respect to saved Artifact instances.
 
+## Files, previews, and elevation
+
+A Project File is not automatically an Artifact. Files can be linked from chat and opened in a safe host-provided preview without changing their lifecycle or adding them to the Artifact catalog.
+
+Creating an Artifact from a Project File is an explicit elevation operation. Initially it can be initiated in either of two ways:
+
+- an agent proposes elevation and the user approves it through the existing human-in-the-loop mechanism; or
+- a user explicitly invokes a Plugin save command, which counts as direct authorization and requests creation of an Artifact through the Artifact Module.
+
+Both paths pass through the same Artifact Module validation and persistence boundary. Elevation assigns Artifact identity, envelope, provenance, current document version, and renderer binding. Merely reading, linking, or previewing a file never performs elevation.
+
+Authorization follows the initiator, not merely the tool name. If an agent invokes a Plugin save or elevation tool, the operation pauses for human approval. A save explicitly initiated by the user in Plugin UI does not require a second confirmation.
+
+An Artifact without an available MCP App uses Agent Hub's generic safe renderer. A compatible MCP App is the preferred renderer when present, while the generic renderer remains the fallback.
+
 ## Illustrative document
 
 ```json
@@ -107,3 +122,5 @@ Outside Agent Hub, another MCP client can pass the same inline document to the P
 - Cross-Thread live synchronization is deferred; views refresh on focus or reopen initially.
 - Large binary payloads will use content references when required rather than embedded base64.
 - Raw generic file edits cannot mutate registered Artifact Documents.
+- Project Files do not appear in the Artifact catalog until explicitly elevated.
+- Chat file links use safe previews and do not imply Artifact creation.
