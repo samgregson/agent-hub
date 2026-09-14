@@ -8,7 +8,8 @@
   "properties": {
     "agentRun": { "$ref": "#/$defs/AgentRun" },
     "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
-    "error": { "$ref": "#/$defs/ErrorEnvelope" }
+    "error": { "$ref": "#/$defs/ErrorEnvelope" },
+    "project": { "$ref": "#/$defs/Project" }
   },
   "$defs": {
     "EntityId": {
@@ -50,7 +51,12 @@
     "ArtifactProvenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["createdByThreadId", "createdByRunId", "lastChangedByThreadId", "lastChangedByRunId"],
+      "required": [
+        "createdByThreadId",
+        "createdByRunId",
+        "lastChangedByThreadId",
+        "lastChangedByRunId"
+      ],
       "properties": {
         "createdByThreadId": { "$ref": "#/$defs/EntityId" },
         "createdByRunId": { "$ref": "#/$defs/EntityId" },
@@ -70,7 +76,16 @@
     "ArtifactEnvelope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "type", "documentVersion", "title", "schema", "plugin", "provenance", "relations"],
+      "required": [
+        "id",
+        "type",
+        "documentVersion",
+        "title",
+        "schema",
+        "plugin",
+        "provenance",
+        "relations"
+      ],
       "properties": {
         "id": { "$ref": "#/$defs/EntityId" },
         "type": { "type": "string", "minLength": 1 },
@@ -97,7 +112,15 @@
     },
     "AgentRunStatus": {
       "type": "string",
-      "enum": ["queued", "running", "interrupted", "cancelling", "cancelled", "succeeded", "failed"]
+      "enum": [
+        "queued",
+        "running",
+        "interrupted",
+        "cancelling",
+        "cancelled",
+        "succeeded",
+        "failed"
+      ]
     },
     "AgentRun": {
       "type": "object",
@@ -110,6 +133,17 @@
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" },
         "error": { "$ref": "#/$defs/ErrorEnvelope" }
+      }
+    },
+    "Project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/EntityId" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       }
     }
   }

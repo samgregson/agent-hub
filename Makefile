@@ -1,4 +1,4 @@
-.PHONY: acceptance build contracts contracts-check dev down format format-check lint migrate setup test typecheck
+.PHONY: acceptance architecture-check build contracts contracts-check dev down format format-check lint migrate setup test typecheck
 
 export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export npm_config_cache := $(CURDIR)/.cache/npm
@@ -17,6 +17,9 @@ down:
 
 build:
 	$(PNPM) build
+
+architecture-check:
+	$(PNPM) architecture:check
 
 contracts:
 	$(PNPM) contracts:generate

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "noEmit": false,
+    "outDir": ".test-build",
+    "rootDir": "src/modules/workspace",
+    "types": ["node"]
+  },
+  "include": [
+    "src/modules/workspace/_state.ts",
+    "src/modules/workspace/_state.test.ts"
+  ]
+}

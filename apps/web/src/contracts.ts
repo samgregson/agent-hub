@@ -13,6 +13,7 @@ export interface FoundationContracts {
   agentRun?: AgentRun;
   artifactDocument?: ArtifactDocument;
   error?: ErrorEnvelope;
+  project?: Project;
 }
 export interface AgentRun {
   id: EntityId;
@@ -65,4 +66,10 @@ export interface ArtifactProvenance {
 export interface ArtifactRelation {
   type: string;
   targetArtifactId: EntityId;
+}
+export interface Project {
+  id: EntityId;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
 }

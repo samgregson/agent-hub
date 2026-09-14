@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn
+from pydantic import Field, PostgresDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,17 @@ class Settings(BaseSettings):
         "postgresql://agent_hub:agent_hub@localhost:5432/agent_hub"
     )
     database_connect_timeout_seconds: int = Field(default=2, ge=1, le=30)
+    identity_mode: Literal["fixed", "trusted_header"] = "fixed"
+    fixed_identity_subject: str = Field(default="local-user", min_length=1, max_length=240)
+    trusted_identity_header: str = Field(
+        default="X-Agent-Hub-Subject", min_length=1, max_length=120
+    )
+
+    @model_validator(mode="after")
+    def require_trusted_identity_in_production(self) -> "Settings":
+        if self.environment == "production" and self.identity_mode != "trusted_header":
+            raise ValueError("production requires identity_mode='trusted_header'")
+        return self
 
 
 @lru_cache

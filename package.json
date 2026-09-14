@@ -3,13 +3,14 @@
   "private": true,
   "packageManager": "pnpm@12.4.1",
   "scripts": {
+    "architecture:check": "node scripts/check-architecture.mjs",
     "build": "pnpm --recursive --if-present build",
     "contracts:check": "node scripts/generate-contracts.mjs --check",
     "contracts:generate": "node scripts/generate-contracts.mjs --write",
     "dev:web": "pnpm --filter @agent-hub/web dev",
     "format": "pnpm --recursive --if-present format && uv run ruff format apps/api",
     "format:check": "pnpm --recursive --if-present format:check && uv run ruff format --check apps/api",
-    "lint": "pnpm --recursive --if-present lint && uv run ruff check apps/api",
+    "lint": "pnpm architecture:check && pnpm --recursive --if-present lint && uv run ruff check apps/api",
     "test": "pnpm --recursive --if-present test && uv run pytest",
     "typecheck": "pnpm --recursive --if-present typecheck && uv run mypy apps/api/src apps/api/tests"
   },

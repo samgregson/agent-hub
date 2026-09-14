@@ -1,0 +1,21 @@
+# The platform authentication configuration must set this variable from its
+# authenticated session, never from a client header.
+# set $agent_hub_authenticated_subject ...;
+
+upstream agent_hub_web {
+    server web:3000;
+}
+
+server {
+    listen 80;
+
+    location / {
+        # proxy_set_header replaces any client-supplied value. The Python API is
+        # not published directly; Next.js forwards this trusted value.
+        proxy_set_header X-Agent-Hub-Subject $agent_hub_authenticated_subject;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://agent_hub_web;
+    }
+}

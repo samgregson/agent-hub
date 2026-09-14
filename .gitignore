@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 node_modules/
 .next/
+.test-build/
 coverage/
 dist/
 *.egg-info/

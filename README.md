@@ -17,6 +17,7 @@ make setup             # install from both lockfiles
 make dev               # build and run web, API, and PostgreSQL
 make contracts         # regenerate Python and TypeScript contracts
 make contracts-check   # fail if generated contracts are stale
+make architecture-check
 make format-check
 make lint
 make typecheck
@@ -32,3 +33,5 @@ Copy `.env.example` to `.env` only when running services outside Docker. The fou
 - Web: `/api/health/live` and `/api/health/ready`
 
 Liveness reports that the process can serve requests. Readiness also checks required dependencies, so it can fail while liveness remains healthy.
+
+Production identity is supplied by the hosting platform. See [the platform identity contract](docs/deployment/identity.md) before exposing Agent Hub through an ingress.

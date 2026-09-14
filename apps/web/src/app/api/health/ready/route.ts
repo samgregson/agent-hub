@@ -1,4 +1,4 @@
-import { loadServerConfig } from "@/lib/config";
+import { loadServerConfig } from "@/shared/config/server";
 
 export async function GET() {
   const { apiUrl } = loadServerConfig();

@@ -12,3 +12,8 @@ def test_settings_reject_unknown_environment() -> None:
 def test_settings_reject_non_postgres_database_url() -> None:
     with pytest.raises(ValidationError):
         Settings(database_url="https://example.com/database")  # type: ignore[arg-type]
+
+
+def test_production_requires_trusted_header_identity() -> None:
+    with pytest.raises(ValidationError):
+        Settings(environment="production")

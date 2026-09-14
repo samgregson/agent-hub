@@ -110,6 +110,16 @@ class AgentRun(BaseModel):
     error: ErrorEnvelope | None = None
 
 
+class Project(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    id: EntityId
+    name: Annotated[str, Field(max_length=120, min_length=1)]
+    created_at: Annotated[AwareDatetime, Field(alias="createdAt")]
+    updated_at: Annotated[AwareDatetime, Field(alias="updatedAt")]
+
+
 class FoundationContracts(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -117,3 +127,4 @@ class FoundationContracts(BaseModel):
     agent_run: Annotated[AgentRun | None, Field(alias="agentRun")] = None
     artifact_document: Annotated[ArtifactDocument | None, Field(alias="artifactDocument")] = None
     error: ErrorEnvelope | None = None
+    project: Project | None = None

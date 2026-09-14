@@ -22,11 +22,19 @@ services:
     environment:
       AGENT_HUB_DATABASE_URL: postgresql://agent_hub:agent_hub@postgres:5432/agent_hub
       AGENT_HUB_ENVIRONMENT: development
+      AGENT_HUB_FIXED_IDENTITY_SUBJECT: local-user
+      AGENT_HUB_IDENTITY_MODE: fixed
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')",
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
