@@ -42,7 +42,6 @@ export function ProjectWorkspace() {
     undefined,
     createWorkspaceState,
   );
-  const [newProjectName, setNewProjectName] = useState("");
   const [threadsByProject, setThreadsByProject] = useState<
     Record<string, Thread[]>
   >({});
@@ -112,7 +111,9 @@ export function ProjectWorkspace() {
 
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const name = newProjectName.trim();
+    const form = event.currentTarget;
+    const submittedName = new FormData(form).get("name");
+    const name = typeof submittedName === "string" ? submittedName.trim() : "";
     if (!name) return;
 
     setIsCreating(true);
@@ -121,7 +122,7 @@ export function ProjectWorkspace() {
       const project = await createProject(name);
       setProjects((current) => [project, ...current]);
       dispatch({ projectId: project.id, type: "selectProject" });
-      setNewProjectName("");
+      form.reset();
     } catch {
       setError("The Project could not be created.");
     } finally {
@@ -257,11 +258,11 @@ export function ProjectWorkspace() {
           <input
             aria-label="New Project name"
             maxLength={120}
-            onChange={(event) => setNewProjectName(event.target.value)}
+            name="name"
             placeholder="New Project"
-            value={newProjectName}
+            required
           />
-          <button disabled={isCreating || !newProjectName.trim()} type="submit">
+          <button disabled={isCreating} type="submit">
             {isCreating ? "Creating…" : "Create"}
           </button>
         </form>

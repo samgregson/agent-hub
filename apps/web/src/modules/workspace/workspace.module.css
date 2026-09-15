@@ -224,7 +224,7 @@
   border: 0;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .shell {
     grid-template-areas: "title title" "rail chat";
     grid-template-columns: 54px 1fr;
