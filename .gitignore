@@ -10,6 +10,8 @@ __pycache__/
 node_modules/
 .next/
 .test-build/
+playwright-report/
+test-results/
 coverage/
 dist/
 *.egg-info/

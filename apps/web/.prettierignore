@@ -1,3 +1,5 @@
 .next
 .test-build
+playwright-report
 src/contracts.ts
+test-results
