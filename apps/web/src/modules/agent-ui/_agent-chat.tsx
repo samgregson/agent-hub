@@ -9,6 +9,7 @@ import {
   MessagePrimitive,
   ThreadPrimitive,
   type ThreadHistoryAdapter,
+  type TextMessagePartProps,
   type ToolCallMessagePartProps,
   useAuiState,
 } from "@assistant-ui/react";
@@ -17,12 +18,36 @@ import {
   useAgUiRuntime,
   type AgUiInterrupt,
 } from "@assistant-ui/react-ag-ui";
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 import type { AgentRun } from "@/contracts";
 
 import { restoreInterruptMetadata } from "./_history";
+import { parseProjectFileLinks } from "./_project-links";
 import styles from "./agent-ui.module.css";
+
+const OpenProjectFileContext = createContext<(path: string) => void>(() => {});
+
+function TextPart({ text }: TextMessagePartProps) {
+  const openProjectFile = useContext(OpenProjectFileContext);
+  const parts = parseProjectFileLinks(text).map((segment, index) =>
+    segment.path && segment.label ? (
+      <a
+        href={segment.path}
+        key={`${index}-${segment.path}`}
+        onClick={(event) => {
+          event.preventDefault();
+          openProjectFile(segment.path!);
+        }}
+      >
+        {segment.label}
+      </a>
+    ) : (
+      segment.text
+    ),
+  );
+  return <p className={styles.messageText}>{parts}</p>;
+}
 
 function ToolCall({
   args,
@@ -69,7 +94,9 @@ function ToolCall({
 function Message() {
   return (
     <MessagePrimitive.Root className={styles.message}>
-      <MessagePrimitive.Parts components={{ tools: { Fallback: ToolCall } }} />
+      <MessagePrimitive.Parts
+        components={{ Text: TextPart, tools: { Fallback: ToolCall } }}
+      />
       <span className={styles.messageError}>
         <MessagePrimitive.Error />
       </span>
@@ -176,9 +203,11 @@ function createHistoryAdapter(
 }
 
 export function AgentChat({
+  onOpenProjectFile,
   projectId,
   threadId,
 }: {
+  onOpenProjectFile: (path: string) => void;
   projectId: string;
   threadId: string;
 }) {
@@ -203,41 +232,44 @@ export function AgentChat({
   const runsUrl = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/runs`;
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
-      <ThreadPrimitive.Root className={styles.thread}>
-        <ThreadPrimitive.Viewport className={styles.viewport}>
-          <ThreadPrimitive.Empty>
-            <div className={styles.empty}>
-              <p className={styles.eyebrow}>Agent Hub</p>
-              <h1>What are we working on?</h1>
-              <p>
-                This Thread keeps its own conversation state within the Project.
-              </p>
-            </div>
-          </ThreadPrimitive.Empty>
-          <ThreadPrimitive.Messages components={{ Message }} />
-          <RunStatus runsUrl={runsUrl} />
-          {error ? <p className={styles.runError}>{error}</p> : null}
-          <ThreadPrimitive.ViewportFooter className={styles.footer}>
-            <ComposerPrimitive.Root className={styles.composer}>
-              <ComposerPrimitive.Input
-                aria-label="Message Agent Hub"
-                className={styles.input}
-                placeholder="Ask Agent Hub…"
-                rows={2}
-              />
-              <div className={styles.actions}>
-                <ComposerPrimitive.Cancel className={styles.cancel}>
-                  Stop
-                </ComposerPrimitive.Cancel>
-                <ComposerPrimitive.Send className={styles.send}>
-                  Send
-                </ComposerPrimitive.Send>
+    <OpenProjectFileContext.Provider value={onOpenProjectFile}>
+      <AssistantRuntimeProvider runtime={runtime}>
+        <ThreadPrimitive.Root className={styles.thread}>
+          <ThreadPrimitive.Viewport className={styles.viewport}>
+            <ThreadPrimitive.Empty>
+              <div className={styles.empty}>
+                <p className={styles.eyebrow}>Agent Hub</p>
+                <h1>What are we working on?</h1>
+                <p>
+                  This Thread keeps its own conversation state within the
+                  Project.
+                </p>
               </div>
-            </ComposerPrimitive.Root>
-          </ThreadPrimitive.ViewportFooter>
-        </ThreadPrimitive.Viewport>
-      </ThreadPrimitive.Root>
-    </AssistantRuntimeProvider>
+            </ThreadPrimitive.Empty>
+            <ThreadPrimitive.Messages components={{ Message }} />
+            <RunStatus runsUrl={runsUrl} />
+            {error ? <p className={styles.runError}>{error}</p> : null}
+            <ThreadPrimitive.ViewportFooter className={styles.footer}>
+              <ComposerPrimitive.Root className={styles.composer}>
+                <ComposerPrimitive.Input
+                  aria-label="Message Agent Hub"
+                  className={styles.input}
+                  placeholder="Ask Agent Hub…"
+                  rows={2}
+                />
+                <div className={styles.actions}>
+                  <ComposerPrimitive.Cancel className={styles.cancel}>
+                    Stop
+                  </ComposerPrimitive.Cancel>
+                  <ComposerPrimitive.Send className={styles.send}>
+                    Send
+                  </ComposerPrimitive.Send>
+                </div>
+              </ComposerPrimitive.Root>
+            </ThreadPrimitive.ViewportFooter>
+          </ThreadPrimitive.Viewport>
+        </ThreadPrimitive.Root>
+      </AssistantRuntimeProvider>
+    </OpenProjectFileContext.Provider>
   );
 }

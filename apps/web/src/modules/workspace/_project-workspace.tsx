@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useReducer, useRef, useState } from "react";
 
 import { AgentChat } from "@/modules/agent-ui";
+import { ProjectFilePreview } from "@/modules/project-files";
 
 import styles from "./workspace.module.css";
 import {
@@ -233,6 +234,9 @@ export function ProjectWorkspace() {
         {selectedProject && selectedThread && selectedActivity === "chats" ? (
           <AgentChat
             key={selectedThread.id}
+            onOpenProjectFile={(path) =>
+              dispatch({ path, type: "openProjectFile" })
+            }
             projectId={selectedProject.id}
             threadId={selectedThread.id}
           />
@@ -253,8 +257,20 @@ export function ProjectWorkspace() {
       </section>
 
       <aside className={styles.artifact}>
-        <strong>Artifact workspace</strong>
-        <p>MCP App hosting arrives in Slice 7.</p>
+        {selectedProject && selectedWorkspace?.selectedFilePath ? (
+          <ProjectFilePreview
+            path={selectedWorkspace.selectedFilePath}
+            projectId={selectedProject.id}
+          />
+        ) : (
+          <>
+            <strong>Artifact workspace</strong>
+            <p>
+              Project file previews open here. MCP App hosting arrives in Slice
+              7.
+            </p>
+          </>
+        )}
       </aside>
     </main>
   );

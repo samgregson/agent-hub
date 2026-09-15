@@ -39,32 +39,35 @@ def input_for(thread_id: str, run_id: str) -> RunAgentInput:
 
 
 class DeterministicRunner:
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        del thread_id
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+        del project_id
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield TextMessageContentEvent(message_id="message-1", delta="Hello")
         yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
 
 
 class FailingRunner:
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        del thread_id
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+        del project_id
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         raise RuntimeError("provider unavailable")
 
 
 class InterruptingRunner:
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        del thread_id
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+        del project_id
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunFinishedEvent(
             thread_id=input_data.thread_id,
@@ -76,31 +79,34 @@ class InterruptingRunner:
 
 
 class ErrorEventRunner:
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        del thread_id
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+        del project_id
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunErrorEvent(message="model overloaded", code="MODEL_OVERLOADED")
 
 
 class CancelledRunner:
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        del thread_id
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+        del project_id
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         raise asyncio.CancelledError
 
 
 class HangingRunner:
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        del thread_id
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+        del project_id
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         await asyncio.Event().wait()
 
@@ -110,14 +116,15 @@ class ResumableRunner:
         self.pending = True
         self.run_count = 0
 
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        del thread_id
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
         return AgentThreadState(
             messages=(),
             interrupts=((Interrupt(id="approval-1", reason="tool_call"),) if self.pending else ()),
         )
 
-    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+        del project_id
         self.run_count += 1
         self.pending = False
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
@@ -130,11 +137,15 @@ async def test_run_lifecycle_is_durable_and_thread_scoped() -> None:
 
     first_events = [
         event
-        async for event in await execution.start(input_for("a", "run-1"), request_id="request-1")
+        async for event in await execution.start(
+            input_for("a", "run-1"), project_id="project", request_id="request-1"
+        )
     ]
     second_events = [
         event
-        async for event in await execution.start(input_for("b", "run-2"), request_id="request-2")
+        async for event in await execution.start(
+            input_for("b", "run-2"), project_id="project", request_id="request-2"
+        )
     ]
 
     first_runs = await execution.list_runs("a")
@@ -150,20 +161,25 @@ async def test_duplicate_run_id_is_rejected() -> None:
     execution = create_memory_agent_execution(DeterministicRunner())
     input_data = input_for("a", "same-run")
 
-    _ = [event async for event in await execution.start(input_data, request_id="request-1")]
+    _ = [
+        event
+        async for event in await execution.start(
+            input_data, project_id="project", request_id="request-1"
+        )
+    ]
 
     with pytest.raises(DuplicateAgentRun):
-        await execution.start(input_data, request_id="request-2")
+        await execution.start(input_data, project_id="project", request_id="request-2")
 
 
 @pytest.mark.asyncio
 async def test_only_one_run_can_be_active_for_a_thread() -> None:
     execution = create_memory_agent_execution(DeterministicRunner())
 
-    _ = await execution.start(input_for("a", "run-1"), request_id="request-1")
+    _ = await execution.start(input_for("a", "run-1"), project_id="project", request_id="request-1")
 
     with pytest.raises(AgentRunAlreadyActive):
-        await execution.start(input_for("a", "run-2"), request_id="request-2")
+        await execution.start(input_for("a", "run-2"), project_id="project", request_id="request-2")
 
 
 @pytest.mark.asyncio
@@ -174,7 +190,9 @@ async def test_failed_stream_updates_run_status() -> None:
         _ = [
             event
             async for event in await execution.start(
-                input_for("a", "run-1"), request_id="request-1"
+                input_for("a", "run-1"),
+                project_id="project",
+                request_id="request-1",
             )
         ]
 
@@ -193,7 +211,9 @@ async def test_interrupt_is_a_durable_non_failure_outcome() -> None:
 
     _ = [
         event
-        async for event in await execution.start(input_for("a", "run-1"), request_id="request-1")
+        async for event in await execution.start(
+            input_for("a", "run-1"), project_id="project", request_id="request-1"
+        )
     ]
 
     run = (await execution.list_runs("a"))[0]
@@ -207,7 +227,9 @@ async def test_error_event_persists_the_shared_error_contract() -> None:
 
     _ = [
         event
-        async for event in await execution.start(input_for("a", "run-1"), request_id="request-1")
+        async for event in await execution.start(
+            input_for("a", "run-1"), project_id="project", request_id="request-1"
+        )
     ]
 
     run = (await execution.list_runs("a"))[0]
@@ -230,7 +252,9 @@ async def test_cancelled_stream_updates_run_status() -> None:
         _ = [
             event
             async for event in await execution.start(
-                input_for("a", "run-1"), request_id="request-1"
+                input_for("a", "run-1"),
+                project_id="project",
+                request_id="request-1",
             )
         ]
 
@@ -244,7 +268,9 @@ async def test_closing_a_dropped_stream_updates_run_status() -> None:
     execution = create_memory_agent_execution(HangingRunner())
     stream = cast(
         AsyncGenerator[BaseEvent, None],
-        await execution.start(input_for("a", "run-1"), request_id="request-1"),
+        await execution.start(
+            input_for("a", "run-1"), project_id="project", request_id="request-1"
+        ),
     )
 
     _ = await anext(stream)
@@ -267,18 +293,27 @@ async def test_resume_must_answer_current_interrupts_and_cannot_be_replayed() ->
     ]
     first_input = input_for("a", "resume-1").model_copy(update={"resume": resume})
 
-    _ = [event async for event in await execution.start(first_input, request_id="request-1")]
+    _ = [
+        event
+        async for event in await execution.start(
+            first_input, project_id="project", request_id="request-1"
+        )
+    ]
 
     replay_input = input_for("a", "resume-2").model_copy(update={"resume": resume})
     with pytest.raises(InvalidAgentRunResume):
-        await execution.start(replay_input, request_id="request-2")
+        await execution.start(replay_input, project_id="project", request_id="request-2")
     assert runner.run_count == 1
 
 
 @pytest.mark.asyncio
 async def test_restart_reconciles_non_terminal_runs_but_preserves_interrupts() -> None:
     running_execution = create_memory_agent_execution(DeterministicRunner())
-    _ = await running_execution.start(input_for("a", "running-run"), request_id="running-request")
+    _ = await running_execution.start(
+        input_for("a", "running-run"),
+        project_id="project",
+        request_id="running-request",
+    )
 
     assert await running_execution.reconcile_non_terminal() == 1
 
@@ -292,7 +327,9 @@ async def test_restart_reconciles_non_terminal_runs_but_preserves_interrupts() -
     _ = [
         event
         async for event in await interrupted_execution.start(
-            input_for("b", "interrupted-run"), request_id="interrupted-request"
+            input_for("b", "interrupted-run"),
+            project_id="project",
+            request_id="interrupted-request",
         )
     ]
 

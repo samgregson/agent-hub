@@ -125,7 +125,7 @@ The same-origin web proxy and assistant-ui AG-UI runtime are adapters at this se
 
 Implements Deep Agents' filesystem Interface over a Project-scoped PostgreSQL adapter. Trusted request context determines the namespace. `/project/**` is durable and shared between Threads; `/scratch/**` may remain Thread-local checkpointed state.
 
-Generic file tools can list and read registered Artifact documents, but cannot write their reserved paths. Artifact mutation crosses the Artifact Module Interface.
+Generic file tools can list and read registered Artifact documents under `/project/.artifacts/**`, but cannot write those reserved paths. Artifact mutation crosses the Artifact Module Interface.
 
 ### Artifact Module — API
 

@@ -15,6 +15,10 @@ from agent_hub_api.modules.agent_transport import (
     create_agent_transport_router,
 )
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
+from agent_hub_api.modules.project_files import (
+    create_postgres_project_files,
+    create_project_files_router,
+)
 from agent_hub_api.modules.projects import (
     ProjectModule,
     create_postgres_project_module,
@@ -34,9 +38,10 @@ def create_app(
     resolved_settings = settings or get_settings()
     resolved_identity = identity or create_identity_module(resolved_settings)
     resolved_projects = projects or create_postgres_project_module(resolved_settings)
+    resolved_project_files = create_postgres_project_files(resolved_settings)
     deep_agent_runner = None
     if agent_execution is None:
-        deep_agent_runner = PostgresDeepAgentRunner(resolved_settings)
+        deep_agent_runner = PostgresDeepAgentRunner(resolved_settings, resolved_project_files)
         resolved_agent_execution = create_postgres_agent_execution(
             resolved_settings, deep_agent_runner
         )
@@ -61,6 +66,10 @@ def create_app(
     application.include_router(health_router)
     application.include_router(
         create_project_router(resolved_identity, resolved_projects), prefix="/api"
+    )
+    application.include_router(
+        create_project_files_router(resolved_identity, resolved_projects, resolved_project_files),
+        prefix="/api",
     )
     application.include_router(
         create_agent_transport_router(

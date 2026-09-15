@@ -47,6 +47,17 @@
   margin: 0 auto 18px;
 }
 
+.messageText {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.messageText a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
 .message[data-role="user"] {
   width: fit-content;
   max-width: min(80%, 680px);

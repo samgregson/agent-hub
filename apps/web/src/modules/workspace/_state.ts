@@ -10,6 +10,7 @@ export type ActivityView = (typeof activityViews)[number];
 export interface ProjectWorkspaceState {
   activity: ActivityView;
   selectedArtifactId: string | null;
+  selectedFilePath: string | null;
   selectedSourceId: string | null;
   selectedThreadId: string | null;
 }
@@ -22,12 +23,14 @@ export interface WorkspaceState {
 export type WorkspaceAction =
   | { projectId: string | null; type: "selectProject" }
   | { activity: ActivityView; type: "selectActivity" }
+  | { path: string | null; type: "openProjectFile" }
   | { threadId: string | null; type: "selectThread" };
 
 function initialProjectState(): ProjectWorkspaceState {
   return {
     activity: "chats",
     selectedArtifactId: null,
+    selectedFilePath: null,
     selectedSourceId: null,
     selectedThreadId: null,
   };
@@ -63,6 +66,18 @@ export function workspaceReducer(
         [state.selectedProjectId]: {
           ...state.projects[state.selectedProjectId],
           selectedThreadId: action.threadId,
+        },
+      },
+    };
+  }
+  if (action.type === "openProjectFile") {
+    return {
+      ...state,
+      projects: {
+        ...state.projects,
+        [state.selectedProjectId]: {
+          ...state.projects[state.selectedProjectId],
+          selectedFilePath: action.path,
         },
       },
     };

@@ -23,7 +23,7 @@ Both paths pass through the same Artifact Module validation and persistence boun
 
 Authorization follows the initiator, not merely the tool name. If an agent invokes a Plugin save or elevation tool, the operation pauses for human approval. A save explicitly initiated by the user in Plugin UI does not require a second confirmation.
 
-An Artifact without an available MCP App uses Agent Hub's generic safe renderer. A compatible MCP App is the preferred renderer when present, while the generic renderer remains the fallback.
+An Artifact without an available MCP App uses Agent Hub's generic safe renderer. A compatible MCP App is the preferred renderer when present, while the generic renderer remains the fallback. Canonical Artifact documents live under the reserved `/project/.artifacts/**` namespace; generic file tools may read them but cannot write or edit them.
 
 ## Illustrative document
 

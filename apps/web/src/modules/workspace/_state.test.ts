@@ -18,6 +18,10 @@ test("project switching restores each project's scoped workspace state", () => {
     type: "selectThread",
   });
   state = workspaceReducer(state, {
+    path: "/project/check.md",
+    type: "openProjectFile",
+  });
+  state = workspaceReducer(state, {
     projectId: "project-b",
     type: "selectProject",
   });
@@ -35,6 +39,11 @@ test("project switching restores each project's scoped workspace state", () => {
 
   assert.equal(state.projects["project-a"].activity, "artifacts");
   assert.equal(state.projects["project-a"].selectedThreadId, "thread-a");
+  assert.equal(
+    state.projects["project-a"].selectedFilePath,
+    "/project/check.md",
+  );
+  assert.equal(state.projects["project-b"].selectedFilePath, null);
   assert.equal(state.projects["project-b"].activity, "sources");
 });
 

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-5.1", min_length=1, max_length=120)
     agent_recursion_limit: int = Field(default=100, ge=10, le=1000)
     enable_foundation_test_tool: bool = False
+    project_file_max_bytes: int = Field(default=1_000_000, ge=1_024, le=20_000_000)
+    project_file_max_files: int = Field(default=1_000, ge=1, le=100_000)
+    project_file_search_max_matches: int = Field(default=200, ge=1, le=10_000)
 
     @field_validator("openai_api_key", mode="before")
     @classmethod

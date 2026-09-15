@@ -60,9 +60,9 @@ class CreateAgentRunResult(StrEnum):
 
 
 class AgentRunner(Protocol):
-    def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]: ...
+    def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]: ...
 
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState: ...
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState: ...
 
 
 class AgentRunStore(Protocol):
@@ -83,10 +83,12 @@ class AgentExecutionModule:
         self._store = store
 
     async def start(
-        self, input_data: RunAgentInput, *, request_id: str
+        self, input_data: RunAgentInput, *, project_id: str, request_id: str
     ) -> AsyncIterator[BaseEvent]:
         if input_data.resume:
-            thread_state = await self._runner.load_thread_state(input_data.thread_id)
+            thread_state = await self._runner.load_thread_state(
+                input_data.thread_id, project_id=project_id
+            )
             expected = {interrupt.id for interrupt in thread_state.interrupts}
             supplied = [entry.interrupt_id for entry in input_data.resume]
             if len(supplied) != len(set(supplied)) or set(supplied) != expected:
@@ -105,15 +107,15 @@ class AgentExecutionModule:
             raise DuplicateAgentRun
         if create_result is CreateAgentRunResult.THREAD_ACTIVE:
             raise AgentRunAlreadyActive
-        return self._stream(run, input_data, request_id)
+        return self._stream(run, input_data, project_id, request_id)
 
     async def _stream(
-        self, run: AgentRun, input_data: RunAgentInput, request_id: str
+        self, run: AgentRun, input_data: RunAgentInput, project_id: str, request_id: str
     ) -> AsyncIterator[BaseEvent]:
         terminal_status = AgentRunStatus.SUCCEEDED
         terminal_error: ErrorEnvelope | None = None
         try:
-            async for event in self._runner.run(input_data):
+            async for event in self._runner.run(input_data, project_id=project_id):
                 if isinstance(event, RunErrorEvent):
                     terminal_status = AgentRunStatus.FAILED
                     terminal_error = ErrorEnvelope.model_validate(
@@ -179,8 +181,8 @@ class AgentExecutionModule:
     async def list_runs(self, thread_id: str) -> tuple[AgentRun, ...]:
         return await self._store.list(thread_id)
 
-    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
-        return await self._runner.load_thread_state(thread_id)
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        return await self._runner.load_thread_state(thread_id, project_id=project_id)
 
 
 class MemoryAgentRunStore:

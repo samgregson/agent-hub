@@ -53,14 +53,20 @@ class AgentTransportModule:
 
     async def load_thread_state(self, access: AgentThreadAccess) -> AgentThreadState:
         await self._authorize(access)
-        return await self._execution.load_thread_state(access.thread_id)
+        return await self._execution.load_thread_state(
+            access.thread_id, project_id=access.project_id
+        )
 
     async def start(
         self, access: AgentThreadAccess, input_data: RunAgentInput
     ) -> AsyncIterator[BaseEvent]:
         await self._authorize(access)
         try:
-            return await self._execution.start(input_data, request_id=access.request_id)
+            return await self._execution.start(
+                input_data,
+                project_id=access.project_id,
+                request_id=access.request_id,
+            )
         except DuplicateAgentRun as error:
             raise DuplicateAgentTransportRun from error
         except AgentRunAlreadyActive as error:
