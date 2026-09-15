@@ -16,11 +16,11 @@ async def test_preview_is_safe_project_authorized_and_does_not_create_an_artifac
     settings = Settings(environment="test", fixed_identity_subject="alice")
     projects = create_memory_project_module()
     project = await projects.create(ProjectAccess(subject="alice"), "Bridge")
-    files = create_memory_project_files()
+    files = create_memory_project_files(projects)
     await files.write(project.id, "/notes/check.md", "# Beam check\n<script>no</script>")
     app = FastAPI()
     app.include_router(
-        create_project_files_router(create_identity_module(settings), projects, files),
+        create_project_files_router(create_identity_module(settings), files),
         prefix="/api",
     )
 
@@ -46,13 +46,12 @@ async def test_preview_is_safe_project_authorized_and_does_not_create_an_artifac
 async def test_preview_does_not_reveal_another_subjects_project() -> None:
     projects = create_memory_project_module()
     project = await projects.create(ProjectAccess(subject="alice"), "Private")
-    files = create_memory_project_files()
+    files = create_memory_project_files(projects)
     await files.write(project.id, "/private.md", "secret")
     app = FastAPI()
     app.include_router(
         create_project_files_router(
             create_identity_module(Settings(environment="test", fixed_identity_subject="bob")),
-            projects,
             files,
         ),
         prefix="/api",

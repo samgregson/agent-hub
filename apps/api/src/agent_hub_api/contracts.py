@@ -110,6 +110,15 @@ class AgentRun(BaseModel):
     error: ErrorEnvelope | None = None
 
 
+class ProjectFilePreview(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    path: Annotated[str, Field(max_length=1032, min_length=1)]
+    content: str
+    version: Annotated[int, Field(ge=1)]
+
+
 class Project(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -138,5 +147,8 @@ class FoundationContracts(BaseModel):
     agent_run: Annotated[AgentRun | None, Field(alias="agentRun")] = None
     artifact_document: Annotated[ArtifactDocument | None, Field(alias="artifactDocument")] = None
     error: ErrorEnvelope | None = None
+    project_file_preview: Annotated[
+        ProjectFilePreview | None, Field(alias="projectFilePreview")
+    ] = None
     project: Project | None = None
     thread: Thread | None = None

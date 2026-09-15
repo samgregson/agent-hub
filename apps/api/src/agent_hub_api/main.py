@@ -38,7 +38,7 @@ def create_app(
     resolved_settings = settings or get_settings()
     resolved_identity = identity or create_identity_module(resolved_settings)
     resolved_projects = projects or create_postgres_project_module(resolved_settings)
-    resolved_project_files = create_postgres_project_files(resolved_settings)
+    resolved_project_files = create_postgres_project_files(resolved_settings, resolved_projects)
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(resolved_settings, resolved_project_files)
@@ -68,7 +68,7 @@ def create_app(
         create_project_router(resolved_identity, resolved_projects), prefix="/api"
     )
     application.include_router(
-        create_project_files_router(resolved_identity, resolved_projects, resolved_project_files),
+        create_project_files_router(resolved_identity, resolved_project_files),
         prefix="/api",
     )
     application.include_router(

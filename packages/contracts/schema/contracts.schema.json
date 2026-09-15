@@ -9,6 +9,7 @@
     "agentRun": { "$ref": "#/$defs/AgentRun" },
     "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
     "error": { "$ref": "#/$defs/ErrorEnvelope" },
+    "projectFilePreview": { "$ref": "#/$defs/ProjectFilePreview" },
     "project": { "$ref": "#/$defs/Project" },
     "thread": { "$ref": "#/$defs/Thread" }
   },
@@ -134,6 +135,16 @@
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" },
         "error": { "$ref": "#/$defs/ErrorEnvelope" }
+      }
+    },
+    "ProjectFilePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content", "version"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1032 },
+        "content": { "type": "string" },
+        "version": { "type": "integer", "minimum": 1 }
       }
     },
     "Project": {

@@ -7,22 +7,10 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol
 
-from deepagents.backends import BackendProtocol, CompositeBackend, StateBackend
-from deepagents.backends.protocol import (
-    EditResult,
-    FileDownloadResponse,
-    FileInfo,
-    FileUploadResponse,
-    GlobResult,
-    GrepMatch,
-    GrepResult,
-    LsResult,
-    ReadResult,
-    WriteResult,
-)
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.settings import Settings
 
 ARTIFACT_ROOT = "/.artifacts"
@@ -38,12 +26,50 @@ class ProjectFile:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectFileAccess:
+    """Identity scope required to read a Project file through the user-facing Interface."""
+
+    subject: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectFileSearchMatch:
+    path: str
+    line: int
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectFileSearchResult:
+    matches: tuple[ProjectFileSearchMatch, ...]
+    truncated: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectFileGlobEntry:
+    path: str
+    is_dir: bool
+    size: int
+    modified_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectFileGlobResult:
+    matches: tuple[ProjectFileGlobEntry, ...]
+    truncated: bool = False
+
+
 class ProjectFileError(Exception):
     """Base expected Project Files failure."""
 
 
 class InvalidProjectFilePath(ProjectFileError):
     """The requested virtual path is not a safe canonical absolute path."""
+
+
+class InvalidProjectFilePattern(ProjectFileError):
+    """The requested Project file search or glob pattern is not safe."""
 
 
 class ProjectFileLimitExceeded(ProjectFileError):
@@ -132,22 +158,17 @@ class ProjectFilesModule:
     def __init__(
         self,
         store: ProjectFileStore,
+        projects: ProjectModule,
         *,
         max_bytes: int,
         max_files: int,
         search_max_matches: int,
     ) -> None:
         self._store = store
+        self._projects = projects
         self._max_bytes = max_bytes
         self._max_files = max_files
         self._search_max_matches = search_max_matches
-
-    def deep_agent_backend(self, project_id: str) -> BackendProtocol:
-        project = _ProjectBackend(self, project_id)
-        return CompositeBackend(
-            default=_RestrictedRootBackend(),
-            routes={"/project/": project, "/scratch/": StateBackend()},
-        )
 
     async def list(self, project_id: str) -> tuple[ProjectFile, ...]:
         return tuple(await self._store.list(project_id))
@@ -158,6 +179,16 @@ class ProjectFilesModule:
         if file is None:
             raise ProjectFileNotFound
         return file
+
+    async def preview(
+        self, access: ProjectFileAccess, project_id: str, path: str
+    ) -> ProjectFile:
+        """Load a Project file only after confirming the caller can see its Project."""
+        try:
+            await self._projects.load(ProjectAccess(subject=access.subject), project_id)
+        except ProjectNotFound as error:
+            raise ProjectFileNotFound from error
+        return await self.load(project_id, path)
 
     async def write(self, project_id: str, path: str, content: str) -> ProjectFile:
         normalized = _normalize_file_path(path)
@@ -200,9 +231,9 @@ class ProjectFilesModule:
         path: str = "/",
         file_glob: str | None = None,
         max_count: int | None = None,
-    ) -> GrepResult:
+    ) -> ProjectFileSearchResult:
         base = _normalize_path(path)
-        matches: list[GrepMatch] = []
+        matches: list[ProjectFileSearchMatch] = []
         requested = self._search_max_matches if max_count is None else max(max_count, 0)
         cap = min(requested, self._search_max_matches)
         for file in await self._store.list(project_id):
@@ -211,24 +242,29 @@ class ProjectFilesModule:
             for number, line in enumerate(file.content.splitlines(), start=1):
                 if pattern in line:
                     if len(matches) == cap:
-                        return GrepResult(matches=matches, truncated=True)
-                    matches.append({"path": file.path, "line": number, "text": line})
-        return GrepResult(matches=matches)
+                        return ProjectFileSearchResult(tuple(matches), truncated=True)
+                    matches.append(ProjectFileSearchMatch(file.path, number, line))
+        return ProjectFileSearchResult(tuple(matches))
 
-    async def glob(self, project_id: str, pattern: str, *, path: str = "/") -> GlobResult:
+    async def glob(
+        self, project_id: str, pattern: str, *, path: str = "/"
+    ) -> ProjectFileGlobResult:
         base = _normalize_path(path)
         if any(part == ".." for part in pattern.split("/")):
-            return GlobResult(error="Error: glob pattern cannot contain '..'")
+            raise InvalidProjectFilePattern("glob pattern cannot contain '..'")
         matches = [
-            _file_info(file)
+            ProjectFileGlobEntry(
+                path=file.path,
+                is_dir=False,
+                size=len(file.content.encode("utf-8")),
+                modified_at=file.updated_at.isoformat(),
+            )
             for file in await self._store.list(project_id)
             if _is_beneath(file.path, base) and _matches_glob(file.path, pattern, base=base)
         ]
         truncated = len(matches) > self._search_max_matches
-        return GlobResult(
-            matches=matches[: self._search_max_matches],
-            truncated=truncated,
-            truncation_reason="budget" if truncated else None,
+        return ProjectFileGlobResult(
+            tuple(matches[: self._search_max_matches]), truncated=truncated
         )
 
     def _check_content(self, content: str) -> None:
@@ -249,194 +285,6 @@ def _matches_glob(path: str, pattern: str | None, *, base: str = "/") -> bool:
     if "/" not in pattern.lstrip("/"):
         return fnmatch.fnmatch(posixpath.basename(path), pattern)
     return fnmatch.fnmatch(relative, pattern.lstrip("/"))
-
-
-def _file_info(file: ProjectFile) -> FileInfo:
-    return {
-        "path": file.path,
-        "is_dir": False,
-        "size": len(file.content.encode("utf-8")),
-        "modified_at": file.updated_at.isoformat(),
-    }
-
-
-def _error_text(error: ProjectFileError) -> str:
-    return str(error) or error.__class__.__name__
-
-
-class _ProjectBackend(BackendProtocol):
-    def __init__(self, files: ProjectFilesModule, project_id: str) -> None:
-        self._files = files
-        self._project_id = project_id
-
-    async def als(self, path: str) -> LsResult:
-        try:
-            base = _normalize_path(path)
-        except InvalidProjectFilePath:
-            return LsResult(error="Error: invalid path")
-        entries: list[FileInfo] = []
-        directories: set[str] = set()
-        prefix = "/" if base == "/" else f"{base}/"
-        for file in await self._files.list(self._project_id):
-            if not file.path.startswith(prefix):
-                continue
-            relative = file.path[len(prefix) :]
-            if "/" in relative:
-                directories.add(f"{prefix}{relative.split('/', 1)[0]}/")
-            elif relative:
-                entries.append(_file_info(file))
-        entries.extend(
-            {"path": directory, "is_dir": True, "size": 0} for directory in sorted(directories)
-        )
-        return LsResult(entries=sorted(entries, key=lambda entry: entry["path"]))
-
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        try:
-            file = await self._files.load(self._project_id, file_path)
-        except InvalidProjectFilePath:
-            return ReadResult(error="Error: invalid path")
-        except ProjectFileNotFound:
-            return ReadResult(error=f"Error: File '{file_path}' not found")
-        if not file.content or not file.content.strip():
-            return ReadResult(file_data={"content": file.content, "encoding": "utf-8"})
-        if limit <= 0:
-            return ReadResult(
-                file_data={"content": "", "encoding": "utf-8"}, no_lines_requested=True
-            )
-        lines = file.content.splitlines(keepends=True)
-        start = max(offset, 0)
-        if start >= len(lines):
-            return ReadResult(
-                error=f"Line offset {offset} exceeds file length ({len(lines)} lines)"
-            )
-        selected = lines[start : start + limit]
-        end = start + len(selected)
-        return ReadResult(
-            file_data={
-                "content": "".join(selected).replace("\r\n", "\n").replace("\r", "\n"),
-                "encoding": "utf-8",
-            },
-            start_line=start + 1,
-            end_line=end,
-            next_offset=end if end < len(lines) else None,
-            total_lines=len(lines),
-        )
-
-    async def awrite(self, file_path: str, content: str) -> WriteResult:
-        try:
-            file = await self._files.write(self._project_id, file_path, content)
-            return WriteResult(path=file.path)
-        except ProjectFileError as error:
-            return WriteResult(error=f"Error: {_error_text(error)}")
-
-    async def aedit(
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        try:
-            file, occurrences = await self._files.edit(
-                self._project_id,
-                file_path,
-                old_string,
-                new_string,
-                replace_all=replace_all,
-            )
-            return EditResult(path=file.path, occurrences=occurrences)
-        except ProjectFileError as error:
-            return EditResult(error=f"Error: {_error_text(error)}")
-
-    async def agrep(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-        *,
-        max_count: int | None = None,
-    ) -> GrepResult:
-        try:
-            return await self._files.search(
-                self._project_id,
-                pattern,
-                path=path or "/",
-                file_glob=glob,
-                max_count=max_count,
-            )
-        except InvalidProjectFilePath:
-            return GrepResult(error="Error: invalid path")
-
-    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
-        try:
-            return await self._files.glob(self._project_id, pattern, path=path or "/")
-        except InvalidProjectFilePath:
-            return GlobResult(error="Error: invalid path")
-
-    async def aupload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        responses: list[FileUploadResponse] = []
-        for path, content in files:
-            try:
-                text = content.decode("utf-8")
-                await self._files.write(self._project_id, path, text)
-                responses.append(FileUploadResponse(path=path))
-            except UnicodeDecodeError:
-                responses.append(FileUploadResponse(path=path, error="invalid_path"))
-            except ProjectFileError as error:
-                responses.append(FileUploadResponse(path=path, error=_error_text(error)))
-        return responses
-
-    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        responses: list[FileDownloadResponse] = []
-        for path in paths:
-            try:
-                file = await self._files.load(self._project_id, path)
-                responses.append(FileDownloadResponse(path=path, content=file.content.encode()))
-            except ProjectFileNotFound:
-                responses.append(FileDownloadResponse(path=path, error="file_not_found"))
-            except InvalidProjectFilePath:
-                responses.append(FileDownloadResponse(path=path, error="invalid_path"))
-        return responses
-
-
-class _RestrictedRootBackend(BackendProtocol):
-    _ERROR = "Error: files must be stored under /project or /scratch"
-
-    def ls(self, path: str) -> LsResult:
-        return LsResult(
-            entries=[] if path == "/" else None, error=None if path == "/" else self._ERROR
-        )
-
-    async def als(self, path: str) -> LsResult:
-        return self.ls(path)
-
-    async def aread(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return ReadResult(error=self._ERROR)
-
-    async def awrite(self, file_path: str, content: str) -> WriteResult:
-        return WriteResult(error=self._ERROR)
-
-    async def aedit(
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        return EditResult(error=self._ERROR)
-
-    async def agrep(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-        *,
-        max_count: int | None = None,
-    ) -> GrepResult:
-        return GrepResult(error=self._ERROR)
-
-    async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
-        return GlobResult(error=self._ERROR)
 
 
 class MemoryProjectFileStore:
@@ -545,6 +393,13 @@ class PostgresProjectFileStore:
     ) -> ProjectFile:
         connection = await self._connect()
         async with connection:
+            # Serialize new-file quota checks per Project. The Project row is a
+            # stable lock target even when this write creates the first file.
+            project = await connection.execute(
+                "SELECT 1 FROM projects WHERE id = %s FOR UPDATE", (project_id,)
+            )
+            if await project.fetchone() is None:
+                raise ProjectFileNotFound
             exists = await connection.execute(
                 "SELECT 1 FROM project_files WHERE project_id = %s AND path = %s",
                 (project_id, path),
@@ -625,18 +480,24 @@ class PostgresProjectFileStore:
             return self._file(saved), occurrences
 
 
-def create_memory_project_files(*, max_bytes: int = 1_000_000) -> ProjectFilesModule:
+def create_memory_project_files(
+    projects: ProjectModule, *, max_bytes: int = 1_000_000
+) -> ProjectFilesModule:
     return ProjectFilesModule(
         MemoryProjectFileStore(),
+        projects,
         max_bytes=max_bytes,
         max_files=1_000,
         search_max_matches=200,
     )
 
 
-def create_postgres_project_files(settings: Settings) -> ProjectFilesModule:
+def create_postgres_project_files(
+    settings: Settings, projects: ProjectModule
+) -> ProjectFilesModule:
     return ProjectFilesModule(
         PostgresProjectFileStore(settings),
+        projects,
         max_bytes=settings.project_file_max_bytes,
         max_files=settings.project_file_max_files,
         search_max_matches=settings.project_file_search_max_matches,

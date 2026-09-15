@@ -13,6 +13,7 @@ export interface FoundationContracts {
   agentRun?: AgentRun;
   artifactDocument?: ArtifactDocument;
   error?: ErrorEnvelope;
+  projectFilePreview?: ProjectFilePreview;
   project?: Project;
   thread?: Thread;
 }
@@ -23,6 +24,11 @@ export interface AgentRun {
   createdAt: string;
   updatedAt: string;
   error?: ErrorEnvelope;
+}
+export interface ProjectFilePreview {
+  path: string;
+  content: string;
+  version: number;
 }
 export interface ErrorEnvelope {
   code: string;

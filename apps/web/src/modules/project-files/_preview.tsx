@@ -2,17 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-import styles from "./project-files.module.css";
+import type { ProjectFilePreview } from "@/contracts";
 
-interface ProjectFilePreviewData {
-  content: string;
-  path: string;
-  version: number;
-}
+import styles from "./project-files.module.css";
 
 interface PreviewResult {
   error: string | null;
-  file: ProjectFilePreviewData | null;
+  file: ProjectFilePreview | null;
   key: string;
 }
 
@@ -40,7 +36,7 @@ export function ProjectFilePreview({
     )
       .then(async (response) => {
         if (!response.ok) throw new Error(String(response.status));
-        return (await response.json()) as ProjectFilePreviewData;
+        return (await response.json()) as ProjectFilePreview;
       })
       .then((loaded) => {
         if (active) setResult({ error: null, file: loaded, key });

@@ -15,6 +15,9 @@ from agent_hub_api.modules.agent_execution._ag_ui import (
     map_langchain_interrupts,
 )
 from agent_hub_api.modules.agent_execution._execution import AgentThreadState
+from agent_hub_api.modules.agent_execution._project_files_backend import (
+    create_project_files_backend,
+)
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.settings import Settings
 
@@ -89,7 +92,7 @@ class PostgresDeepAgentRunner:
                 "link it as Markdown using its absolute /project path."
             ),
             interrupt_on=interrupt_on,
-            backend=self._project_files.deep_agent_backend(project_id),
+            backend=create_project_files_backend(self._project_files, project_id),
             checkpointer=self._checkpointer,
         )
         agent = AgentHubLangGraphAgent(
