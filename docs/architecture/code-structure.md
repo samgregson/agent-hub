@@ -63,7 +63,7 @@ Each Module exposes one intentional Interface from its package root. Internal fi
 Web Modules may expose `index.ts` and `server.ts` at the package root when Next.js requires separate browser-safe and server-only entry points. These are runtime-specific views of the same Module Interface; callers must not import underscore-prefixed implementation files.
 
 - Callers import from the Module root, never its implementation files.
-- Inputs and results use Module-owned types or generated cross-process contracts, not database rows or framework request objects.
+- Inputs and results use Module-owned types or generated cross-process contracts, not database rows or framework request objects. An ADR-pinned open protocol may cross an explicitly named seam where it is the product's deliberate compatibility boundary.
 - Expected failures are explicit Interface outcomes. Framework-specific status codes and rendering remain in adapters.
 - Dependencies are accepted during construction. Implementations do not create hidden global clients.
 - Cross-Module work is coordinated through Interfaces at the composition root or an owning application Module.
@@ -81,6 +81,7 @@ composition root -> Module Interface -> Module implementation -> adapter
 Additionally:
 
 - a Module cannot import another Module's implementation;
+- API Modules import another API Module only through its package root; a subpath is an implementation import even when it does not begin with an underscore;
 - web Modules cannot import from `app/`;
 - API Modules cannot import the FastAPI application instance;
 - generated contracts do not import application code;
@@ -105,7 +106,8 @@ FastAPI route handlers are adapters. They resolve trusted request context, valid
 
 The Interface is the primary test surface.
 
-- Module tests exercise observable behaviour through the same Interface used by production callers.
+- Module tests are colocated beside the Module or root implementation they exercise, and use the same Interface as production callers.
+- Separate test trees are reserved for genuinely cross-Module contract tests, production-adapter integration tests, browser journeys, and end-to-end acceptance tests. Do not mirror the production tree merely to separate tests from source.
 - Deterministic adapters replace PostgreSQL, models, LangGraph, or remote MCP at internal seams where needed.
 - Contract tests verify language-neutral schemas and protocol mappings.
 - Integration tests verify production adapters such as PostgreSQL and AG-UI.
@@ -113,6 +115,10 @@ The Interface is the primary test surface.
 - Tests should survive implementation reorganisation inside a Module.
 
 Do not preserve lower-level tests that merely duplicate stronger Interface tests. Do not test private state solely to make an implementation shape permanent.
+
+## Adopted protocol seams
+
+AG-UI is the accepted open protocol seam between the Deep Agent runtime and the agent UI. Its pinned `ag_ui` types may cross the Agent Execution and Agent Transport Modules, and only those Modules. They must not become types in Project, Project Files, Artifact, Plugin Gateway, or browser workspace Interfaces. The fixture and adapter tests prove that external protocol compatibility; Agent Hub does not duplicate AG-UI as an internal event model.
 
 ## Change checklist
 

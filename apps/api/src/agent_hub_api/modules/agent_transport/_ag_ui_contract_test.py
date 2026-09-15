@@ -6,9 +6,8 @@ from pydantic import TypeAdapter
 
 
 def test_pinned_ag_ui_fixture_matches_python_contract() -> None:
-    fixture_path = (
-        Path(__file__).resolve().parents[3] / "packages/contracts/fixtures/ag-ui-0.0.59.json"
-    )
+    root = Path(__file__).resolve().parents[6]
+    fixture_path = root / "packages/contracts/fixtures/ag-ui-0.0.59.json"
     fixture = json.loads(fixture_path.read_text())
 
     event_adapter: TypeAdapter[Event] = TypeAdapter(Event)

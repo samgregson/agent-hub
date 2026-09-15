@@ -22,6 +22,104 @@ function report(path, message) {
   violations.push(`${relative(root, path)}: ${message}`);
 }
 
+function withoutPythonCommentsAndStrings(source) {
+  let result = "";
+  let quote;
+  let triple = false;
+  let comment = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    const next = source.slice(index, index + 3);
+
+    if (comment) {
+      result += character === "\n" ? "\n" : " ";
+    } else if (quote) {
+      if (triple && next === quote.repeat(3)) {
+        result += "   ";
+        index += 2;
+        quote = undefined;
+        triple = false;
+      } else if (!triple && character === "\\") {
+        result += "  ";
+        index += 1;
+      } else {
+        result += character === "\n" ? "\n" : " ";
+        if (!triple && character === quote) quote = undefined;
+      }
+    } else if (character === "#") {
+      result += " ";
+      comment = true;
+    } else if (character === "'" || character === '"') {
+      quote = character;
+      triple = next === character.repeat(3);
+      result += triple ? "   " : " ";
+      if (triple) index += 2;
+    } else {
+      result += character;
+    }
+
+    if (character === "\n") comment = false;
+  }
+
+  return result;
+}
+
+function checkPythonModulePath(path, moduleName, importedPath) {
+  const prefix = "agent_hub_api.modules.";
+  if (!importedPath.startsWith(prefix)) return;
+
+  const parts = importedPath.split(".");
+  const importedModule = parts[2];
+  const subpath = parts.slice(3);
+  if (importedModule === moduleName || !subpath.length) return;
+
+  const kind = subpath[0].startsWith("_")
+    ? "imports private implementation"
+    : "bypasses the package-root Interface";
+  report(path, `${kind} of Module '${importedModule}'`);
+}
+
+function relativePythonModulePath(moduleName, dots, suffix) {
+  const currentPackage = ["agent_hub_api", "modules", moduleName];
+  const parentPackage = currentPackage.slice(
+    0,
+    currentPackage.length - (dots.length - 1),
+  );
+  return [...parentPackage, ...suffix.split(".").filter(Boolean)].join(".");
+}
+
+function checkPythonModuleImports(path, source, moduleName) {
+  const code = withoutPythonCommentsAndStrings(source);
+
+  for (const match of code.matchAll(
+    /\bfrom\s+(agent_hub_api\.modules\.[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+import\b/g,
+  )) {
+    checkPythonModulePath(path, moduleName, match[1]);
+  }
+
+  for (const match of code.matchAll(/\bimport\s+([^\n;]+)/g)) {
+    for (const importedPath of match[1].split(",")) {
+      checkPythonModulePath(
+        path,
+        moduleName,
+        importedPath.trim().split(/\s+as\s+/)[0],
+      );
+    }
+  }
+
+  for (const match of code.matchAll(
+    /\bfrom\s+(\.+)([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)?\s+import\b/g,
+  )) {
+    const importedPath = relativePythonModulePath(
+      moduleName,
+      match[1],
+      match[2] ?? "",
+    );
+    checkPythonModulePath(path, moduleName, importedPath);
+  }
+}
+
 for (const path of await files(webRoot, new Set([".ts", ".tsx"]))) {
   const source = await readFile(path, "utf8");
   const localPath = relative(webRoot, path).split(sep);
@@ -69,13 +167,7 @@ for (const path of await files(apiRoot, new Set([".py"]))) {
     report(path, "only HTTP adapters may depend on FastAPI Request objects");
   }
 
-  for (const match of source.matchAll(
-    /(?:from|import)\s+agent_hub_api\.modules\.([^.\s]+)\.(_[^\s]*)/g,
-  )) {
-    if (match[1] !== moduleName) {
-      report(path, `imports private implementation from Module '${match[1]}'`);
-    }
-  }
+  if (moduleName) checkPythonModuleImports(path, source, moduleName);
 }
 
 if (violations.length) {
