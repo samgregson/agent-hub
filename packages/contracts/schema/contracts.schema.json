@@ -10,6 +10,7 @@
     "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
     "error": { "$ref": "#/$defs/ErrorEnvelope" },
     "projectFilePreview": { "$ref": "#/$defs/ProjectFilePreview" },
+    "scratchFilePreview": { "$ref": "#/$defs/ScratchFilePreview" },
     "project": { "$ref": "#/$defs/Project" },
     "thread": { "$ref": "#/$defs/Thread" }
   },
@@ -145,6 +146,15 @@
         "path": { "type": "string", "minLength": 1, "maxLength": 1032 },
         "content": { "type": "string" },
         "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ScratchFilePreview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "content"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1032 },
+        "content": { "type": "string" }
       }
     },
     "Project": {

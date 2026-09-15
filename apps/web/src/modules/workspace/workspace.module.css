@@ -126,7 +126,7 @@
 }
 
 .newThread,
-.threadList button {
+.threadButton {
   width: 100%;
   border: 1px solid #35342f;
   border-radius: 8px;
@@ -147,17 +147,34 @@
   gap: 6px;
 }
 
-.threadList button {
+.threadRow {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.threadButton {
+  flex: 1;
   overflow: hidden;
   padding: 9px 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.threadList button[aria-pressed="true"] {
+.threadButton[aria-pressed="true"] {
   border-color: #5b5a4f;
   background: #25251f;
   color: #f0eee8;
+}
+
+.threadRow > div {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.threadRow:hover > div,
+.threadRow:focus-within > div {
+  opacity: 1;
 }
 
 .chat {

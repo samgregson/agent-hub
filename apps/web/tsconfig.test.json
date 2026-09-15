@@ -12,6 +12,8 @@
   "include": [
     "src/modules/workspace/_state.ts",
     "src/modules/workspace/_state.test.ts",
+    "src/modules/workspace/_thread-title.ts",
+    "src/modules/workspace/_thread-title.test.ts",
     "src/modules/agent-ui/_history.ts",
     "src/modules/agent-ui/_history.test.ts",
     "src/modules/agent-ui/_project-links.ts",

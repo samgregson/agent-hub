@@ -21,6 +21,8 @@ from agent_hub_api.modules.agent_execution import (
     AgentThreadState,
     DuplicateAgentRun,
     InvalidAgentRunResume,
+    ScratchFile,
+    ScratchFileNotFound,
     create_memory_agent_execution,
 )
 
@@ -38,7 +40,13 @@ def input_for(thread_id: str, run_id: str) -> RunAgentInput:
     )
 
 
-class DeterministicRunner:
+class ScratchlessRunner:
+    async def load_scratch_file(self, thread_id: str, *, project_id: str, path: str) -> ScratchFile:
+        del thread_id, project_id, path
+        raise ScratchFileNotFound
+
+
+class DeterministicRunner(ScratchlessRunner):
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
@@ -50,7 +58,7 @@ class DeterministicRunner:
         yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
 
 
-class FailingRunner:
+class FailingRunner(ScratchlessRunner):
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
@@ -61,7 +69,7 @@ class FailingRunner:
         raise RuntimeError("provider unavailable")
 
 
-class InterruptingRunner:
+class InterruptingRunner(ScratchlessRunner):
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
@@ -78,7 +86,7 @@ class InterruptingRunner:
         )
 
 
-class ErrorEventRunner:
+class ErrorEventRunner(ScratchlessRunner):
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
@@ -89,7 +97,7 @@ class ErrorEventRunner:
         yield RunErrorEvent(message="model overloaded", code="MODEL_OVERLOADED")
 
 
-class CancelledRunner:
+class CancelledRunner(ScratchlessRunner):
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
@@ -100,7 +108,7 @@ class CancelledRunner:
         raise asyncio.CancelledError
 
 
-class HangingRunner:
+class HangingRunner(ScratchlessRunner):
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
@@ -111,7 +119,7 @@ class HangingRunner:
         await asyncio.Event().wait()
 
 
-class ResumableRunner:
+class ResumableRunner(ScratchlessRunner):
     def __init__(self) -> None:
         self.pending = True
         self.run_count = 0

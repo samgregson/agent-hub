@@ -1,12 +1,12 @@
-export interface ProjectLinkSegment {
+export interface VirtualFileLinkSegment {
   label?: string;
   path?: string;
   text?: string;
 }
 
-export function parseProjectFileLinks(text: string): ProjectLinkSegment[] {
-  const pattern = /\[([^\]]+)]\((\/project\/[^)\s]+)\)/g;
-  const segments: ProjectLinkSegment[] = [];
+export function parseVirtualFileLinks(text: string): VirtualFileLinkSegment[] {
+  const pattern = /\[([^\]]+)]\((\/(?:project|scratch)\/[^)\s]+)\)/g;
+  const segments: VirtualFileLinkSegment[] = [];
   let start = 0;
   for (const match of text.matchAll(pattern)) {
     const index = match.index;
@@ -27,3 +27,5 @@ export function parseProjectFileLinks(text: string): ProjectLinkSegment[] {
   if (start < text.length) segments.push({ text: text.slice(start) });
   return segments;
 }
+
+export const parseProjectFileLinks = parseVirtualFileLinks;

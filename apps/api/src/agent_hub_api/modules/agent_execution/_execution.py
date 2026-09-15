@@ -41,6 +41,18 @@ class AgentThreadState:
     interrupts: tuple[Interrupt, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ScratchFile:
+    """A Thread-local Deep Agents file safe to present back to its owner."""
+
+    path: str
+    content: str
+
+
+class ScratchFileNotFound(Exception):
+    """The requested Thread-local scratch file is unavailable."""
+
+
 class DuplicateAgentRun(Exception):
     """The client supplied a Run ID which already belongs to a durable Run."""
 
@@ -63,6 +75,10 @@ class AgentRunner(Protocol):
     def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]: ...
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState: ...
+
+    async def load_scratch_file(
+        self, thread_id: str, *, project_id: str, path: str
+    ) -> ScratchFile: ...
 
 
 class AgentRunStore(Protocol):
@@ -183,6 +199,9 @@ class AgentExecutionModule:
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         return await self._runner.load_thread_state(thread_id, project_id=project_id)
+
+    async def load_scratch_file(self, thread_id: str, *, project_id: str, path: str) -> ScratchFile:
+        return await self._runner.load_scratch_file(thread_id, project_id=project_id, path=path)
 
 
 class MemoryAgentRunStore:

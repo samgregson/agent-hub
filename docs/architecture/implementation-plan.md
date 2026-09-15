@@ -90,9 +90,9 @@ All slices belong to the [Agent Hub foundation milestone](https://github.com/sam
 - Normalize paths, enforce Project context, and add configurable content/operation limits.
 - Reserve the Artifact namespace against generic writes.
 - Surface file tool errors in the run stream.
-- Resolve Project File links from chat into safe previews without registering an Artifact.
+- Resolve Project File and Thread-local Scratch links from chat into safe previews without registering an Artifact. A Scratch preview remains Thread-local and is not promoted by opening it.
 
-**Acceptance:** Thread A writes and Thread B reads a Project file; a chat link opens that file in a safe preview without adding it to the Artifact catalog; neither can escape its Project namespace or reach server paths; stale exact-string edits return an explicit error; registered Artifact paths reject generic writes.
+**Acceptance:** Thread A writes and Thread B reads a Project file; a chat link opens that file in a safe preview without adding it to the Artifact catalog; a Scratch link is visible only from its owning Thread and remains absent from the Project catalog; neither can escape its Project namespace or reach server paths; stale exact-string edits return an explicit error; registered Artifact paths reject generic writes.
 
 ## Slice 5 — Curated MCP Gateway and portable fixture Plugin
 

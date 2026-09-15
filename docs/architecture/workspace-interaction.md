@@ -97,8 +97,9 @@ The product borrows the stable navigation/chat/inspector structure from Codex an
 
 - Remains the default primary surface.
 - Shows streamed messages, Agent Run state, tool calls, approvals, errors, and the composer.
+- Clearly distinguishes user and assistant messages by alignment, surface treatment, and an accessible sender label. Assistant text renders safe Markdown, including emphasis, lists, links, and fenced code blocks; untrusted HTML is never rendered.
 - Selecting or creating a Thread changes this surface but does not automatically close the current Project Artifact.
-- Links and tool results can select an Artifact or Source in the right workspace without navigating away from the Thread.
+- Links and tool results can select an Artifact or Source in the right workspace without navigating away from the Thread. Project and Thread-local Scratch file links open safe previews in that workspace without changing their lifecycle.
 
 ### Right: Artifact workspace
 
@@ -123,11 +124,14 @@ Panel sizes and collapse state are presentation preferences. They may be kept lo
 
 ## Thread and Artifact interaction
 
+- A newly created Thread has a deterministic provisional title. On its first user message, Agent Hub replaces that title with a normalized, truncated excerpt of that message; this avoids a model call solely to name a conversation. A user rename is authoritative and prevents later automatic replacement.
+- Hovering or focusing a Thread exposes a compact overflow menu with Rename and Delete actions. Deletion requires confirmation, removes the Thread from the Project's visible conversation list, and selects the next available Thread (or the empty-chat state) without changing the active Project or open Project Artifact. The Run/checkpoint retention work follows the backend's durable-deletion design rather than being hidden in the menu.
 - Artifact creation selects the saved Artifact only after Agent Hub has validated and persisted it.
 - An MCP App edit remains pending until the Plugin result passes the Artifact Host Adapter and the updated current document is saved.
 - When another Thread changes the open Artifact, the host marks it stale with a compact notice. The user or agent can reload it; live merging is not implied.
 - The Artifact catalog is discoverable on demand. Its full contents are not injected into every Thread prompt.
 - A Source can open beside chat through the same workspace, but it is never mislabeled as an Artifact.
+- A Scratch preview is explicitly Thread-local. It can be opened from that Thread's chat but is never listed in the Project Artifact catalog, promoted to a Project File, or made visible to other Threads merely by previewing it.
 
 ## Narrow-screen behavior
 

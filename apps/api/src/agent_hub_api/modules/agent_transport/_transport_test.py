@@ -14,7 +14,12 @@ from ag_ui.core import (
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from agent_hub_api.modules.agent_execution import AgentThreadState, create_memory_agent_execution
+from agent_hub_api.modules.agent_execution import (
+    AgentThreadState,
+    ScratchFile,
+    ScratchFileNotFound,
+    create_memory_agent_execution,
+)
 from agent_hub_api.modules.agent_transport import (
     AgentTransportModule,
     create_agent_transport_router,
@@ -25,6 +30,10 @@ from agent_hub_api.settings import Settings
 
 
 class DeterministicRunner:
+    async def load_scratch_file(self, thread_id: str, *, project_id: str, path: str) -> ScratchFile:
+        del thread_id, project_id, path
+        raise ScratchFileNotFound
+
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
@@ -61,6 +70,14 @@ class InterruptedHistoryRunner(DeterministicRunner):
                 ),
             ),
         )
+
+
+class ScratchPreviewRunner(DeterministicRunner):
+    async def load_scratch_file(self, thread_id: str, *, project_id: str, path: str) -> ScratchFile:
+        del thread_id, project_id
+        if path == "/scratch/check.md":
+            return ScratchFile(path=path, content="# Working check\nNot durable")
+        raise ScratchFileNotFound
 
 
 def run_body(thread_id: str, run_id: str = "run-1") -> dict[str, object]:
@@ -157,3 +174,38 @@ async def test_history_returns_pending_interrupts_for_approval_restoration() -> 
         }
     ]
     assert history.json()["messages"][0]["toolCalls"][0]["id"] == "tool-1"
+
+
+@pytest.mark.asyncio
+async def test_scratch_preview_is_thread_scoped_and_never_uses_project_file_storage() -> None:
+    settings = Settings(environment="test", fixed_identity_subject="subject-a")
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="subject-a")
+    project = await projects.create(access, "First")
+    thread = await projects.create_thread(access, project.id, "Conversation")
+    runner = ScratchPreviewRunner()
+    app = FastAPI()
+    app.include_router(
+        create_agent_transport_router(
+            create_identity_module(settings),
+            AgentTransportModule(projects, create_memory_agent_execution(runner)),
+        ),
+        prefix="/api",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        preview = await client.get(
+            f"/api/projects/{project.id}/threads/{thread.id}/scratch",
+            params={"path": "/scratch/check.md"},
+        )
+        wrong_scope = await client.get(
+            f"/api/projects/{project.id}/threads/{thread.id}/scratch",
+            params={"path": "/project/check.md"},
+        )
+
+    assert preview.status_code == 200
+    assert preview.json() == {
+        "path": "/scratch/check.md",
+        "content": "# Working check\nNot durable",
+    }
+    assert wrong_scope.status_code == 422

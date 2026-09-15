@@ -4,12 +4,13 @@ from typing import Annotated
 
 from ag_ui.core import RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agent_hub_api.contracts import AgentRun as AgentRunResponse
-from agent_hub_api.modules.agent_execution import AgentRun
+from agent_hub_api.contracts import ScratchFilePreview
+from agent_hub_api.modules.agent_execution import AgentRun, ScratchFileNotFound
 from agent_hub_api.modules.agent_transport._application import (
     AgentThreadAccess,
     AgentThreadNotFound,
@@ -104,6 +105,29 @@ def create_agent_transport_router(
             for interrupt in thread_state.interrupts
         ]
         return ThreadHistoryResponse(messages=messages, interrupts=interrupts)
+
+    @router.get("/scratch", response_model=ScratchFilePreview)
+    async def preview_scratch_file(
+        project_id: str,
+        thread_id: str,
+        context: Context,
+        path: Annotated[str, Query(min_length=10, max_length=1032)],
+    ) -> ScratchFilePreview:
+        if not path.startswith("/scratch/"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Scratch file previews require a /scratch/ path",
+            )
+        try:
+            file = await agent_transport.load_scratch_file(
+                access(project_id, thread_id, context), path
+            )
+        except (AgentThreadNotFound, ScratchFileNotFound) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scratch file not found",
+            ) from error
+        return ScratchFilePreview(path=file.path, content=file.content)
 
     @router.post("/agent")
     async def stream_agent(

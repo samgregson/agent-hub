@@ -22,6 +22,11 @@ test("project switching restores each project's scoped workspace state", () => {
     type: "openProjectFile",
   });
   state = workspaceReducer(state, {
+    path: "/scratch/notes.md",
+    threadId: "thread-a",
+    type: "openScratchFile",
+  });
+  state = workspaceReducer(state, {
     projectId: "project-b",
     type: "selectProject",
   });
@@ -41,10 +46,30 @@ test("project switching restores each project's scoped workspace state", () => {
   assert.equal(state.projects["project-a"].selectedThreadId, "thread-a");
   assert.equal(
     state.projects["project-a"].selectedFilePath,
-    "/project/check.md",
+    "/scratch/notes.md",
   );
+  assert.equal(state.projects["project-a"].selectedScratchThreadId, "thread-a");
   assert.equal(state.projects["project-b"].selectedFilePath, null);
+  assert.equal(state.projects["project-b"].selectedScratchThreadId, null);
   assert.equal(state.projects["project-b"].activity, "sources");
+});
+
+test("opening a Project file clears a prior Thread-local scratch selection", () => {
+  let state = workspaceReducer(createWorkspaceState(), {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  state = workspaceReducer(state, {
+    path: "/scratch/notes.md",
+    threadId: "thread-a",
+    type: "openScratchFile",
+  });
+  state = workspaceReducer(state, {
+    path: "/project/notes.md",
+    type: "openProjectFile",
+  });
+
+  assert.equal(state.projects["project-a"].selectedScratchThreadId, null);
 });
 
 test("activity changes are ignored until a Project is selected", () => {

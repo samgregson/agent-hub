@@ -2,18 +2,26 @@
 
 import { FormEvent, useEffect, useReducer, useRef, useState } from "react";
 
-import { AgentChat } from "@/modules/agent-ui";
+import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
 import { ProjectFilePreview } from "@/modules/project-files";
+import { Menu, MenuItem } from "@/shared/ui";
 
 import styles from "./workspace.module.css";
 import {
   createProject,
   createThread,
+  deleteThread,
   listProjects,
   listThreads,
+  renameThread,
   type Project,
   type Thread,
 } from "./_projects";
+import {
+  automaticThreadTitle,
+  hasProvisionalThreadTitle,
+  initialThreadTitle,
+} from "./_thread-title";
 import {
   activityViews,
   createWorkspaceState,
@@ -39,6 +47,9 @@ export function ProjectWorkspace() {
     Record<string, Thread[]>
   >({});
   const [isCreating, setIsCreating] = useState(false);
+  const [autoNamingThreadIds, setAutoNamingThreadIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -124,7 +135,7 @@ export function ProjectWorkspace() {
     try {
       const thread = await createThread(
         workspace.selectedProjectId,
-        `New Thread ${selectedThreads.length + 1}`,
+        initialThreadTitle(selectedThreads.length + 1),
       );
       setThreadsByProject((current) => ({
         ...current,
@@ -133,6 +144,87 @@ export function ProjectWorkspace() {
       dispatch({ threadId: thread.id, type: "selectThread" });
     } catch {
       setError("The Thread could not be created.");
+    }
+  }
+
+  function replaceThread(updatedThread: Thread) {
+    setThreadsByProject((current) => ({
+      ...current,
+      [updatedThread.projectId]: (current[updatedThread.projectId] ?? []).map(
+        (thread) => (thread.id === updatedThread.id ? updatedThread : thread),
+      ),
+    }));
+  }
+
+  async function handleRenameThread(thread: Thread) {
+    const title = window.prompt("Rename Thread", thread.title);
+    if (title === null) return;
+    const normalizedTitle = title.trim();
+    if (!normalizedTitle) {
+      setError("A Thread title cannot be empty.");
+      return;
+    }
+
+    setError(null);
+    try {
+      replaceThread(
+        await renameThread(thread.projectId, thread.id, normalizedTitle),
+      );
+    } catch {
+      setError("The Thread could not be renamed.");
+    }
+  }
+
+  async function handleDeleteThread(thread: Thread) {
+    if (!window.confirm(`Delete “${thread.title}”? This cannot be undone.`)) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await deleteThread(thread.projectId, thread.id);
+      const remaining = selectedThreads.filter((item) => item.id !== thread.id);
+      setThreadsByProject((current) => ({
+        ...current,
+        [thread.projectId]: (current[thread.projectId] ?? []).filter(
+          (item) => item.id !== thread.id,
+        ),
+      }));
+      if (selectedThread?.id === thread.id) {
+        dispatch({ threadId: remaining[0]?.id ?? null, type: "selectThread" });
+      }
+    } catch {
+      setError("The Thread could not be deleted.");
+    }
+  }
+
+  async function handleFirstUserMessage(message: string) {
+    if (
+      !selectedProject ||
+      !selectedThread ||
+      !hasProvisionalThreadTitle(selectedThread.title) ||
+      autoNamingThreadIds.has(selectedThread.id)
+    ) {
+      return;
+    }
+    const title = automaticThreadTitle(message);
+    if (!title) return;
+
+    setAutoNamingThreadIds((current) =>
+      new Set(current).add(selectedThread.id),
+    );
+    try {
+      replaceThread(
+        await renameThread(selectedProject.id, selectedThread.id, title),
+      );
+    } catch {
+      // A title failure must never block the conversational send already in flight.
+    } finally {
+      setAutoNamingThreadIds((current) => {
+        const next = new Set(current);
+        next.delete(selectedThread.id);
+        return next;
+      });
     }
   }
 
@@ -208,16 +300,29 @@ export function ProjectWorkspace() {
             </button>
             <div className={styles.threadList}>
               {selectedThreads.map((thread) => (
-                <button
-                  aria-pressed={selectedThread?.id === thread.id}
-                  key={thread.id}
-                  onClick={() =>
-                    dispatch({ threadId: thread.id, type: "selectThread" })
-                  }
-                  type="button"
-                >
-                  {thread.title}
-                </button>
+                <div className={styles.threadRow} key={thread.id}>
+                  <button
+                    aria-pressed={selectedThread?.id === thread.id}
+                    className={styles.threadButton}
+                    onClick={() =>
+                      dispatch({ threadId: thread.id, type: "selectThread" })
+                    }
+                    type="button"
+                  >
+                    {thread.title}
+                  </button>
+                  <Menu label={`${thread.title} actions`}>
+                    <MenuItem onSelect={() => void handleRenameThread(thread)}>
+                      Rename
+                    </MenuItem>
+                    <MenuItem
+                      destructive
+                      onSelect={() => void handleDeleteThread(thread)}
+                    >
+                      Delete
+                    </MenuItem>
+                  </Menu>
+                </div>
               ))}
             </div>
           </>
@@ -234,9 +339,18 @@ export function ProjectWorkspace() {
         {selectedProject && selectedThread && selectedActivity === "chats" ? (
           <AgentChat
             key={selectedThread.id}
-            onOpenProjectFile={(path) =>
-              dispatch({ path, type: "openProjectFile" })
-            }
+            onOpenVirtualFile={(path) => {
+              if (path.startsWith("/scratch/")) {
+                dispatch({
+                  path,
+                  threadId: selectedThread.id,
+                  type: "openScratchFile",
+                });
+                return;
+              }
+              dispatch({ path, type: "openProjectFile" });
+            }}
+            onUserMessage={(message) => void handleFirstUserMessage(message)}
             projectId={selectedProject.id}
             threadId={selectedThread.id}
           />
@@ -257,7 +371,15 @@ export function ProjectWorkspace() {
       </section>
 
       <aside className={styles.artifact}>
-        {selectedProject && selectedWorkspace?.selectedFilePath ? (
+        {selectedProject &&
+        selectedWorkspace?.selectedFilePath &&
+        selectedWorkspace.selectedScratchThreadId ? (
+          <ScratchFilePreview
+            path={selectedWorkspace.selectedFilePath}
+            projectId={selectedProject.id}
+            threadId={selectedWorkspace.selectedScratchThreadId}
+          />
+        ) : selectedProject && selectedWorkspace?.selectedFilePath ? (
           <ProjectFilePreview
             path={selectedWorkspace.selectedFilePath}
             projectId={selectedProject.id}

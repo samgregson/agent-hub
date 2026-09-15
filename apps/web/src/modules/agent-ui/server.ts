@@ -6,7 +6,7 @@ export function forwardAgentRequest(
   request: Request,
   projectId: string,
   threadId: string,
-  suffix: "agent" | "history" | "runs",
+  suffix: "agent" | "history" | "runs" | "scratch",
 ): Promise<Response> {
   const path = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/${suffix}`;
   return forwardBackendRequest(request, path);

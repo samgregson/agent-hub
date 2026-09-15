@@ -65,4 +65,30 @@ export async function createThread(
   return threadSchema.parse(await response.json());
 }
 
+export async function renameThread(
+  projectId: string,
+  threadId: string,
+  title: string,
+): Promise<Thread> {
+  const response = await projectRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`,
+    {
+      body: JSON.stringify({ title }),
+      headers: { "content-type": "application/json" },
+      method: "PATCH",
+    },
+  );
+  return threadSchema.parse(await response.json());
+}
+
+export async function deleteThread(
+  projectId: string,
+  threadId: string,
+): Promise<void> {
+  await projectRequest(
+    `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}`,
+    { method: "DELETE" },
+  );
+}
+
 export type { Project, Thread };

@@ -18,35 +18,26 @@ import {
   useAgUiRuntime,
   type AgUiInterrupt,
 } from "@assistant-ui/react-ag-ui";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 
 import type { AgentRun } from "@/contracts";
+import { Markdown } from "@/shared/ui";
 
 import { restoreInterruptMetadata } from "./_history";
-import { parseProjectFileLinks } from "./_project-links";
 import styles from "./agent-ui.module.css";
 
-const OpenProjectFileContext = createContext<(path: string) => void>(() => {});
+const OpenVirtualFileContext = createContext<(path: string) => void>(() => {});
 
 function TextPart({ text }: TextMessagePartProps) {
-  const openProjectFile = useContext(OpenProjectFileContext);
-  const parts = parseProjectFileLinks(text).map((segment, index) =>
-    segment.path && segment.label ? (
-      <a
-        href={segment.path}
-        key={`${index}-${segment.path}`}
-        onClick={(event) => {
-          event.preventDefault();
-          openProjectFile(segment.path!);
-        }}
-      >
-        {segment.label}
-      </a>
-    ) : (
-      segment.text
-    ),
-  );
-  return <p className={styles.messageText}>{parts}</p>;
+  const openVirtualFile = useContext(OpenVirtualFileContext);
+  return <Markdown onOpenVirtualFile={openVirtualFile} text={text} />;
 }
 
 function ToolCall({
@@ -92,8 +83,18 @@ function ToolCall({
 }
 
 function Message() {
+  const role = useAuiState((state) => state.message.role);
+  const isUser = role === "user";
+
   return (
-    <MessagePrimitive.Root className={styles.message}>
+    <MessagePrimitive.Root
+      aria-label={isUser ? "You" : "Agent Hub"}
+      className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}
+      data-role={role}
+    >
+      <span className={styles.messageAuthor}>
+        {isUser ? "You" : "Agent Hub"}
+      </span>
       <MessagePrimitive.Parts
         components={{ Text: TextPart, tools: { Fallback: ToolCall } }}
       />
@@ -203,11 +204,13 @@ function createHistoryAdapter(
 }
 
 export function AgentChat({
-  onOpenProjectFile,
+  onOpenVirtualFile,
+  onUserMessage,
   projectId,
   threadId,
 }: {
-  onOpenProjectFile: (path: string) => void;
+  onOpenVirtualFile: (path: string) => void;
+  onUserMessage?: (message: string) => void;
   projectId: string;
   threadId: string;
 }) {
@@ -231,8 +234,14 @@ export function AgentChat({
   });
   const runsUrl = `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/runs`;
 
+  function captureUserMessage(event: FormEvent<HTMLFormElement>) {
+    const input = event.currentTarget.querySelector("textarea");
+    const message = input?.value ?? "";
+    if (message.trim()) onUserMessage?.(message);
+  }
+
   return (
-    <OpenProjectFileContext.Provider value={onOpenProjectFile}>
+    <OpenVirtualFileContext.Provider value={onOpenVirtualFile}>
       <AssistantRuntimeProvider runtime={runtime}>
         <ThreadPrimitive.Root className={styles.thread}>
           <ThreadPrimitive.Viewport className={styles.viewport}>
@@ -250,7 +259,10 @@ export function AgentChat({
             <RunStatus runsUrl={runsUrl} />
             {error ? <p className={styles.runError}>{error}</p> : null}
             <ThreadPrimitive.ViewportFooter className={styles.footer}>
-              <ComposerPrimitive.Root className={styles.composer}>
+              <ComposerPrimitive.Root
+                className={styles.composer}
+                onSubmit={captureUserMessage}
+              >
                 <ComposerPrimitive.Input
                   aria-label="Message Agent Hub"
                   className={styles.input}
@@ -270,6 +282,6 @@ export function AgentChat({
           </ThreadPrimitive.Viewport>
         </ThreadPrimitive.Root>
       </AssistantRuntimeProvider>
-    </OpenProjectFileContext.Provider>
+    </OpenVirtualFileContext.Provider>
   );
 }

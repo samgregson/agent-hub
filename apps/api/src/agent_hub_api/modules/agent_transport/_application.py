@@ -10,6 +10,7 @@ from agent_hub_api.modules.agent_execution import (
     AgentThreadState,
     DuplicateAgentRun,
     InvalidAgentRunResume,
+    ScratchFile,
 )
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ThreadNotFound
 
@@ -55,6 +56,12 @@ class AgentTransportModule:
         await self._authorize(access)
         return await self._execution.load_thread_state(
             access.thread_id, project_id=access.project_id
+        )
+
+    async def load_scratch_file(self, access: AgentThreadAccess, path: str) -> ScratchFile:
+        await self._authorize(access)
+        return await self._execution.load_scratch_file(
+            access.thread_id, project_id=access.project_id, path=path
         )
 
     async def start(

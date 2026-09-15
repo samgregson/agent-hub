@@ -14,7 +14,11 @@ from agent_hub_api.modules.agent_execution._ag_ui import (
     AgentHubLangGraphAgent,
     map_langchain_interrupts,
 )
-from agent_hub_api.modules.agent_execution._execution import AgentThreadState
+from agent_hub_api.modules.agent_execution._execution import (
+    AgentThreadState,
+    ScratchFile,
+    ScratchFileNotFound,
+)
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
@@ -88,8 +92,8 @@ class PostgresDeepAgentRunner:
             system_prompt=(
                 "Use /project for durable files shared by every Thread in the selected "
                 "Project and /scratch for Thread-local working files. Never claim access "
-                "to the host filesystem. When referring to a durable file in a response, "
-                "link it as Markdown using its absolute /project path."
+                "to the host filesystem. When referring to a virtual file in a response, "
+                "link it as Markdown using its absolute /project or /scratch path."
             ),
             interrupt_on=interrupt_on,
             backend=create_project_files_backend(self._project_files, project_id),
@@ -128,3 +132,31 @@ class PostgresDeepAgentRunner:
             messages=tuple(langchain_messages_to_agui(messages)),
             interrupts=tuple(map_langchain_interrupts(interrupts, messages)),
         )
+
+    async def load_scratch_file(self, thread_id: str, *, project_id: str, path: str) -> ScratchFile:
+        if not _is_scratch_file_path(path):
+            raise ScratchFileNotFound
+        await self.open()
+        agent = self._agent_for(project_id)
+        state = await agent.graph.aget_state({"configurable": {"thread_id": thread_id}})
+        files = state.values.get("files")
+        if not isinstance(files, dict):
+            raise ScratchFileNotFound
+        file_data = files.get(path)
+        if not isinstance(file_data, dict):
+            raise ScratchFileNotFound
+        content = file_data.get("content")
+        if isinstance(content, str):
+            return ScratchFile(path=path, content=content)
+        if isinstance(content, list) and all(isinstance(line, str) for line in content):
+            return ScratchFile(path=path, content="".join(content))
+        raise ScratchFileNotFound
+
+
+def _is_scratch_file_path(path: str) -> bool:
+    return (
+        path.startswith("/scratch/")
+        and len(path) <= 1032
+        and "\x00" not in path
+        and ".." not in path.split("/")
+    )

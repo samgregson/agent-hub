@@ -8,6 +8,8 @@ from agent_hub_api.modules.agent_execution._execution import (
     AgentThreadState,
     DuplicateAgentRun,
     InvalidAgentRunResume,
+    ScratchFile,
+    ScratchFileNotFound,
     create_memory_agent_execution,
     create_postgres_agent_execution,
 )
@@ -22,6 +24,8 @@ __all__ = [
     "DuplicateAgentRun",
     "InvalidAgentRunResume",
     "PostgresDeepAgentRunner",
+    "ScratchFile",
+    "ScratchFileNotFound",
     "create_memory_agent_execution",
     "create_postgres_agent_execution",
 ]

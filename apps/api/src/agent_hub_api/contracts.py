@@ -119,6 +119,14 @@ class ProjectFilePreview(BaseModel):
     version: Annotated[int, Field(ge=1)]
 
 
+class ScratchFilePreview(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    path: Annotated[str, Field(max_length=1032, min_length=1)]
+    content: str
+
+
 class Project(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -149,6 +157,9 @@ class FoundationContracts(BaseModel):
     error: ErrorEnvelope | None = None
     project_file_preview: Annotated[
         ProjectFilePreview | None, Field(alias="projectFilePreview")
+    ] = None
+    scratch_file_preview: Annotated[
+        ScratchFilePreview | None, Field(alias="scratchFilePreview")
     ] = None
     project: Project | None = None
     thread: Thread | None = None

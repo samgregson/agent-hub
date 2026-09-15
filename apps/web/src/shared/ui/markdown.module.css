@@ -1,0 +1,63 @@
+.markdown {
+  min-width: 0;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 0 0 var(--space-3);
+}
+
+.markdown ul {
+  padding-left: 1.4rem;
+}
+
+.markdown pre {
+  margin: var(--space-3) 0;
+  overflow-x: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--background);
+  color: var(--text);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.markdown code {
+  padding: 0.08em 0.32em;
+  border-radius: 0.2rem;
+  background: var(--surface-raised);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.markdown a,
+.linkButton {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.linkButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
