@@ -104,6 +104,8 @@ All slices belong to the [Agent Hub foundation milestone](https://github.com/sam
 - Implement catalog capability intersection, namespacing, discovery caching, timeouts, cancellation, size limits, and normalized errors.
 - Add outbound origin/redirect/DNS protections and secret-reference plumbing without building a full OAuth UI.
 - Build a trivial independently runnable MCP fixture with one read-only tool and useful text/structured output.
+- Give that fixture a fixed standards-compatible `ui://` resource, while leaving
+  Agent Hub's resource loading, sandboxing, and bridge for Slice 7.
 - Display the tool call/result through assistant-ui.
 
 **Acceptance:** only enabled catalogued tools reach a Run; arbitrary/private endpoints and unapproved capabilities are denied; unavailable/slow/malformed servers produce explicit outcomes; the fixture works in a generic MCP client.
@@ -129,7 +131,7 @@ All slices belong to the [Agent Hub foundation milestone](https://github.com/sam
 
 **Work:**
 
-- Add the fixture's standard MCP App UI resource.
+- Load the fixture's existing standard MCP App UI resource through the gateway.
 - Implement validated UI-resource loading and the capability-limited MCP Apps bridge through the Plugin Gateway.
 - Render trusted Artifact chrome outside an isolated-origin sandboxed iframe.
 - Route App semantic edits through Plugin tools and the Artifact Module, then refresh on successful persistence.
