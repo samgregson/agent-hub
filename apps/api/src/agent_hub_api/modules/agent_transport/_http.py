@@ -14,7 +14,9 @@ from agent_hub_api.modules.agent_transport._application import (
     AgentThreadAccess,
     AgentThreadNotFound,
     AgentTransportModule,
+    AgentTransportRunAlreadyActive,
     DuplicateAgentTransportRun,
+    InvalidAgentTransportResume,
 )
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 class ThreadHistoryResponse(BaseModel):
     messages: list[dict[str, object]]
+    interrupts: list[dict[str, object]]
 
 
 def _run_response(run: AgentRun) -> AgentRunResponse:
@@ -85,17 +88,22 @@ def create_agent_transport_router(
         project_id: str, thread_id: str, context: Context
     ) -> ThreadHistoryResponse:
         try:
-            messages = await agent_transport.load_messages(access(project_id, thread_id, context))
+            thread_state = await agent_transport.load_thread_state(
+                access(project_id, thread_id, context)
+            )
         except AgentThreadNotFound as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Thread not found"
             ) from error
-        return ThreadHistoryResponse(
-            messages=[
-                message.model_dump(mode="json", by_alias=True, exclude_none=True)
-                for message in messages
-            ]
-        )
+        messages = [
+            message.model_dump(mode="json", by_alias=True, exclude_none=True)
+            for message in thread_state.messages
+        ]
+        interrupts = [
+            interrupt.model_dump(mode="json", by_alias=True, exclude_none=True)
+            for interrupt in thread_state.interrupts
+        ]
+        return ThreadHistoryResponse(messages=messages, interrupts=interrupts)
 
     @router.post("/agent")
     async def stream_agent(
@@ -126,6 +134,16 @@ def create_agent_transport_router(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Agent Run already exists",
+            ) from error
+        except AgentTransportRunAlreadyActive as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This Thread already has an active Agent Run",
+            ) from error
+        except InvalidAgentTransportResume as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Resume responses do not match the Thread's pending approvals",
             ) from error
 
         encoder = EventEncoder(accept=request.headers.get("accept") or "")

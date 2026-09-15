@@ -1,11 +1,20 @@
 from collections.abc import AsyncIterator
 
 import pytest
-from ag_ui.core import BaseEvent, Message, RunAgentInput, RunFinishedEvent, RunStartedEvent
+from ag_ui.core import (
+    AssistantMessage,
+    BaseEvent,
+    FunctionCall,
+    Interrupt,
+    RunAgentInput,
+    RunFinishedEvent,
+    RunStartedEvent,
+    ToolCall,
+)
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from agent_hub_api.modules.agent_execution import create_memory_agent_execution
+from agent_hub_api.modules.agent_execution import AgentThreadState, create_memory_agent_execution
 from agent_hub_api.modules.agent_transport import (
     AgentTransportModule,
     create_agent_transport_router,
@@ -16,13 +25,41 @@ from agent_hub_api.settings import Settings
 
 
 class DeterministicRunner:
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
         del thread_id
-        return ()
+        return AgentThreadState(messages=(), interrupts=())
 
     async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+
+
+class InterruptedHistoryRunner(DeterministicRunner):
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
+        del thread_id
+        return AgentThreadState(
+            messages=(
+                AssistantMessage(
+                    id="assistant-1",
+                    tool_calls=[
+                        ToolCall(
+                            id="tool-1",
+                            function=FunctionCall(
+                                name="foundation_protected_action",
+                                arguments='{"note":"test"}',
+                            ),
+                        )
+                    ],
+                ),
+            ),
+            interrupts=(
+                Interrupt(
+                    id="interrupt-1",
+                    reason="tool_call",
+                    tool_call_id="tool-1",
+                ),
+            ),
+        )
 
 
 def run_body(thread_id: str, run_id: str = "run-1") -> dict[str, object]:
@@ -85,5 +122,37 @@ async def test_agent_stream_requires_owned_matching_thread() -> None:
     assert "RUN_STARTED" in streamed.text
     assert "RUN_FINISHED" in streamed.text
     assert runs.json()[0]["status"] == "succeeded"
-    assert history.json() == {"messages": []}
+    assert history.json() == {"interrupts": [], "messages": []}
     assert unauthorized.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_history_returns_pending_interrupts_for_approval_restoration() -> None:
+    settings = Settings(environment="test", fixed_identity_subject="subject-a")
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="subject-a")
+    project = await projects.create(access, "First")
+    thread = await projects.create_thread(access, project.id, "Conversation")
+    app = FastAPI()
+    app.include_router(
+        create_agent_transport_router(
+            create_identity_module(settings),
+            AgentTransportModule(
+                projects, create_memory_agent_execution(InterruptedHistoryRunner())
+            ),
+        ),
+        prefix="/api",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        history = await client.get(f"/api/projects/{project.id}/threads/{thread.id}/history")
+
+    assert history.status_code == 200
+    assert history.json()["interrupts"] == [
+        {
+            "id": "interrupt-1",
+            "reason": "tool_call",
+            "toolCallId": "tool-1",
+        }
+    ]
+    assert history.json()["messages"][0]["toolCalls"][0]["id"] == "tool-1"

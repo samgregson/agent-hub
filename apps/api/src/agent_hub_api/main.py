@@ -45,6 +45,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        await resolved_agent_execution.reconcile_non_terminal()
         yield
         if deep_agent_runner is not None:
             await deep_agent_runner.close()

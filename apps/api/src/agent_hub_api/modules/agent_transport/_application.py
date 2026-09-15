@@ -1,12 +1,15 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from ag_ui.core import BaseEvent, Message, RunAgentInput
+from ag_ui.core import BaseEvent, RunAgentInput
 
 from agent_hub_api.modules.agent_execution import (
     AgentExecutionModule,
     AgentRun,
+    AgentRunAlreadyActive,
+    AgentThreadState,
     DuplicateAgentRun,
+    InvalidAgentRunResume,
 )
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ThreadNotFound
 
@@ -29,6 +32,14 @@ class DuplicateAgentTransportRun(Exception):
     """The supplied Run ID already belongs to a durable Agent Run."""
 
 
+class AgentTransportRunAlreadyActive(Exception):
+    """The Thread already has an active Agent Run."""
+
+
+class InvalidAgentTransportResume(Exception):
+    """The supplied responses do not match the pending Thread interrupts."""
+
+
 class AgentTransportModule:
     """Own project authorization and durable execution behind the AG-UI seam."""
 
@@ -40,9 +51,9 @@ class AgentTransportModule:
         await self._authorize(access)
         return await self._execution.list_runs(access.thread_id)
 
-    async def load_messages(self, access: AgentThreadAccess) -> tuple[Message, ...]:
+    async def load_thread_state(self, access: AgentThreadAccess) -> AgentThreadState:
         await self._authorize(access)
-        return await self._execution.load_messages(access.thread_id)
+        return await self._execution.load_thread_state(access.thread_id)
 
     async def start(
         self, access: AgentThreadAccess, input_data: RunAgentInput
@@ -52,6 +63,10 @@ class AgentTransportModule:
             return await self._execution.start(input_data, request_id=access.request_id)
         except DuplicateAgentRun as error:
             raise DuplicateAgentTransportRun from error
+        except AgentRunAlreadyActive as error:
+            raise AgentTransportRunAlreadyActive from error
+        except InvalidAgentRunResume as error:
+            raise InvalidAgentTransportResume from error
 
     async def _authorize(self, access: AgentThreadAccess) -> None:
         try:

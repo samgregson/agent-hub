@@ -12,11 +12,16 @@ import {
   type ToolCallMessagePartProps,
   useAuiState,
 } from "@assistant-ui/react";
-import { fromAgUiMessages, useAgUiRuntime } from "@assistant-ui/react-ag-ui";
+import {
+  fromAgUiMessages,
+  useAgUiRuntime,
+  type AgUiInterrupt,
+} from "@assistant-ui/react-ag-ui";
 import { useEffect, useMemo, useState } from "react";
 
 import type { AgentRun } from "@/contracts";
 
+import { restoreInterruptMetadata } from "./_history";
 import styles from "./agent-ui.module.css";
 
 function ToolCall({
@@ -140,12 +145,24 @@ function createHistoryAdapter(
       if (!response.ok) {
         throw new Error(`Thread history failed with status ${response.status}`);
       }
-      const body = (await response.json()) as { messages?: unknown[] };
-      const messages = fromAgUiMessages(body.messages ?? []).map((message) =>
-        fromThreadMessageLike(message, generateId(), {
-          reason: "unknown",
-          type: "complete",
-        }),
+      const body = (await response.json()) as {
+        interrupts?: AgUiInterrupt[];
+        messages?: unknown[];
+      };
+      const interrupts = body.interrupts ?? [];
+      const restored = restoreInterruptMetadata(
+        body.messages ?? [],
+        interrupts,
+      );
+      const converted = fromAgUiMessages(restored.messages);
+      const messages = converted.map((message) =>
+        fromThreadMessageLike(
+          message,
+          generateId(),
+          message.id === restored.interruptedMessageId
+            ? { reason: "interrupt", type: "requires-action" }
+            : { reason: "unknown", type: "complete" },
+        ),
       );
       let parentId: string | null = null;
       const repository = messages.map((message) => {

@@ -1,14 +1,18 @@
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 
-from ag_ui.core import BaseEvent, Message, RunAgentInput
-from ag_ui_langgraph import LangGraphAgent
+from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
 from deepagents import create_deep_agent
 from langchain.agents.middleware import InterruptOnConfig
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from agent_hub_api.modules.agent_execution._ag_ui import (
+    AgentHubLangGraphAgent,
+    map_langchain_interrupts,
+)
+from agent_hub_api.modules.agent_execution._execution import AgentThreadState
 from agent_hub_api.settings import Settings
 
 
@@ -24,7 +28,7 @@ class PostgresDeepAgentRunner:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._stack: AsyncExitStack | None = None
-        self._agent: LangGraphAgent | None = None
+        self._agent: AgentHubLangGraphAgent | None = None
 
     async def open(self) -> None:
         if self._agent is not None:
@@ -65,10 +69,11 @@ class PostgresDeepAgentRunner:
             interrupt_on=interrupt_on,
             checkpointer=checkpointer,
         )
-        self._agent = LangGraphAgent(
+        self._agent = AgentHubLangGraphAgent(
             name="agent-hub",
             graph=graph,
             config={"recursion_limit": self._settings.agent_recursion_limit},
+            emit_interrupt_outcome=True,
         )
         self._stack = stack
 
@@ -85,9 +90,13 @@ class PostgresDeepAgentRunner:
         async for event in request_agent.run(input_data):
             yield event
 
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
         await self.open()
         assert self._agent is not None
         state = await self._agent.graph.aget_state({"configurable": {"thread_id": thread_id}})
         messages = state.values.get("messages", [])
-        return tuple(langchain_messages_to_agui(messages))
+        interrupts = [interrupt for task in state.tasks for interrupt in (task.interrupts or ())]
+        return AgentThreadState(
+            messages=tuple(langchain_messages_to_agui(messages)),
+            interrupts=tuple(map_langchain_interrupts(interrupts, messages)),
+        )

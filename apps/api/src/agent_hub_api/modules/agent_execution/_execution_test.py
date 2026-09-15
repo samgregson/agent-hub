@@ -1,10 +1,12 @@
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncGenerator, AsyncIterator
+from typing import cast
 
 import pytest
 from ag_ui.core import (
     BaseEvent,
     Interrupt,
-    Message,
+    ResumeEntry,
     RunAgentInput,
     RunErrorEvent,
     RunFinishedEvent,
@@ -14,8 +16,11 @@ from ag_ui.core import (
 )
 
 from agent_hub_api.modules.agent_execution import (
+    AgentRunAlreadyActive,
     AgentRunStatus,
+    AgentThreadState,
     DuplicateAgentRun,
+    InvalidAgentRunResume,
     create_memory_agent_execution,
 )
 
@@ -34,9 +39,9 @@ def input_for(thread_id: str, run_id: str) -> RunAgentInput:
 
 
 class DeterministicRunner:
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
         del thread_id
-        return ()
+        return AgentThreadState(messages=(), interrupts=())
 
     async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
@@ -45,9 +50,9 @@ class DeterministicRunner:
 
 
 class FailingRunner:
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
         del thread_id
-        return ()
+        return AgentThreadState(messages=(), interrupts=())
 
     async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
@@ -55,9 +60,9 @@ class FailingRunner:
 
 
 class InterruptingRunner:
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
         del thread_id
-        return ()
+        return AgentThreadState(messages=(), interrupts=())
 
     async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
@@ -71,13 +76,52 @@ class InterruptingRunner:
 
 
 class ErrorEventRunner:
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
         del thread_id
-        return ()
+        return AgentThreadState(messages=(), interrupts=())
 
     async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunErrorEvent(message="model overloaded", code="MODEL_OVERLOADED")
+
+
+class CancelledRunner:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
+        del thread_id
+        return AgentThreadState(messages=(), interrupts=())
+
+    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+        yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+        raise asyncio.CancelledError
+
+
+class HangingRunner:
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
+        del thread_id
+        return AgentThreadState(messages=(), interrupts=())
+
+    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+        yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+        await asyncio.Event().wait()
+
+
+class ResumableRunner:
+    def __init__(self) -> None:
+        self.pending = True
+        self.run_count = 0
+
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
+        del thread_id
+        return AgentThreadState(
+            messages=(),
+            interrupts=((Interrupt(id="approval-1", reason="tool_call"),) if self.pending else ()),
+        )
+
+    async def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]:
+        self.run_count += 1
+        self.pending = False
+        yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+        yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
 
 
 @pytest.mark.asyncio
@@ -110,6 +154,16 @@ async def test_duplicate_run_id_is_rejected() -> None:
 
     with pytest.raises(DuplicateAgentRun):
         await execution.start(input_data, request_id="request-2")
+
+
+@pytest.mark.asyncio
+async def test_only_one_run_can_be_active_for_a_thread() -> None:
+    execution = create_memory_agent_execution(DeterministicRunner())
+
+    _ = await execution.start(input_for("a", "run-1"), request_id="request-1")
+
+    with pytest.raises(AgentRunAlreadyActive):
+        await execution.start(input_for("a", "run-2"), request_id="request-2")
 
 
 @pytest.mark.asyncio
@@ -166,3 +220,82 @@ async def test_error_event_persists_the_shared_error_contract() -> None:
         "retryable": True,
         "details": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stream_updates_run_status() -> None:
+    execution = create_memory_agent_execution(CancelledRunner())
+
+    with pytest.raises(asyncio.CancelledError):
+        _ = [
+            event
+            async for event in await execution.start(
+                input_for("a", "run-1"), request_id="request-1"
+            )
+        ]
+
+    run = (await execution.list_runs("a"))[0]
+    assert run.status is AgentRunStatus.CANCELLED
+    assert run.error is None
+
+
+@pytest.mark.asyncio
+async def test_closing_a_dropped_stream_updates_run_status() -> None:
+    execution = create_memory_agent_execution(HangingRunner())
+    stream = cast(
+        AsyncGenerator[BaseEvent, None],
+        await execution.start(input_for("a", "run-1"), request_id="request-1"),
+    )
+
+    _ = await anext(stream)
+    await stream.aclose()
+
+    run = (await execution.list_runs("a"))[0]
+    assert run.status is AgentRunStatus.CANCELLED
+
+
+@pytest.mark.asyncio
+async def test_resume_must_answer_current_interrupts_and_cannot_be_replayed() -> None:
+    runner = ResumableRunner()
+    execution = create_memory_agent_execution(runner)
+    resume = [
+        ResumeEntry(
+            interrupt_id="approval-1",
+            status="resolved",
+            payload={"approved": True},
+        )
+    ]
+    first_input = input_for("a", "resume-1").model_copy(update={"resume": resume})
+
+    _ = [event async for event in await execution.start(first_input, request_id="request-1")]
+
+    replay_input = input_for("a", "resume-2").model_copy(update={"resume": resume})
+    with pytest.raises(InvalidAgentRunResume):
+        await execution.start(replay_input, request_id="request-2")
+    assert runner.run_count == 1
+
+
+@pytest.mark.asyncio
+async def test_restart_reconciles_non_terminal_runs_but_preserves_interrupts() -> None:
+    running_execution = create_memory_agent_execution(DeterministicRunner())
+    _ = await running_execution.start(input_for("a", "running-run"), request_id="running-request")
+
+    assert await running_execution.reconcile_non_terminal() == 1
+
+    reconciled = (await running_execution.list_runs("a"))[0]
+    assert reconciled.status is AgentRunStatus.FAILED
+    assert reconciled.error is not None
+    assert reconciled.error.code == "RUN_ABANDONED_ON_RESTART"
+    assert reconciled.error.request_id.root == "running-request"
+
+    interrupted_execution = create_memory_agent_execution(InterruptingRunner())
+    _ = [
+        event
+        async for event in await interrupted_execution.start(
+            input_for("b", "interrupted-run"), request_id="interrupted-request"
+        )
+    ]
+
+    assert await interrupted_execution.reconcile_non_terminal() == 0
+    interrupted = (await interrupted_execution.list_runs("b"))[0]
+    assert interrupted.status is AgentRunStatus.INTERRUPTED

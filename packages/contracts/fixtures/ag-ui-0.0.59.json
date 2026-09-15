@@ -1,0 +1,82 @@
+{
+  "events": [
+    {
+      "type": "RUN_STARTED",
+      "threadId": "thread-fixture",
+      "runId": "run-fixture"
+    },
+    {
+      "type": "TOOL_CALL_START",
+      "toolCallId": "tool-fixture",
+      "toolCallName": "foundation_protected_action",
+      "parentMessageId": "assistant-fixture"
+    },
+    {
+      "type": "TOOL_CALL_ARGS",
+      "toolCallId": "tool-fixture",
+      "delta": "{\"note\":\"fixture\"}"
+    },
+    {
+      "type": "TOOL_CALL_END",
+      "toolCallId": "tool-fixture"
+    },
+    {
+      "type": "STATE_SNAPSHOT",
+      "snapshot": {
+        "phase": "approval"
+      }
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread-fixture",
+      "runId": "run-fixture",
+      "outcome": {
+        "type": "interrupt",
+        "interrupts": [
+          {
+            "id": "interrupt-fixture",
+            "reason": "tool_call",
+            "message": "Approve the fixture action?",
+            "toolCallId": "tool-fixture"
+          }
+        ]
+      }
+    },
+    {
+      "type": "TOOL_CALL_RESULT",
+      "messageId": "tool-message-fixture",
+      "toolCallId": "tool-fixture",
+      "content": "Approved foundation action: fixture"
+    },
+    {
+      "type": "RUN_ERROR",
+      "message": "fixture failure",
+      "code": "FIXTURE_FAILURE"
+    },
+    {
+      "type": "RUN_FINISHED",
+      "threadId": "thread-fixture",
+      "runId": "resume-run-fixture",
+      "outcome": {
+        "type": "success"
+      }
+    }
+  ],
+  "resumeInput": {
+    "threadId": "thread-fixture",
+    "runId": "resume-run-fixture",
+    "messages": [],
+    "tools": [],
+    "context": [],
+    "forwardedProps": {},
+    "resume": [
+      {
+        "interruptId": "interrupt-fixture",
+        "status": "resolved",
+        "payload": {
+          "approved": true
+        }
+      }
+    ]
+  }
+}

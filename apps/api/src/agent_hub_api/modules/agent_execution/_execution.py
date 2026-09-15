@@ -1,10 +1,11 @@
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol
 
-from ag_ui.core import BaseEvent, Message, RunAgentInput, RunErrorEvent, RunFinishedEvent
+from ag_ui.core import BaseEvent, Interrupt, Message, RunAgentInput, RunErrorEvent, RunFinishedEvent
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -14,8 +15,11 @@ from agent_hub_api.settings import Settings
 
 
 class AgentRunStatus(StrEnum):
+    QUEUED = "queued"
     RUNNING = "running"
     INTERRUPTED = "interrupted"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 
@@ -24,28 +28,51 @@ class AgentRunStatus(StrEnum):
 class AgentRun:
     id: str
     thread_id: str
+    request_id: str
     status: AgentRunStatus
     created_at: datetime
     updated_at: datetime
     error: ErrorEnvelope | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AgentThreadState:
+    messages: tuple[Message, ...]
+    interrupts: tuple[Interrupt, ...]
+
+
 class DuplicateAgentRun(Exception):
     """The client supplied a Run ID which already belongs to a durable Run."""
+
+
+class AgentRunAlreadyActive(Exception):
+    """Another Run is already active for the Thread."""
+
+
+class InvalidAgentRunResume(Exception):
+    """Resume entries do not exactly answer the Thread's pending interrupts."""
+
+
+class CreateAgentRunResult(StrEnum):
+    CREATED = "created"
+    DUPLICATE = "duplicate"
+    THREAD_ACTIVE = "thread_active"
 
 
 class AgentRunner(Protocol):
     def run(self, input_data: RunAgentInput) -> AsyncIterator[BaseEvent]: ...
 
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]: ...
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState: ...
 
 
 class AgentRunStore(Protocol):
-    async def create(self, run: AgentRun) -> bool: ...
+    async def create(self, run: AgentRun) -> CreateAgentRunResult: ...
 
     async def update(self, run: AgentRun) -> None: ...
 
     async def list(self, thread_id: str) -> tuple[AgentRun, ...]: ...
+
+    async def reconcile_non_terminal(self, *, now: datetime) -> int: ...
 
 
 class AgentExecutionModule:
@@ -58,16 +85,26 @@ class AgentExecutionModule:
     async def start(
         self, input_data: RunAgentInput, *, request_id: str
     ) -> AsyncIterator[BaseEvent]:
+        if input_data.resume:
+            thread_state = await self._runner.load_thread_state(input_data.thread_id)
+            expected = {interrupt.id for interrupt in thread_state.interrupts}
+            supplied = [entry.interrupt_id for entry in input_data.resume]
+            if len(supplied) != len(set(supplied)) or set(supplied) != expected:
+                raise InvalidAgentRunResume
         now = datetime.now(UTC)
         run = AgentRun(
             id=input_data.run_id,
             thread_id=input_data.thread_id,
+            request_id=request_id,
             status=AgentRunStatus.RUNNING,
             created_at=now,
             updated_at=now,
         )
-        if not await self._store.create(run):
+        create_result = await self._store.create(run)
+        if create_result is CreateAgentRunResult.DUPLICATE:
             raise DuplicateAgentRun
+        if create_result is CreateAgentRunResult.THREAD_ACTIVE:
+            raise AgentRunAlreadyActive
         return self._stream(run, input_data, request_id)
 
     async def _stream(
@@ -92,6 +129,9 @@ class AgentExecutionModule:
                     if getattr(outcome, "type", None) == "interrupt":
                         terminal_status = AgentRunStatus.INTERRUPTED
                 yield event
+        except (asyncio.CancelledError, GeneratorExit):
+            await self._persist_cancelled(run)
+            raise
         except Exception as error:
             failed = replace(
                 run,
@@ -118,22 +158,47 @@ class AgentExecutionModule:
                 )
             )
 
+    async def _persist_cancelled(self, run: AgentRun) -> None:
+        update = asyncio.create_task(
+            self._store.update(
+                replace(
+                    run,
+                    status=AgentRunStatus.CANCELLED,
+                    updated_at=datetime.now(UTC),
+                )
+            )
+        )
+        try:
+            await asyncio.shield(update)
+        except asyncio.CancelledError:
+            await update
+
+    async def reconcile_non_terminal(self) -> int:
+        return await self._store.reconcile_non_terminal(now=datetime.now(UTC))
+
     async def list_runs(self, thread_id: str) -> tuple[AgentRun, ...]:
         return await self._store.list(thread_id)
 
-    async def load_messages(self, thread_id: str) -> tuple[Message, ...]:
-        return await self._runner.load_messages(thread_id)
+    async def load_thread_state(self, thread_id: str) -> AgentThreadState:
+        return await self._runner.load_thread_state(thread_id)
 
 
 class MemoryAgentRunStore:
     def __init__(self) -> None:
         self._runs: dict[str, AgentRun] = {}
 
-    async def create(self, run: AgentRun) -> bool:
+    async def create(self, run: AgentRun) -> CreateAgentRunResult:
         if run.id in self._runs:
-            return False
+            return CreateAgentRunResult.DUPLICATE
+        if any(
+            existing.thread_id == run.thread_id
+            and existing.status
+            in {AgentRunStatus.QUEUED, AgentRunStatus.RUNNING, AgentRunStatus.CANCELLING}
+            for existing in self._runs.values()
+        ):
+            return CreateAgentRunResult.THREAD_ACTIVE
         self._runs[run.id] = run
-        return True
+        return CreateAgentRunResult.CREATED
 
     async def update(self, run: AgentRun) -> None:
         self._runs[run.id] = run
@@ -141,6 +206,22 @@ class MemoryAgentRunStore:
     async def list(self, thread_id: str) -> tuple[AgentRun, ...]:
         runs = (run for run in self._runs.values() if run.thread_id == thread_id)
         return tuple(sorted(runs, key=lambda run: run.updated_at, reverse=True))
+
+    async def reconcile_non_terminal(self, *, now: datetime) -> int:
+        count = 0
+        for run_id, run in tuple(self._runs.items()):
+            if run.status is AgentRunStatus.CANCELLING:
+                self._runs[run_id] = replace(run, status=AgentRunStatus.CANCELLED, updated_at=now)
+                count += 1
+            elif run.status in {AgentRunStatus.QUEUED, AgentRunStatus.RUNNING}:
+                self._runs[run_id] = replace(
+                    run,
+                    status=AgentRunStatus.FAILED,
+                    updated_at=now,
+                    error=_restart_error(run),
+                )
+                count += 1
+        return count
 
 
 class PostgresAgentRunStore:
@@ -160,27 +241,36 @@ class PostgresAgentRunStore:
             return None
         return Jsonb(error.model_dump(mode="json", by_alias=True))
 
-    async def create(self, run: AgentRun) -> bool:
+    async def create(self, run: AgentRun) -> CreateAgentRunResult:
         connection = await self._connect()
         async with connection:
             cursor = await connection.execute(
                 """
                 INSERT INTO agent_runs
-                    (id, thread_id, status, created_at, updated_at, error)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
+                    (id, thread_id, request_id, status, created_at, updated_at, error)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
                 RETURNING id
                 """,
                 (
                     run.id,
                     run.thread_id,
+                    run.request_id,
                     run.status.value,
                     run.created_at,
                     run.updated_at,
                     self._serialized_error(run.error),
                 ),
             )
-            return await cursor.fetchone() is not None
+            if await cursor.fetchone() is not None:
+                return CreateAgentRunResult.CREATED
+            duplicate = await connection.execute(
+                "SELECT 1 FROM agent_runs WHERE id = %s",
+                (run.id,),
+            )
+            if await duplicate.fetchone() is not None:
+                return CreateAgentRunResult.DUPLICATE
+            return CreateAgentRunResult.THREAD_ACTIVE
 
     async def update(self, run: AgentRun) -> None:
         connection = await self._connect()
@@ -204,7 +294,7 @@ class PostgresAgentRunStore:
         async with connection:
             cursor = await connection.execute(
                 """
-                SELECT id, thread_id, status, created_at, updated_at, error
+                SELECT id, thread_id, request_id, status, created_at, updated_at, error
                 FROM agent_runs
                 WHERE thread_id = %s
                 ORDER BY updated_at DESC, id
@@ -215,6 +305,7 @@ class PostgresAgentRunStore:
                 AgentRun(
                     id=str(row["id"]),
                     thread_id=str(row["thread_id"]),
+                    request_id=str(row["request_id"]),
                     status=AgentRunStatus(str(row["status"])),
                     created_at=row["created_at"],  # type: ignore[arg-type]
                     updated_at=row["updated_at"],  # type: ignore[arg-type]
@@ -224,6 +315,44 @@ class PostgresAgentRunStore:
                 )
                 for row in await cursor.fetchall()
             )
+
+    async def reconcile_non_terminal(self, *, now: datetime) -> int:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                UPDATE agent_runs
+                SET status = CASE
+                        WHEN status = 'cancelling' THEN 'cancelled'
+                        ELSE 'failed'
+                    END,
+                    updated_at = %s,
+                    error = CASE
+                        WHEN status = 'cancelling' THEN NULL
+                        ELSE json_build_object(
+                            'code', 'RUN_ABANDONED_ON_RESTART',
+                            'message', 'The API restarted before the Run reached a terminal state.',
+                            'requestId', request_id,
+                            'retryable', true,
+                            'details', NULL
+                        )
+                    END
+                WHERE status IN ('queued', 'running', 'cancelling')
+                """,
+                (now,),
+            )
+            return cursor.rowcount
+
+
+def _restart_error(run: AgentRun) -> ErrorEnvelope:
+    return ErrorEnvelope.model_validate(
+        {
+            "code": "RUN_ABANDONED_ON_RESTART",
+            "message": "The API restarted before the Run reached a terminal state.",
+            "requestId": run.request_id,
+            "retryable": True,
+        }
+    )
 
 
 def create_memory_agent_execution(runner: AgentRunner) -> AgentExecutionModule:

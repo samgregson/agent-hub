@@ -23,6 +23,7 @@ export async function forwardBackendRequest(
     duplex: "half",
     headers,
     method: request.method,
+    signal: request.signal,
   } as RequestInit & { duplex: "half" });
 
   const responseHeaders = new Headers();

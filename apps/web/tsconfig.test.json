@@ -6,11 +6,14 @@
     "moduleResolution": "nodenext",
     "noEmit": false,
     "outDir": ".test-build",
-    "rootDir": "src/modules/workspace",
+    "rootDir": "src/modules",
     "types": ["node"]
   },
   "include": [
     "src/modules/workspace/_state.ts",
-    "src/modules/workspace/_state.test.ts"
+    "src/modules/workspace/_state.test.ts",
+    "src/modules/agent-ui/_history.ts",
+    "src/modules/agent-ui/_history.test.ts",
+    "src/modules/agent-ui/_ag-ui-contract.test.ts"
   ]
 }
