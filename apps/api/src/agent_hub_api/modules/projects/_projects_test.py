@@ -94,3 +94,55 @@ async def test_threads_are_scoped_to_their_project_and_subject() -> None:
     assert created.json()["projectId"] == first["id"]
     assert wrong_project.status_code == 404
     assert guessed.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_thread_can_be_renamed_with_the_same_title_rules_as_creation() -> None:
+    projects = create_memory_project_module()
+
+    async with client_for("subject-a", projects) as client:
+        project = (await client.post("/api/projects", json={"name": "Bridge study"})).json()
+        created = await client.post(
+            f"/api/projects/{project['id']}/threads", json={"title": "Initial title"}
+        )
+        thread_id = created.json()["id"]
+        renamed = await client.patch(
+            f"/api/projects/{project['id']}/threads/{thread_id}",
+            json={"title": "  Load combinations  "},
+        )
+        blank = await client.patch(
+            f"/api/projects/{project['id']}/threads/{thread_id}", json={"title": "   "}
+        )
+        too_long = await client.patch(
+            f"/api/projects/{project['id']}/threads/{thread_id}", json={"title": "x" * 161}
+        )
+
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Load combinations"
+    assert blank.status_code == 422
+    assert too_long.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_thread_delete_is_scoped_and_makes_the_thread_unavailable() -> None:
+    projects = create_memory_project_module()
+
+    async with client_for("subject-a", projects) as alice:
+        project = (await alice.post("/api/projects", json={"name": "Bridge study"})).json()
+        created = await alice.post(
+            f"/api/projects/{project['id']}/threads", json={"title": "Load combinations"}
+        )
+        thread_id = created.json()["id"]
+
+    async with client_for("subject-b", projects) as bob:
+        guessed = await bob.delete(f"/api/projects/{project['id']}/threads/{thread_id}")
+
+    async with client_for("subject-a", projects) as alice:
+        deleted = await alice.delete(f"/api/projects/{project['id']}/threads/{thread_id}")
+        loaded = await alice.get(f"/api/projects/{project['id']}/threads/{thread_id}")
+        deleted_again = await alice.delete(f"/api/projects/{project['id']}/threads/{thread_id}")
+
+    assert guessed.status_code == 404
+    assert deleted.status_code == 204
+    assert loaded.status_code == 404
+    assert deleted_again.status_code == 404

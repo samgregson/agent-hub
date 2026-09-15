@@ -54,6 +54,18 @@ class ThreadCreateRequest(BaseModel):
         return normalized
 
 
+class ThreadRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, title: str) -> str:
+        normalized = title.strip()
+        if not normalized:
+            raise ValueError("Thread title cannot be blank")
+        return normalized
+
+
 class ThreadResponse(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
@@ -158,6 +170,32 @@ def create_project_router(
             return _thread_response(
                 await projects.load_thread(project_access(context), project_id, thread_id)
             )
+        except ThreadNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Thread not found",
+            ) from error
+
+    @router.patch("/{project_id}/threads/{thread_id}", response_model=ThreadResponse)
+    async def rename_thread(
+        project_id: str, thread_id: str, body: ThreadRenameRequest, context: Context
+    ) -> ThreadResponse:
+        try:
+            return _thread_response(
+                await projects.rename_thread(
+                    project_access(context), project_id, thread_id, body.title
+                )
+            )
+        except ThreadNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Thread not found",
+            ) from error
+
+    @router.delete("/{project_id}/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_thread(project_id: str, thread_id: str, context: Context) -> None:
+        try:
+            await projects.delete_thread(project_access(context), project_id, thread_id)
         except ThreadNotFound as error:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

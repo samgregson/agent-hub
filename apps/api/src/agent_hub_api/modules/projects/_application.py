@@ -55,6 +55,12 @@ class ProjectStore(Protocol):
 
     async def load_thread(self, subject: str, project_id: str, thread_id: str) -> Thread | None: ...
 
+    async def rename_thread(
+        self, subject: str, project_id: str, thread_id: str, title: str, updated_at: datetime
+    ) -> Thread | None: ...
+
+    async def delete_thread(self, subject: str, project_id: str, thread_id: str) -> bool: ...
+
 
 class ProjectModule:
     """Own Project creation and identity-scoped discovery."""
@@ -117,6 +123,29 @@ class ProjectModule:
             raise ThreadNotFound
         return thread
 
+    async def rename_thread(
+        self, access: ProjectAccess, project_id: str, thread_id: str, title: str
+    ) -> Thread:
+        normalized_title = title.strip()
+        if not normalized_title or len(normalized_title) > 160:
+            raise ValueError("Thread title must contain between 1 and 160 characters")
+
+        thread = await self._store.rename_thread(
+            access.subject,
+            project_id,
+            thread_id,
+            normalized_title,
+            datetime.now(UTC),
+        )
+        if thread is None:
+            raise ThreadNotFound
+        return thread
+
+    async def delete_thread(self, access: ProjectAccess, project_id: str, thread_id: str) -> None:
+        deleted = await self._store.delete_thread(access.subject, project_id, thread_id)
+        if not deleted:
+            raise ThreadNotFound
+
 
 class MemoryProjectStore:
     def __init__(self) -> None:
@@ -157,6 +186,28 @@ class MemoryProjectStore:
         if thread.project_id != project_id:
             return None
         return thread
+
+    async def rename_thread(
+        self, subject: str, project_id: str, thread_id: str, title: str, updated_at: datetime
+    ) -> Thread | None:
+        thread = await self.load_thread(subject, project_id, thread_id)
+        if thread is None:
+            return None
+        renamed = Thread(
+            id=thread.id,
+            project_id=thread.project_id,
+            title=title,
+            created_at=thread.created_at,
+            updated_at=updated_at,
+        )
+        self._threads[thread_id] = (subject, renamed)
+        return renamed
+
+    async def delete_thread(self, subject: str, project_id: str, thread_id: str) -> bool:
+        if await self.load_thread(subject, project_id, thread_id) is None:
+            return False
+        del self._threads[thread_id]
+        return True
 
 
 class PostgresProjectStore:
@@ -283,6 +334,45 @@ class PostgresProjectStore:
             )
             row = await cursor.fetchone()
             return None if row is None else Thread(**row)  # type: ignore[arg-type]
+
+    async def rename_thread(
+        self, subject: str, project_id: str, thread_id: str, title: str, updated_at: datetime
+    ) -> Thread | None:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                UPDATE threads
+                SET title = %s, updated_at = %s
+                FROM projects
+                WHERE threads.id = %s
+                  AND threads.project_id = %s
+                  AND projects.id = threads.project_id
+                  AND projects.owner_subject = %s
+                RETURNING threads.id, threads.project_id, threads.title,
+                          threads.created_at, threads.updated_at
+                """,
+                (title, updated_at, thread_id, project_id, subject),
+            )
+            row = await cursor.fetchone()
+            return None if row is None else Thread(**row)  # type: ignore[arg-type]
+
+    async def delete_thread(self, subject: str, project_id: str, thread_id: str) -> bool:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                DELETE FROM threads
+                USING projects
+                WHERE threads.id = %s
+                  AND threads.project_id = %s
+                  AND projects.id = threads.project_id
+                  AND projects.owner_subject = %s
+                RETURNING threads.id
+                """,
+                (thread_id, project_id, subject),
+            )
+            return await cursor.fetchone() is not None
 
 
 def create_memory_project_module() -> ProjectModule:
