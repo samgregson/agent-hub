@@ -254,7 +254,12 @@ export function ProjectWorkspace() {
             ))}
           </select>
         </label>
-        <form className={styles.createProject} onSubmit={handleCreateProject}>
+        <form
+          action="/api/projects"
+          className={styles.createProject}
+          method="post"
+          onSubmit={handleCreateProject}
+        >
           <input
             aria-label="New Project name"
             maxLength={120}
