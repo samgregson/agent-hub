@@ -5,6 +5,7 @@ from typing import Any
 from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
 from deepagents import create_deep_agent
+from deepagents.middleware.filesystem import FilesystemPermission
 from langchain.agents.middleware import InterruptOnConfig
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
@@ -30,6 +31,11 @@ from agent_hub_api.settings import Settings
 def foundation_protected_action(note: str) -> str:
     """Echo a note after human approval to verify the interrupt transport."""
     return f"Approved foundation action: {note}"
+
+
+def _project_file_permissions() -> list[FilesystemPermission]:
+    """Require an explicit decision before a Deep Agents file tool mutates a Project."""
+    return [FilesystemPermission(operations=["write"], paths=["/project/**"], mode="interrupt")]
 
 
 class PostgresDeepAgentRunner:
@@ -91,11 +97,13 @@ class PostgresDeepAgentRunner:
             tools=tools,
             system_prompt=(
                 "Use /project for durable files shared by every Thread in the selected "
-                "Project and /scratch for Thread-local working files. Never claim access "
+                "Project and /scratch for Thread-local working files. Project file writes "
+                "require user approval before they are persisted. Never claim access "
                 "to the host filesystem. When referring to a virtual file in a response, "
                 "link it as Markdown using its absolute /project or /scratch path."
             ),
             interrupt_on=interrupt_on,
+            permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),
             checkpointer=self._checkpointer,
         )
