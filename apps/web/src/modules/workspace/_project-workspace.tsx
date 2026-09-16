@@ -227,7 +227,6 @@ export function ProjectWorkspace() {
 
   function handleSelectActivity(activity: ActivityView) {
     dispatch({ activity, type: "selectActivity" });
-    setIsMobileNavigationOpen(false);
   }
 
   async function handleFirstUserMessage(message: string) {
@@ -274,40 +273,42 @@ export function ProjectWorkspace() {
           onClick={() => setIsMobileNavigationOpen(true)}
           type="button"
         >
-          Navigation
+          ☰ Navigation
         </button>
-        <label className={styles.projectPicker}>
-          <span className={styles.srOnly}>Selected Project</span>
-          <select
-            onChange={(event) =>
-              dispatch({
-                projectId: event.target.value || null,
-                type: "selectProject",
-              })
-            }
-            value={workspace.selectedProjectId ?? ""}
-          >
-            <option value="">No Project selected</option>
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <form className={styles.createProject} onSubmit={handleCreateProject}>
-          <input
-            aria-label="New Project name"
-            disabled={!isInteractive}
-            maxLength={120}
-            name="name"
-            placeholder="New Project"
-            required
-          />
-          <button disabled={!isInteractive || isCreating} type="submit">
-            {isCreating ? "Creating…" : "Create"}
-          </button>
-        </form>
+        <div className={styles.projectControls}>
+          <label className={styles.projectPicker}>
+            <span className={styles.srOnly}>Selected Project</span>
+            <select
+              onChange={(event) =>
+                dispatch({
+                  projectId: event.target.value || null,
+                  type: "selectProject",
+                })
+              }
+              value={workspace.selectedProjectId ?? ""}
+            >
+              <option value="">No Project selected</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <form className={styles.createProject} onSubmit={handleCreateProject}>
+            <input
+              aria-label="New Project name"
+              disabled={!isInteractive}
+              maxLength={120}
+              name="name"
+              placeholder="New Project"
+              required
+            />
+            <button disabled={!isInteractive || isCreating} type="submit">
+              {isCreating ? "Creating…" : "Create"}
+            </button>
+          </form>
+        </div>
         <span className={styles.foundation}>
           Foundation · Project workspace
         </span>

@@ -96,7 +96,7 @@ test.describe("at phone width", () => {
     ).toBeVisible();
 
     await drawer.getByRole("button", { name: "Artifacts" }).click();
-    await expect(drawer).toBeHidden();
+    await expect(drawer).toBeVisible();
     await expect(
       page.getByText("Artifacts will appear in this Project workspace."),
     ).toBeVisible();
