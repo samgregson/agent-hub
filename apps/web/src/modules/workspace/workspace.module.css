@@ -74,6 +74,12 @@
   text-transform: uppercase;
 }
 
+.mobileNavigationToggle,
+.mobileNavigationDrawer,
+.mobileNavigationBackdrop {
+  display: none;
+}
+
 .rail {
   grid-area: rail;
   display: flex;
@@ -226,14 +232,94 @@
 
 @media (max-width: 1024px) {
   .shell {
-    grid-template-areas: "title title" "rail chat";
-    grid-template-columns: 54px 1fr;
+    grid-template-areas: "title" "chat";
+    grid-template-columns: minmax(0, 1fr);
   }
 
+  .rail,
   .navigator,
   .artifact,
   .foundation {
     display: none;
+  }
+
+  .mobileNavigationToggle {
+    display: inline-flex;
+    height: 30px;
+    flex: 0 0 auto;
+    align-items: center;
+    border: 1px solid #3b3933;
+    border-radius: 7px;
+    background: #22221e;
+    color: #d7d4cb;
+    font-size: 12px;
+  }
+
+  .mobileNavigationBackdrop {
+    display: block;
+    position: fixed;
+    z-index: 10;
+    inset: 0;
+    border: 0;
+    background: rgb(0 0 0 / 55%);
+  }
+
+  .mobileNavigationDrawer {
+    display: block;
+    position: fixed;
+    z-index: 11;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(340px, calc(100vw - 32px));
+    overflow-y: auto;
+    border-right: 1px solid #302f2a;
+    background: #171714;
+    box-shadow: 12px 0 32px rgb(0 0 0 / 30%);
+  }
+
+  .mobileNavigationHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 52px;
+    padding: 0 14px;
+    border-bottom: 1px solid #302f2a;
+  }
+
+  .mobileNavigationClose {
+    border: 0;
+    background: transparent;
+    color: #d7d4cb;
+    font-size: 12px;
+  }
+
+  .mobileViewList {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    padding: 14px;
+    border-bottom: 1px solid #302f2a;
+  }
+
+  .mobileViewButton {
+    min-height: 38px;
+    border: 1px solid #35342f;
+    border-radius: 8px;
+    background: transparent;
+    color: #aaa69d;
+    font-size: 12px;
+    text-align: left;
+  }
+
+  .mobileViewButton[aria-pressed="true"] {
+    border-color: #e9ff70;
+    background: #25271d;
+    color: #e9ff70;
+  }
+
+  .mobileNavigatorContent {
+    padding: 20px;
   }
 
   .createProject input {

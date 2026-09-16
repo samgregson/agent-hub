@@ -30,6 +30,7 @@ import {
   initialThreadTitle,
 } from "./_thread-title";
 import {
+  type ActivityView,
   activityViews,
   createWorkspaceState,
   workspaceReducer,
@@ -70,6 +71,7 @@ export function ProjectWorkspace() {
     serverIsInteractive,
   );
   const [isCreating, setIsCreating] = useState(false);
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [autoNamingThreadIds, setAutoNamingThreadIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -223,6 +225,11 @@ export function ProjectWorkspace() {
     }
   }
 
+  function handleSelectActivity(activity: ActivityView) {
+    dispatch({ activity, type: "selectActivity" });
+    setIsMobileNavigationOpen(false);
+  }
+
   async function handleFirstUserMessage(message: string) {
     if (
       !selectedProject ||
@@ -259,6 +266,16 @@ export function ProjectWorkspace() {
         <span aria-hidden="true" className={styles.mark}>
           A
         </span>
+        <button
+          aria-controls="mobile-project-navigation"
+          aria-expanded={isMobileNavigationOpen}
+          aria-label="Open Project navigation"
+          className={styles.mobileNavigationToggle}
+          onClick={() => setIsMobileNavigationOpen(true)}
+          type="button"
+        >
+          Navigation
+        </button>
         <label className={styles.projectPicker}>
           <span className={styles.srOnly}>Selected Project</span>
           <select
@@ -314,52 +331,77 @@ export function ProjectWorkspace() {
       </nav>
 
       <aside className={styles.navigator}>
-        <strong>{activityLabels[selectedActivity]}</strong>
-        {selectedActivity === "chats" && selectedProject ? (
-          <>
-            <button
-              className={styles.newThread}
-              onClick={handleCreateThread}
-              type="button"
-            >
-              + New Thread
-            </button>
-            <div className={styles.threadList}>
-              {selectedThreads.map((thread) => (
-                <div className={styles.threadRow} key={thread.id}>
-                  <button
-                    aria-pressed={selectedThread?.id === thread.id}
-                    className={styles.threadButton}
-                    onClick={() =>
-                      dispatch({ threadId: thread.id, type: "selectThread" })
-                    }
-                    type="button"
-                  >
-                    {thread.title}
-                  </button>
-                  <Menu label={`${thread.title} actions`}>
-                    <MenuItem onSelect={() => void handleRenameThread(thread)}>
-                      Rename
-                    </MenuItem>
-                    <MenuItem
-                      destructive
-                      onSelect={() => void handleDeleteThread(thread)}
-                    >
-                      Delete
-                    </MenuItem>
-                  </Menu>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <p>
-            {selectedProject
-              ? `${activityLabels[selectedActivity]} in ${selectedProject.name}`
-              : "Create or select a Project to begin."}
-          </p>
-        )}
+        <ProjectNavigator
+          onCreateThread={() => void handleCreateThread()}
+          onDeleteThread={(thread) => void handleDeleteThread(thread)}
+          onRenameThread={(thread) => void handleRenameThread(thread)}
+          onSelectThread={(threadId) =>
+            dispatch({ threadId, type: "selectThread" })
+          }
+          project={selectedProject}
+          selectedActivity={selectedActivity}
+          selectedThreadId={selectedThread?.id}
+          threads={selectedThreads}
+        />
       </aside>
+
+      {isMobileNavigationOpen ? (
+        <>
+          <button
+            aria-label="Close Project navigation"
+            className={styles.mobileNavigationBackdrop}
+            onClick={() => setIsMobileNavigationOpen(false)}
+            type="button"
+          />
+          <aside
+            aria-label="Project navigation"
+            className={styles.mobileNavigationDrawer}
+            id="mobile-project-navigation"
+            role="dialog"
+          >
+            <div className={styles.mobileNavigationHeader}>
+              <strong>Project navigation</strong>
+              <button
+                aria-label="Close Project navigation"
+                className={styles.mobileNavigationClose}
+                onClick={() => setIsMobileNavigationOpen(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <nav aria-label="Project views" className={styles.mobileViewList}>
+              {activityViews.map((view) => (
+                <button
+                  aria-pressed={selectedActivity === view}
+                  className={styles.mobileViewButton}
+                  disabled={!selectedProject}
+                  key={view}
+                  onClick={() => handleSelectActivity(view)}
+                  type="button"
+                >
+                  {activityLabels[view]}
+                </button>
+              ))}
+            </nav>
+            <div className={styles.mobileNavigatorContent}>
+              <ProjectNavigator
+                onCreateThread={() => void handleCreateThread()}
+                onDeleteThread={(thread) => void handleDeleteThread(thread)}
+                onRenameThread={(thread) => void handleRenameThread(thread)}
+                onSelectThread={(threadId) => {
+                  dispatch({ threadId, type: "selectThread" });
+                  setIsMobileNavigationOpen(false);
+                }}
+                project={selectedProject}
+                selectedActivity={selectedActivity}
+                selectedThreadId={selectedThread?.id}
+                threads={selectedThreads}
+              />
+            </div>
+          </aside>
+        </>
+      ) : null}
 
       <section className={styles.chat}>
         {selectedProject && selectedThread && selectedActivity === "chats" ? (
@@ -421,5 +463,72 @@ export function ProjectWorkspace() {
         )}
       </aside>
     </main>
+  );
+}
+
+interface ProjectNavigatorProps {
+  onCreateThread: () => void;
+  onDeleteThread: (thread: Thread) => void;
+  onRenameThread: (thread: Thread) => void;
+  onSelectThread: (threadId: string) => void;
+  project: Project | undefined;
+  selectedActivity: ActivityView;
+  selectedThreadId: string | undefined;
+  threads: Thread[];
+}
+
+function ProjectNavigator({
+  onCreateThread,
+  onDeleteThread,
+  onRenameThread,
+  onSelectThread,
+  project,
+  selectedActivity,
+  selectedThreadId,
+  threads,
+}: ProjectNavigatorProps) {
+  return (
+    <>
+      <strong>{activityLabels[selectedActivity]}</strong>
+      {selectedActivity === "chats" && project ? (
+        <>
+          <button
+            className={styles.newThread}
+            onClick={onCreateThread}
+            type="button"
+          >
+            + New Thread
+          </button>
+          <div className={styles.threadList}>
+            {threads.map((thread) => (
+              <div className={styles.threadRow} key={thread.id}>
+                <button
+                  aria-pressed={selectedThreadId === thread.id}
+                  className={styles.threadButton}
+                  onClick={() => onSelectThread(thread.id)}
+                  type="button"
+                >
+                  {thread.title}
+                </button>
+                <Menu label={`${thread.title} actions`}>
+                  <MenuItem onSelect={() => onRenameThread(thread)}>
+                    Rename
+                  </MenuItem>
+                  <MenuItem destructive onSelect={() => onDeleteThread(thread)}>
+                    Delete
+                  </MenuItem>
+                </Menu>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p>
+          {project
+            ? `${activityLabels[selectedActivity]} in ${project.name}`
+            : "Create or select a Project to begin."}
+        </p>
+      )}
+    </>
   );
 }

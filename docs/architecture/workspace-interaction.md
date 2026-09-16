@@ -137,7 +137,7 @@ Panel sizes and collapse state are presentation preferences. They may be kept lo
 
 Below the usable three-column width, show one primary surface at a time:
 
-- Project navigator becomes a drawer.
+- Project navigator becomes a drawer, opened from an explicit title-bar control. It includes the Chats, Artifacts, Sources, and Plugins controls as well as the selected view's navigator controls, including Thread creation and selection.
 - Chat and Artifact workspace become peer routes/tabs with explicit back navigation.
 - Opening an Artifact moves to the Artifact surface while preserving Thread scroll and draft state.
 - Approvals that block an Agent Run remain reachable from both surfaces.
@@ -154,7 +154,7 @@ Below the usable three-column width, show one primary surface at a time:
 ## Deferred questions
 
 - Exact visual styling, dimensions, icons, animation, and breakpoint values.
-- Detailed small-screen interaction and responsive implementation; the foundation requirement remains one primary surface at a time with preserved workspace state.
+- Artifact focus and the detailed mobile treatment of rich Artifact and Plugin App surfaces.
 - Multiple Artifacts visible simultaneously.
 - Detachable windows or browser tabs.
 - Real-time co-editing and live cross-Thread refresh.

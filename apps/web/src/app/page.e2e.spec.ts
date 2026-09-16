@@ -55,4 +55,50 @@ test.describe("at phone width", () => {
     await expect(page.getByLabel("New Project name")).toBeInViewport();
     await expect(page.getByRole("button", { name: "Create" })).toBeInViewport();
   });
+
+  test("Project navigation exposes Thread and activity controls", async ({
+    page,
+  }) => {
+    const project = {
+      createdAt: "2026-09-16T00:00:00.000Z",
+      id: "project-123",
+      name: "Design review",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    };
+    const thread = {
+      createdAt: "2026-09-16T00:00:00.000Z",
+      id: "thread-123",
+      projectId: project.id,
+      title: "New Thread 1",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    };
+
+    await page.route("**/api/projects", async (route) => {
+      await route.fulfill({ json: [project] });
+    });
+    await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({ json: thread, status: 201 });
+        return;
+      }
+      await route.fulfill({ json: [] });
+    });
+
+    await page.goto("/");
+    await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
+
+    await page.getByRole("button", { name: "Open Project navigation" }).click();
+    const drawer = page.getByRole("dialog", { name: "Project navigation" });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "+ New Thread" }).click();
+    await expect(
+      drawer.getByRole("button", { name: "New Thread 1" }),
+    ).toBeVisible();
+
+    await drawer.getByRole("button", { name: "Artifacts" }).click();
+    await expect(drawer).toBeHidden();
+    await expect(
+      page.getByText("Artifacts will appear in this Project workspace."),
+    ).toBeVisible();
+  });
 });
