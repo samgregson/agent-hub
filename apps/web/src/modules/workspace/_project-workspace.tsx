@@ -1,6 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useReducer, useRef, useState } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
 import { ProjectFilePreview } from "@/modules/project-files";
@@ -35,6 +42,18 @@ const activityLabels = {
   sources: "Sources",
 } as const;
 
+function subscribeToHydration() {
+  return () => {};
+}
+
+function clientIsInteractive() {
+  return true;
+}
+
+function serverIsInteractive() {
+  return false;
+}
+
 export function ProjectWorkspace() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [workspace, dispatch] = useReducer(
@@ -45,6 +64,11 @@ export function ProjectWorkspace() {
   const [threadsByProject, setThreadsByProject] = useState<
     Record<string, Thread[]>
   >({});
+  const isInteractive = useSyncExternalStore(
+    subscribeToHydration,
+    clientIsInteractive,
+    serverIsInteractive,
+  );
   const [isCreating, setIsCreating] = useState(false);
   const [autoNamingThreadIds, setAutoNamingThreadIds] = useState<Set<string>>(
     () => new Set(),
@@ -254,20 +278,16 @@ export function ProjectWorkspace() {
             ))}
           </select>
         </label>
-        <form
-          action="/api/projects"
-          className={styles.createProject}
-          method="post"
-          onSubmit={handleCreateProject}
-        >
+        <form className={styles.createProject} onSubmit={handleCreateProject}>
           <input
             aria-label="New Project name"
+            disabled={!isInteractive}
             maxLength={120}
             name="name"
             placeholder="New Project"
             required
           />
-          <button disabled={isCreating} type="submit">
+          <button disabled={!isInteractive || isCreating} type="submit">
             {isCreating ? "Creating…" : "Create"}
           </button>
         </form>

@@ -26,26 +26,14 @@ test("user can create a Project", async ({ page }) => {
   await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
 });
 
-test("project creation does not fall back to a query navigation", async ({
+test("project creation is unavailable before the workspace hydrates", async ({
   browser,
 }) => {
   const context = await browser.newContext({ javaScriptEnabled: false });
   const page = await context.newPage();
-  let submitted = false;
-
-  await page.route("**/api/projects", async (route) => {
-    submitted = route.request().method() === "POST";
-    await route.fulfill({
-      headers: { location: "/" },
-      status: 303,
-    });
-  });
 
   await page.goto("/");
-  await page.getByLabel("New Project name").fill("Design review");
-  await page.getByRole("button", { name: "Create" }).click();
-
-  await expect.poll(() => submitted).toBe(true);
-  await expect(page).toHaveURL("http://localhost:3001/");
+  await expect(page.getByLabel("New Project name")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Create" })).toBeDisabled();
   await context.close();
 });
