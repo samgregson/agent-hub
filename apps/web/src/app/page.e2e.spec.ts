@@ -102,3 +102,122 @@ test.describe("at phone width", () => {
     ).toBeVisible();
   });
 });
+
+test("approving a tool call resumes through the AG-UI transport contract", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "thread-123",
+    projectId: project.id,
+    title: "New Thread 1",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const resumeRequests: unknown[] = [];
+
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      if (input.resume) {
+        resumeRequests.push(input.resume);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+        return;
+      }
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "tool-123",
+            toolCallName: "write_file",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "tool-123",
+            delta: '{"file_path":"/project/example.md"}',
+          },
+          { type: "TOOL_CALL_END", toolCallId: "tool-123" },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-123",
+                  reason: "tool_call",
+                  toolCallId: "tool-123",
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/agent")) {
+      await route.fallback();
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      await route.fulfill({ json: [project] });
+      return;
+    }
+    if (url.pathname.endsWith("/threads")) {
+      await route.fulfill({ json: [thread] });
+      return;
+    }
+    if (url.pathname.endsWith("/history")) {
+      await route.fulfill({ json: { interrupts: [], messages: [] } });
+      return;
+    }
+    if (url.pathname.endsWith("/runs")) {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message Agent Hub").fill("Create the file");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Approve" }).click();
+
+  await expect.poll(() => resumeRequests).toEqual([
+    [
+      {
+        interruptId: "interrupt-123",
+        payload: { approved: true },
+        status: "resolved",
+      },
+    ],
+  ]);
+});
+
+function sse(events: object[]) {
+  return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+}

@@ -53,6 +53,27 @@ def test_langchain_hitl_interrupt_maps_to_a_bound_ag_ui_tool_gate() -> None:
     assert mapped.message == "Approve the test action?"
 
 
+def test_stream_fallback_resumes_with_langchain_hitl_decisions() -> None:
+    adapter = object.__new__(AgentHubLangGraphAgent)
+    adapter._visible_tool_calls = []
+
+    [mapped] = adapter._interrupts_to_agui([hitl_interrupt()])
+    command = adapter._build_command_from_agui_resume(
+        [
+            ResumeEntry(
+                interrupt_id=mapped.id,
+                status="resolved",
+                payload={"approved": True},
+            )
+        ],
+        open_interrupts=[mapped],
+    )
+
+    assert mapped.metadata is not None
+    assert mapped.metadata["agentHubLangChainHITL"]["rawInterruptId"] == "interrupt-1"
+    assert command.resume == {"decisions": [{"type": "approve"}]}
+
+
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [

@@ -150,7 +150,10 @@ class PostgresDeepAgentRunner:
         files = state.values.get("files")
         if not isinstance(files, dict):
             raise ScratchFileNotFound
-        file_data = files.get(path)
+        # ``CompositeBackend`` routes ``/scratch/...`` to ``StateBackend`` and
+        # stores the route-relative key in LangGraph state (for example,
+        # ``/scratch/dummy.md`` is persisted as ``/dummy.md``).
+        file_data = files.get(_scratch_state_path(path))
         if not isinstance(file_data, dict):
             raise ScratchFileNotFound
         content = file_data.get("content")
@@ -168,3 +171,8 @@ def _is_scratch_file_path(path: str) -> bool:
         and "\x00" not in path
         and ".." not in path.split("/")
     )
+
+
+def _scratch_state_path(path: str) -> str:
+    """Translate Agent Hub's public scratch path to StateBackend's state key."""
+    return path.removeprefix("/scratch")
