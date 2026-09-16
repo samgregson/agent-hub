@@ -140,7 +140,27 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
         mapped: list[AGUIInterrupt] = []
         for raw_interrupt in raw_interrupts:
             hitl = _hitl_interrupts(raw_interrupt, calls)
-            mapped.extend(hitl or lg_interrupts_to_agui([raw_interrupt]))
+            if hitl:
+                mapped.extend(hitl)
+                continue
+            fallback = lg_interrupts_to_agui([raw_interrupt])
+            raw = getattr(raw_interrupt, "value", None)
+            actions = raw.get("action_requests") if isinstance(raw, dict) else None
+            raw_id = getattr(raw_interrupt, "id", None)
+            if (
+                isinstance(actions, list)
+                and isinstance(raw_id, str)
+                and len(fallback) == len(actions)
+            ):
+                for index, interrupt in enumerate(fallback):
+                    metadata = dict(interrupt.metadata or {})
+                    metadata[_HITL_METADATA_KEY] = {
+                        "rawInterruptId": raw_id,
+                        "actionIndex": index,
+                    }
+                    mapped.append(interrupt.model_copy(update={"metadata": metadata}))
+                continue
+            mapped.extend(fallback)
         return mapped
 
     def _build_command_from_agui_resume(
