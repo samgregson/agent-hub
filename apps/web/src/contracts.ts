@@ -4,14 +4,7 @@
  * An opaque stable Agent Hub identifier. Clients must not parse it.
  */
 export type EntityId = string;
-export type AgentRunStatus =
-  | "queued"
-  | "running"
-  | "interrupted"
-  | "cancelling"
-  | "cancelled"
-  | "succeeded"
-  | "failed";
+export type AgentRunStatus = "queued" | "running" | "interrupted" | "cancelling" | "cancelled" | "succeeded" | "failed";
 
 /**
  * Registry of the language-neutral Agent Hub foundation contracts.
@@ -21,6 +14,7 @@ export interface FoundationContracts {
   artifactDocument?: ArtifactDocument;
   error?: ErrorEnvelope;
   projectFilePreview?: ProjectFilePreview;
+  projectFileCatalog?: ProjectFileCatalog;
   scratchFilePreview?: ScratchFilePreview;
   project?: Project;
   thread?: Thread;
@@ -32,15 +26,6 @@ export interface AgentRun {
   createdAt: string;
   updatedAt: string;
   error?: ErrorEnvelope;
-}
-export interface ProjectFilePreview {
-  path: string;
-  content: string;
-  version: number;
-}
-export interface ScratchFilePreview {
-  path: string;
-  content: string;
 }
 export interface ErrorEnvelope {
   code: string;
@@ -85,6 +70,23 @@ export interface ArtifactProvenance {
 export interface ArtifactRelation {
   type: string;
   targetArtifactId: EntityId;
+}
+export interface ProjectFilePreview {
+  path: string;
+  content: string;
+  version: number;
+}
+export interface ProjectFileCatalog {
+  files: ProjectFileSummary[];
+}
+export interface ProjectFileSummary {
+  path: string;
+  version: number;
+  updatedAt: string;
+}
+export interface ScratchFilePreview {
+  path: string;
+  content: string;
 }
 export interface Project {
   id: EntityId;

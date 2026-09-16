@@ -25,6 +25,7 @@ async def test_preview_is_safe_project_authorized_and_does_not_create_an_artifac
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        index = await client.get(f"/api/projects/{project.id}/files/index")
         response = await client.get(
             f"/api/projects/{project.id}/files", params={"path": "/project/notes/check.md"}
         )
@@ -32,6 +33,8 @@ async def test_preview_is_safe_project_authorized_and_does_not_create_an_artifac
             f"/api/projects/{project.id}/files", params={"path": "/etc/passwd"}
         )
 
+    assert index.status_code == 200
+    assert index.json()["files"][0]["path"] == "/project/notes/check.md"
     assert response.status_code == 200
     assert response.json() == {
         "path": "/project/notes/check.md",

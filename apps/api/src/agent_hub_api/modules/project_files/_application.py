@@ -190,6 +190,15 @@ class ProjectFilesModule:
             raise ProjectFileNotFound from error
         return await self.load(project_id, path)
 
+    async def list_visible(
+        self, access: ProjectFileAccess, project_id: str
+    ) -> tuple[ProjectFile, ...]:
+        try:
+            await self._projects.load(ProjectAccess(subject=access.subject), project_id)
+        except ProjectNotFound as error:
+            raise ProjectFileNotFound from error
+        return await self.list(project_id)
+
     async def write(self, project_id: str, path: str, content: str) -> ProjectFile:
         normalized = _normalize_file_path(path)
         _require_mutable(normalized)

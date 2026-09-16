@@ -10,6 +10,7 @@
     "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
     "error": { "$ref": "#/$defs/ErrorEnvelope" },
     "projectFilePreview": { "$ref": "#/$defs/ProjectFilePreview" },
+    "projectFileCatalog": { "$ref": "#/$defs/ProjectFileCatalog" },
     "scratchFilePreview": { "$ref": "#/$defs/ScratchFilePreview" },
     "project": { "$ref": "#/$defs/Project" },
     "thread": { "$ref": "#/$defs/Thread" }
@@ -146,6 +147,27 @@
         "path": { "type": "string", "minLength": 1, "maxLength": 1032 },
         "content": { "type": "string" },
         "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ProjectFileCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files"],
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProjectFileSummary" }
+        }
+      }
+    },
+    "ProjectFileSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "version", "updatedAt"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1032 },
+        "version": { "type": "integer", "minimum": 1 },
+        "updatedAt": { "type": "string", "format": "date-time" }
       }
     },
     "ScratchFilePreview": {

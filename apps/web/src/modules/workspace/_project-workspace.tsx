@@ -10,7 +10,10 @@ import {
 } from "react";
 
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
-import { ProjectFilePreview } from "@/modules/project-files";
+import {
+  ProjectFileCatalog,
+  ProjectFilePreview,
+} from "@/modules/project-files";
 import { Menu, MenuItem } from "@/shared/ui";
 
 import styles from "./workspace.module.css";
@@ -460,6 +463,11 @@ export function ProjectWorkspace() {
         ) : selectedProject && selectedWorkspace?.selectedFilePath ? (
           <ProjectFilePreview
             path={selectedWorkspace.selectedFilePath}
+            projectId={selectedProject.id}
+          />
+        ) : selectedProject && selectedActivity === "artifacts" ? (
+          <ProjectFileCatalog
+            onOpen={(path) => dispatch({ path, type: "openProjectFile" })}
             projectId={selectedProject.id}
           />
         ) : (

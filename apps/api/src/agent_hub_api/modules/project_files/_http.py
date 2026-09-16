@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from agent_hub_api.contracts import ProjectFilePreview
+from agent_hub_api.contracts import ProjectFileCatalog, ProjectFilePreview, ProjectFileSummary
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
@@ -33,6 +33,25 @@ def create_project_files_router(
             ) from error
 
     Context = Annotated[RequestContext, Depends(request_context)]
+
+    @router.get("/index", response_model=ProjectFileCatalog)
+    async def list_files(project_id: str, context: Context) -> ProjectFileCatalog:
+        try:
+            files = await project_files.list_visible(
+                ProjectFileAccess(subject=context.subject), project_id
+            )
+        except ProjectFileNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+            ) from error
+        return ProjectFileCatalog(
+            files=[
+                ProjectFileSummary(
+                    path=f"/project{file.path}", version=file.version, updatedAt=file.updated_at
+                )
+                for file in files
+            ]
+        )
 
     @router.get("", response_model=ProjectFilePreview)
     async def preview_file(

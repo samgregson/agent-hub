@@ -41,3 +41,25 @@
 .error {
   color: #ff9585;
 }
+
+.catalog {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.catalog p,
+.catalog span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.catalog button {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.45rem;
+  background: var(--surface-raised);
+  color: var(--text);
+  text-align: left;
+}

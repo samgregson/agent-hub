@@ -119,6 +119,15 @@ class ProjectFilePreview(BaseModel):
     version: Annotated[int, Field(ge=1)]
 
 
+class ProjectFileSummary(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    path: Annotated[str, Field(max_length=1032, min_length=1)]
+    version: Annotated[int, Field(ge=1)]
+    updated_at: Annotated[AwareDatetime, Field(alias="updatedAt")]
+
+
 class ScratchFilePreview(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -148,6 +157,13 @@ class Thread(BaseModel):
     updated_at: Annotated[AwareDatetime, Field(alias="updatedAt")]
 
 
+class ProjectFileCatalog(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    files: list[ProjectFileSummary]
+
+
 class FoundationContracts(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -157,6 +173,9 @@ class FoundationContracts(BaseModel):
     error: ErrorEnvelope | None = None
     project_file_preview: Annotated[
         ProjectFilePreview | None, Field(alias="projectFilePreview")
+    ] = None
+    project_file_catalog: Annotated[
+        ProjectFileCatalog | None, Field(alias="projectFileCatalog")
     ] = None
     scratch_file_preview: Annotated[
         ScratchFilePreview | None, Field(alias="scratchFilePreview")
