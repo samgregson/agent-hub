@@ -185,12 +185,13 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
                 raise ValueError("Malformed Agent Hub HITL interrupt binding")
             decisions_by_raw.setdefault(raw_id, []).append((action_index, decision))
 
-        payloads = {
-            raw_id: {
-                "decisions": [decision for _, decision in sorted(indexed, key=lambda item: item[0])]
+        if len(decisions_by_raw) != 1:
+            raise ValueError("A resume must answer one LangChain approval request")
+        indexed = next(iter(decisions_by_raw.values()))
+        return Command(
+            resume={
+                "decisions": [
+                    decision for _, decision in sorted(indexed, key=lambda item: item[0])
+                ]
             }
-            for raw_id, indexed in decisions_by_raw.items()
-        }
-        if len(payloads) == 1:
-            return Command(resume=next(iter(payloads.values())))
-        return Command(resume=payloads)
+        )
