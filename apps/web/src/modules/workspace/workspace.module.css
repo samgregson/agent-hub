@@ -240,3 +240,36 @@
     width: 120px;
   }
 }
+
+@media (max-width: 600px) {
+  .shell {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .titlebar {
+    min-height: 44px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-block: 7px;
+  }
+
+  .projectPicker {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .projectPicker select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .createProject {
+    flex-basis: 100%;
+  }
+
+  .createProject input {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+}

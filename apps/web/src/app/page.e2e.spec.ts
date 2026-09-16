@@ -37,3 +37,22 @@ test("project creation is unavailable before the workspace hydrates", async ({
   await expect(page.getByRole("button", { name: "Create" })).toBeDisabled();
   await context.close();
 });
+
+test.describe("at phone width", () => {
+  test.use({ viewport: { height: 844, width: 390 } });
+
+  test("Project controls fit without horizontal overflow", async ({ page }) => {
+    await page.goto("/");
+    await page.getByLabel("New Project name").waitFor({ state: "visible" });
+
+    const headerWidth = await page.locator("header").evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(headerWidth.scrollWidth).toBeLessThanOrEqual(
+      headerWidth.clientWidth,
+    );
+    await expect(page.getByLabel("New Project name")).toBeInViewport();
+    await expect(page.getByRole("button", { name: "Create" })).toBeInViewport();
+  });
+});
