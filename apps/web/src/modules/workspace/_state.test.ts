@@ -70,6 +70,21 @@ test("opening a Project file clears a prior Thread-local scratch selection", () 
   });
 
   assert.equal(state.projects["project-a"].selectedScratchThreadId, null);
+  assert.equal(state.projects["project-a"].mobileSurface, "artifact");
+});
+
+test("opening a virtual file makes the Artifact surface visible on a phone", () => {
+  let state = workspaceReducer(createWorkspaceState(), {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  state = workspaceReducer(state, {
+    path: "/project/notes.md",
+    type: "openProjectFile",
+  });
+  state = workspaceReducer(state, { type: "showChat" });
+
+  assert.equal(state.projects["project-a"].mobileSurface, "chat");
 });
 
 test("activity changes are ignored until a Project is selected", () => {

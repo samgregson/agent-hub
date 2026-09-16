@@ -260,7 +260,9 @@ export function ProjectWorkspace() {
   }
 
   return (
-    <main className={styles.shell}>
+    <main
+      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""}`}
+    >
       <header className={styles.titlebar}>
         <span aria-hidden="true" className={styles.mark}>
           A
@@ -440,6 +442,13 @@ export function ProjectWorkspace() {
       </section>
 
       <aside className={styles.artifact}>
+        <button
+          className={styles.mobileReturnToChat}
+          onClick={() => dispatch({ type: "showChat" })}
+          type="button"
+        >
+          Back to chat
+        </button>
         {selectedProject &&
         selectedWorkspace?.selectedFilePath &&
         selectedWorkspace.selectedScratchThreadId ? (

@@ -84,7 +84,8 @@
 
 .mobileNavigationToggle,
 .mobileNavigationDrawer,
-.mobileNavigationBackdrop {
+.mobileNavigationBackdrop,
+.mobileReturnToChat {
   display: none;
 }
 
@@ -329,6 +330,30 @@
 
   .mobileNavigatorContent {
     padding: 20px;
+  }
+
+  .shell.mobileArtifactOpen {
+    grid-template-areas: "title" "artifact";
+  }
+
+  .shell.mobileArtifactOpen .chat {
+    display: none;
+  }
+
+  .shell.mobileArtifactOpen .artifact {
+    display: block;
+    overflow: auto;
+  }
+
+  .mobileReturnToChat {
+    display: block;
+    margin-bottom: 16px;
+    border: 1px solid #3b3933;
+    border-radius: 7px;
+    background: #22221e;
+    color: #d7d4cb;
+    font-size: 12px;
+    padding: 7px 10px;
   }
 
   .createProject input {

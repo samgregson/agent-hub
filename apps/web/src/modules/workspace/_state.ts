@@ -9,6 +9,7 @@ export type ActivityView = (typeof activityViews)[number];
 
 export interface ProjectWorkspaceState {
   activity: ActivityView;
+  mobileSurface: "artifact" | "chat";
   selectedArtifactId: string | null;
   selectedFilePath: string | null;
   selectedScratchThreadId: string | null;
@@ -26,11 +27,13 @@ export type WorkspaceAction =
   | { activity: ActivityView; type: "selectActivity" }
   | { path: string | null; type: "openProjectFile" }
   | { path: string | null; threadId: string; type: "openScratchFile" }
+  | { type: "showChat" }
   | { threadId: string | null; type: "selectThread" };
 
 function initialProjectState(): ProjectWorkspaceState {
   return {
     activity: "chats",
+    mobileSurface: "chat",
     selectedArtifactId: null,
     selectedFilePath: null,
     selectedScratchThreadId: null,
@@ -82,6 +85,7 @@ export function workspaceReducer(
           ...state.projects[state.selectedProjectId],
           selectedFilePath: action.path,
           selectedScratchThreadId: null,
+          mobileSurface: action.path === null ? "chat" : "artifact",
         },
       },
     };
@@ -96,6 +100,19 @@ export function workspaceReducer(
           selectedFilePath: action.path,
           selectedScratchThreadId:
             action.path === null ? null : action.threadId,
+          mobileSurface: action.path === null ? "chat" : "artifact",
+        },
+      },
+    };
+  }
+  if (action.type === "showChat") {
+    return {
+      ...state,
+      projects: {
+        ...state.projects,
+        [state.selectedProjectId]: {
+          ...state.projects[state.selectedProjectId],
+          mobileSurface: "chat",
         },
       },
     };
