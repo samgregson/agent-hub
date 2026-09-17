@@ -83,6 +83,28 @@ test.describe("at phone width", () => {
       }
       await route.fulfill({ json: [] });
     });
+    await page.route(`**/api/projects/${project.id}/files/index`, async (route) => {
+      await route.fulfill({
+        json: {
+          files: [
+            {
+              path: "/project/notes/check.md",
+              updatedAt: "2026-09-16T00:00:00.000Z",
+              version: 1,
+            },
+          ],
+        },
+      });
+    });
+    await page.route(`**/api/projects/${project.id}/files?**`, async (route) => {
+      await route.fulfill({
+        json: {
+          content: "# Preview\n",
+          path: "/project/notes/check.md",
+          version: 1,
+        },
+      });
+    });
 
     await page.goto("/");
     await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
@@ -96,10 +118,12 @@ test.describe("at phone width", () => {
     ).toBeVisible();
 
     await drawer.getByRole("button", { name: "Artifacts" }).click();
-    await expect(drawer).toBeVisible();
-    await expect(
-      page.getByText("Artifacts will appear in this Project workspace."),
-    ).toBeVisible();
+    await expect(drawer.getByText("Project files")).toBeVisible();
+    await drawer
+      .getByRole("button", { name: /\/project\/notes\/check\.md/ })
+      .click();
+    await expect(drawer).toBeHidden();
+    await expect(page.getByText("# Preview")).toBeVisible();
   });
 });
 

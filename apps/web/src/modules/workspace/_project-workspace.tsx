@@ -341,6 +341,7 @@ export function ProjectWorkspace() {
           onCreateThread={() => void handleCreateThread()}
           onDeleteThread={(thread) => void handleDeleteThread(thread)}
           onRenameThread={(thread) => void handleRenameThread(thread)}
+          onOpenProjectFile={(path) => dispatch({ path, type: "openProjectFile" })}
           onSelectThread={(threadId) =>
             dispatch({ threadId, type: "selectThread" })
           }
@@ -395,6 +396,10 @@ export function ProjectWorkspace() {
                 onCreateThread={() => void handleCreateThread()}
                 onDeleteThread={(thread) => void handleDeleteThread(thread)}
                 onRenameThread={(thread) => void handleRenameThread(thread)}
+                onOpenProjectFile={(path) => {
+                  dispatch({ path, type: "openProjectFile" });
+                  setIsMobileNavigationOpen(false);
+                }}
                 onSelectThread={(threadId) => {
                   dispatch({ threadId, type: "selectThread" });
                   setIsMobileNavigationOpen(false);
@@ -465,11 +470,6 @@ export function ProjectWorkspace() {
             path={selectedWorkspace.selectedFilePath}
             projectId={selectedProject.id}
           />
-        ) : selectedProject && selectedActivity === "artifacts" ? (
-          <ProjectFileCatalog
-            onOpen={(path) => dispatch({ path, type: "openProjectFile" })}
-            projectId={selectedProject.id}
-          />
         ) : (
           <>
             <strong>Artifact workspace</strong>
@@ -487,6 +487,7 @@ export function ProjectWorkspace() {
 interface ProjectNavigatorProps {
   onCreateThread: () => void;
   onDeleteThread: (thread: Thread) => void;
+  onOpenProjectFile: (path: string) => void;
   onRenameThread: (thread: Thread) => void;
   onSelectThread: (threadId: string) => void;
   project: Project | undefined;
@@ -498,6 +499,7 @@ interface ProjectNavigatorProps {
 function ProjectNavigator({
   onCreateThread,
   onDeleteThread,
+  onOpenProjectFile,
   onRenameThread,
   onSelectThread,
   project,
@@ -540,6 +542,8 @@ function ProjectNavigator({
             ))}
           </div>
         </>
+      ) : selectedActivity === "artifacts" && project ? (
+        <ProjectFileCatalog onOpen={onOpenProjectFile} projectId={project.id} />
       ) : (
         <p>
           {project
