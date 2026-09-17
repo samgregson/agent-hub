@@ -139,6 +139,17 @@ All slices belong to the [Agent Hub foundation milestone](https://github.com/sam
 
 **Acceptance:** the App renders and can request a valid edit without direct storage access; forbidden bridge capabilities fail closed; CSP/origin/MIME violations do not execute; resource failure preserves a usable generic Artifact view; the same App still renders in a standard MCP Apps host.
 
+### Deferred Plugin Gateway acceptance — Markdown Project File viewer
+
+Use the fixture Plugin to prove that an enabled MCP App can provide the preferred
+viewer for a selected `.md` Project File. The Plugin receives the file through
+the normal host-controlled read path and renders it in the workspace iframe;
+the host's existing raw-text preview remains the explicit fallback when the
+Plugin is unavailable or declines the file. The Markdown view itself may offer
+source and rendered modes, but Agent Hub does not add a separate host-level
+toggle. Viewing a file this way never promotes it to an Artifact or gives the
+Plugin direct Project storage access.
+
 ## Slice 8 — Cross-Thread discovery and change awareness
 
 **Outcome:** project ownership is demonstrated across two conversations without bloating every prompt.
