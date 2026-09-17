@@ -120,6 +120,7 @@ class PostgresDeepAgentRunner:
             name="agent-hub",
             graph=graph,
             config={"recursion_limit": self._settings.agent_recursion_limit},
+            enable_legacy_on_interrupt_event=False,
             emit_interrupt_outcome=True,
         )
         self._agents[project_id] = agent

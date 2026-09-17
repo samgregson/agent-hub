@@ -6,6 +6,7 @@ import pytest
 from deepagents.middleware._fs_interrupt import _build_interrupt_on_from_permissions
 from langchain.tools.tool_node import ToolCallRequest
 
+import agent_hub_api.modules.agent_execution._deep_agent as deep_agent
 from agent_hub_api.modules.agent_execution._deep_agent import (
     _AGENT_SYSTEM_PROMPT,
     PostgresDeepAgentRunner,
@@ -44,6 +45,32 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
         in _AGENT_SYSTEM_PROMPT
     )
     assert "The approval card is shown automatically after the tool call." in _AGENT_SYSTEM_PROMPT
+
+
+def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = object.__new__(PostgresDeepAgentRunner)
+    runner._agents = {}
+    runner._checkpointer = object()
+    runner._model = object()
+    runner._project_files = object()
+    runner._settings = SimpleNamespace(
+        agent_recursion_limit=10,
+        enable_foundation_test_tool=False,
+    )
+
+    monkeypatch.setattr(
+        deep_agent,
+        "create_deep_agent",
+        lambda **_kwargs: SimpleNamespace(nodes={}),
+    )
+
+    agent = runner._agent_for("project-1")
+
+    assert agent.emit_interrupt_outcome is True
+    assert agent.enable_legacy_on_interrupt_event is False
+    assert agent.clone().enable_legacy_on_interrupt_event is False
 
 
 @pytest.mark.asyncio
