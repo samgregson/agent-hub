@@ -59,8 +59,11 @@ export function parseInlineMarkdown(
   return segments;
 }
 
-function isVirtualFile(url: string): boolean {
-  return /^\/(?:project|scratch)\//.test(url) && !url.split("/").includes("..");
+export function virtualFilePath(url: string): string | null {
+  const path = url.startsWith("sandbox:/") ? url.replace(/^sandbox:/, "") : url;
+  return /^\/(?:project|scratch)\//.test(path) && !path.split("/").includes("..")
+    ? path
+    : null;
 }
 
 function safeExternalUrl(url: string): string | null {
@@ -99,25 +102,28 @@ function InlineMarkdown({
           })}
         </Fragment>,
       );
-    } else if (isVirtualFile(segment.url) && onOpenVirtualFile) {
-      content.push(
-        <button
-          className={styles.linkButton}
-          key={index}
-          onClick={() => onOpenVirtualFile(segment.url)}
-          type="button"
-        >
-          {segment.label}
-        </button>,
-      );
-    } else if (safeExternalUrl(segment.url)) {
-      content.push(
-        <a href={segment.url} key={index} rel="noreferrer" target="_blank">
-          {segment.label}
-        </a>,
-      );
     } else {
-      content.push(`[${segment.label}](${segment.url})`);
+      const path = virtualFilePath(segment.url);
+      if (path && onOpenVirtualFile) {
+        content.push(
+          <button
+            className={styles.linkButton}
+            key={index}
+            onClick={() => onOpenVirtualFile(path)}
+            type="button"
+          >
+            {segment.label}
+          </button>,
+        );
+      } else if (safeExternalUrl(segment.url)) {
+        content.push(
+          <a href={segment.url} key={index} rel="noreferrer" target="_blank">
+            {segment.label}
+          </a>,
+        );
+      } else {
+        content.push(`[${segment.label}](${segment.url})`);
+      }
     }
   }
 

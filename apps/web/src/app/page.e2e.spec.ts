@@ -135,6 +135,18 @@ test("approving a tool call resumes through the AG-UI transport contract", async
           body: sse([
             { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
             {
+              type: "TEXT_MESSAGE_START",
+              messageId: "assistant-123",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: "assistant-123",
+              delta:
+                "Created [the file](sandbox:/project/example.md).",
+            },
+            { type: "TEXT_MESSAGE_END", messageId: "assistant-123" },
+            {
               type: "RUN_FINISHED",
               threadId: thread.id,
               runId: input.runId,
@@ -199,6 +211,16 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       await route.fulfill({ json: [] });
       return;
     }
+    if (url.pathname.endsWith("/files")) {
+      await route.fulfill({
+        json: {
+          content: "# Example\n",
+          path: "/project/example.md",
+          version: 1,
+        },
+      });
+      return;
+    }
     await route.fulfill({ json: {} });
   });
 
@@ -216,6 +238,8 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       },
     ],
   ]);
+  await page.getByRole("button", { name: "the file" }).click();
+  await expect(page.getByText("# Example")).toBeVisible();
 });
 
 function sse(events: object[]) {
