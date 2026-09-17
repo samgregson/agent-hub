@@ -18,12 +18,18 @@ test("user can create a Project", async ({ page }) => {
   });
 
   await page.goto("/");
-  await page.getByLabel("New Project name").fill(project.name);
-  await expect(page.getByRole("button", { name: "Create" })).toBeEnabled();
+  await page.getByLabel("Selected Project").selectOption({
+    label: "New Project…",
+  });
 
-  await page.getByRole("button", { name: "Create" }).click();
+  const dialog = page.getByRole("dialog", { name: "New Project" });
+  const name = dialog.getByLabel("Project name");
+  await expect(name).toBeFocused();
+  await name.fill(project.name);
+  await name.press("Enter");
 
   await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
+  await expect(dialog).toBeHidden();
 });
 
 test("project creation is unavailable before the workspace hydrates", async ({
@@ -33,8 +39,7 @@ test("project creation is unavailable before the workspace hydrates", async ({
   const page = await context.newPage();
 
   await page.goto("/");
-  await expect(page.getByLabel("New Project name")).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Create" })).toBeDisabled();
+  await expect(page.getByLabel("Selected Project")).toBeDisabled();
   await context.close();
 });
 
@@ -43,7 +48,7 @@ test.describe("at phone width", () => {
 
   test("Project controls fit without horizontal overflow", async ({ page }) => {
     await page.goto("/");
-    await page.getByLabel("New Project name").waitFor({ state: "visible" });
+    await page.getByLabel("Selected Project").waitFor({ state: "visible" });
 
     const headerWidth = await page.locator("header").evaluate((element) => ({
       clientWidth: element.clientWidth,
@@ -52,8 +57,10 @@ test.describe("at phone width", () => {
     expect(headerWidth.scrollWidth).toBeLessThanOrEqual(
       headerWidth.clientWidth,
     );
-    await expect(page.getByLabel("New Project name")).toBeInViewport();
-    await expect(page.getByRole("button", { name: "Create" })).toBeInViewport();
+    await expect(page.getByLabel("Selected Project")).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: "Open Project navigation" }),
+    ).toBeInViewport();
   });
 
   test("Project navigation exposes Thread and activity controls", async ({
@@ -83,28 +90,34 @@ test.describe("at phone width", () => {
       }
       await route.fulfill({ json: [] });
     });
-    await page.route(`**/api/projects/${project.id}/files/index`, async (route) => {
-      await route.fulfill({
-        json: {
-          files: [
-            {
-              path: "/project/notes/check.md",
-              updatedAt: "2026-09-16T00:00:00.000Z",
-              version: 1,
-            },
-          ],
-        },
-      });
-    });
-    await page.route(`**/api/projects/${project.id}/files?**`, async (route) => {
-      await route.fulfill({
-        json: {
-          content: "# Preview\n",
-          path: "/project/notes/check.md",
-          version: 1,
-        },
-      });
-    });
+    await page.route(
+      `**/api/projects/${project.id}/files/index`,
+      async (route) => {
+        await route.fulfill({
+          json: {
+            files: [
+              {
+                path: "/project/notes/check.md",
+                updatedAt: "2026-09-16T00:00:00.000Z",
+                version: 1,
+              },
+            ],
+          },
+        });
+      },
+    );
+    await page.route(
+      `**/api/projects/${project.id}/files?**`,
+      async (route) => {
+        await route.fulfill({
+          json: {
+            content: "# Preview\n",
+            path: "/project/notes/check.md",
+            version: 1,
+          },
+        });
+      },
+    );
 
     await page.goto("/");
     await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
@@ -166,8 +179,7 @@ test("approving a tool call resumes through the AG-UI transport contract", async
             {
               type: "TEXT_MESSAGE_CONTENT",
               messageId: "assistant-123",
-              delta:
-                "Created [the file](sandbox:/project/example.md).",
+              delta: "Created [the file](sandbox:/project/example.md).",
             },
             { type: "TEXT_MESSAGE_END", messageId: "assistant-123" },
             {
@@ -253,15 +265,17 @@ test("approving a tool call resumes through the AG-UI transport contract", async
   await page.getByRole("button", { name: "Send" }).click();
   await page.getByRole("button", { name: "Approve" }).click();
 
-  await expect.poll(() => resumeRequests).toEqual([
-    [
-      {
-        interruptId: "interrupt-123",
-        payload: { approved: true },
-        status: "resolved",
-      },
-    ],
-  ]);
+  await expect
+    .poll(() => resumeRequests)
+    .toEqual([
+      [
+        {
+          interruptId: "interrupt-123",
+          payload: { approved: true },
+          status: "resolved",
+        },
+      ],
+    ]);
   await page.getByRole("button", { name: "the file" }).click();
   await expect(page.getByText("# Example")).toBeVisible();
 });

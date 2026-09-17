@@ -29,8 +29,10 @@
 }
 
 .projectPicker select,
-.createProject input,
-.createProject button {
+.newProjectNameField input,
+.newProjectCancel,
+.newProjectSubmit,
+.newProjectDialogClose {
   height: 30px;
   border: 1px solid #3b3933;
   border-radius: 7px;
@@ -46,30 +48,86 @@
 .projectControls {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding-left: 12px;
-  border-left: 1px solid #302f2a;
+  min-width: 0;
 }
 
-.createProject {
-  display: flex;
-  gap: 6px;
-}
-
-.createProject input {
-  width: 150px;
-  padding: 0 9px;
-}
-
-.createProject button {
-  padding: 0 10px;
-  cursor: pointer;
-}
-
-.createProject button:disabled,
+.projectPicker select:disabled,
+.newProjectDialog button:disabled,
 .railButton:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.newProjectDialogBackdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 60%);
+}
+
+.newProjectDialog {
+  display: grid;
+  width: min(100%, 440px);
+  gap: 20px;
+  padding: 24px;
+  border: 1px solid #4a493f;
+  border-radius: 12px;
+  background: #1c1c19;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 45%);
+}
+
+.newProjectDialogHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.newProjectDialogHeading h2 {
+  margin: 6px 0 0;
+  font-size: 22px;
+}
+
+.newProjectDialogClose,
+.newProjectCancel,
+.newProjectSubmit {
+  padding: 0 10px;
+  color: #d7d4cb;
+  cursor: pointer;
+}
+
+.newProjectDialogClose {
+  border: 0;
+  background: transparent;
+}
+
+.newProjectNameField {
+  display: grid;
+  gap: 7px;
+  color: #d7d4cb;
+  font-size: 13px;
+}
+
+.newProjectNameField input {
+  width: 100%;
+  padding: 0 10px;
+  color: #f0eee8;
+}
+
+.newProjectDialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.newProjectSubmit {
+  border-color: #e9ff70;
+  background: #e9ff70;
+  color: #15160c;
+  font-weight: 800;
 }
 
 .foundation {
@@ -355,10 +413,6 @@
     font-size: 12px;
     padding: 7px 10px;
   }
-
-  .createProject input {
-    width: 120px;
-  }
 }
 
 @media (max-width: 600px) {
@@ -368,20 +422,7 @@
 
   .titlebar {
     min-height: 44px;
-    flex-wrap: wrap;
     gap: 8px;
-    padding-block: 7px;
-  }
-
-  .projectControls {
-    width: 100%;
-    flex-basis: 100%;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding-top: 8px;
-    padding-left: 0;
-    border-top: 1px solid #302f2a;
-    border-left: 0;
   }
 
   .projectPicker {
@@ -394,13 +435,8 @@
     min-width: 0;
   }
 
-  .createProject {
-    flex-basis: 100%;
-  }
-
-  .createProject input {
-    width: auto;
-    min-width: 0;
-    flex: 1;
+  .newProjectDialogBackdrop {
+    align-items: end;
+    padding: 12px;
   }
 }

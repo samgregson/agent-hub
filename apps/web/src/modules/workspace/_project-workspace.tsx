@@ -74,11 +74,14 @@ export function ProjectWorkspace() {
     serverIsInteractive,
   );
   const [isCreating, setIsCreating] = useState(false);
+  const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [autoNamingThreadIds, setAutoNamingThreadIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [error, setError] = useState<string | null>(null);
+  const newProjectNameInput = useRef<HTMLInputElement>(null);
+  const projectPicker = useRef<HTMLSelectElement>(null);
 
   useEffect(() => {
     let active = true;
@@ -138,6 +141,11 @@ export function ProjectWorkspace() {
     };
   }, [workspace.selectedProjectId]);
 
+  useEffect(() => {
+    if (!isNewProjectDialogOpen) return;
+    newProjectNameInput.current?.focus();
+  }, [isNewProjectDialogOpen]);
+
   async function handleCreateProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
@@ -152,11 +160,17 @@ export function ProjectWorkspace() {
       setProjects((current) => [project, ...current]);
       dispatch({ projectId: project.id, type: "selectProject" });
       form.reset();
+      setIsNewProjectDialogOpen(false);
     } catch {
       setError("The Project could not be created.");
     } finally {
       setIsCreating(false);
     }
+  }
+
+  function closeNewProjectDialog() {
+    setIsNewProjectDialogOpen(false);
+    projectPicker.current?.focus();
   }
 
   async function handleCreateThread() {
@@ -270,6 +284,34 @@ export function ProjectWorkspace() {
         <span aria-hidden="true" className={styles.mark}>
           A
         </span>
+        <div className={styles.projectControls}>
+          <label className={styles.projectPicker}>
+            <span className={styles.srOnly}>Selected Project</span>
+            <select
+              disabled={!isInteractive}
+              onChange={(event) => {
+                if (event.target.value === "new-project") {
+                  setIsNewProjectDialogOpen(true);
+                  return;
+                }
+                dispatch({
+                  projectId: event.target.value || null,
+                  type: "selectProject",
+                });
+              }}
+              ref={projectPicker}
+              value={workspace.selectedProjectId ?? ""}
+            >
+              <option value="">No Project selected</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+              <option value="new-project">New Project…</option>
+            </select>
+          </label>
+        </div>
         <button
           aria-controls="mobile-project-navigation"
           aria-expanded={isMobileNavigationOpen}
@@ -280,44 +322,68 @@ export function ProjectWorkspace() {
         >
           ☰ Navigation
         </button>
-        <div className={styles.projectControls}>
-          <label className={styles.projectPicker}>
-            <span className={styles.srOnly}>Selected Project</span>
-            <select
-              onChange={(event) =>
-                dispatch({
-                  projectId: event.target.value || null,
-                  type: "selectProject",
-                })
-              }
-              value={workspace.selectedProjectId ?? ""}
-            >
-              <option value="">No Project selected</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <form className={styles.createProject} onSubmit={handleCreateProject}>
-            <input
-              aria-label="New Project name"
-              disabled={!isInteractive}
-              maxLength={120}
-              name="name"
-              placeholder="New Project"
-              required
-            />
-            <button disabled={!isInteractive || isCreating} type="submit">
-              {isCreating ? "Creating…" : "Create"}
-            </button>
-          </form>
-        </div>
         <span className={styles.foundation}>
           Foundation · Project workspace
         </span>
       </header>
+
+      {isNewProjectDialogOpen ? (
+        <div
+          aria-labelledby="new-project-title"
+          aria-modal="true"
+          className={styles.newProjectDialogBackdrop}
+          role="dialog"
+        >
+          <form
+            className={styles.newProjectDialog}
+            onSubmit={handleCreateProject}
+          >
+            <div className={styles.newProjectDialogHeading}>
+              <div>
+                <p className={styles.eyebrow}>Project workspace</p>
+                <h2 id="new-project-title">New Project</h2>
+              </div>
+              <button
+                aria-label="Close New Project"
+                className={styles.newProjectDialogClose}
+                onClick={closeNewProjectDialog}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <label className={styles.newProjectNameField}>
+              <span>Project name</span>
+              <input
+                aria-label="Project name"
+                disabled={isCreating}
+                maxLength={120}
+                name="name"
+                placeholder="e.g. Riverside extension"
+                ref={newProjectNameInput}
+                required
+              />
+            </label>
+            <div className={styles.newProjectDialogActions}>
+              <button
+                className={styles.newProjectCancel}
+                disabled={isCreating}
+                onClick={closeNewProjectDialog}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className={styles.newProjectSubmit}
+                disabled={isCreating}
+                type="submit"
+              >
+                {isCreating ? "Creating…" : "Create Project"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
 
       <nav aria-label="Project views" className={styles.rail}>
         {activityViews.map((view) => (
@@ -341,7 +407,9 @@ export function ProjectWorkspace() {
           onCreateThread={() => void handleCreateThread()}
           onDeleteThread={(thread) => void handleDeleteThread(thread)}
           onRenameThread={(thread) => void handleRenameThread(thread)}
-          onOpenProjectFile={(path) => dispatch({ path, type: "openProjectFile" })}
+          onOpenProjectFile={(path) =>
+            dispatch({ path, type: "openProjectFile" })
+          }
           onSelectThread={(threadId) =>
             dispatch({ threadId, type: "selectThread" })
           }
