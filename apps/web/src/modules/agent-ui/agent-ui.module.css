@@ -136,6 +136,18 @@
   background: #181815;
 }
 
+.approvalCard {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.approvalCard p {
+  margin: 6px 0 12px;
+}
+
 .toolCall pre {
   overflow-x: auto;
   color: #aaa69d;

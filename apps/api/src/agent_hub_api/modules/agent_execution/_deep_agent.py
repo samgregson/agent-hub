@@ -26,6 +26,21 @@ from agent_hub_api.modules.agent_execution._project_files_backend import (
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.settings import Settings
 
+_AGENT_SYSTEM_PROMPT = "\n\n".join(
+    (
+        "Use /project for durable files shared by every Thread in the selected Project "
+        "and /scratch for Thread-local working files.",
+        "Project file writes require user approval before they are persisted. When the "
+        "requested Project file name and content are clear, the write can begin. Start "
+        "the Project file write without asking for approval in chat first. The approval "
+        "card is shown automatically after the tool call. Do not tell the user that they "
+        "need to separately grant approval or ask whether you may proceed; wait for the "
+        "tool result after their decision.",
+        "Never claim access to the host filesystem. When referring to a virtual file in "
+        "a response, link it as Markdown using its absolute /project or /scratch path.",
+    )
+)
+
 
 @tool
 def foundation_protected_action(note: str) -> str:
@@ -95,13 +110,7 @@ class PostgresDeepAgentRunner:
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
-            system_prompt=(
-                "Use /project for durable files shared by every Thread in the selected "
-                "Project and /scratch for Thread-local working files. Project file writes "
-                "require user approval before they are persisted. Never claim access "
-                "to the host filesystem. When referring to a virtual file in a response, "
-                "link it as Markdown using its absolute /project or /scratch path."
-            ),
+            system_prompt=_AGENT_SYSTEM_PROMPT,
             interrupt_on=interrupt_on,
             permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),

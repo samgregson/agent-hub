@@ -52,11 +52,16 @@ function ToolCall({
     approval.approved === undefined &&
     approval.resolution === undefined;
 
-  return (
-    <section className={styles.toolCall}>
-      <strong>{toolName}</strong>
-      <pre>{JSON.stringify(args, null, 2)}</pre>
-      {waitingForDecision ? (
+  if (waitingForDecision) {
+    const label =
+      toolName === "write_file" || toolName === "edit_file"
+        ? "Approve Project File change"
+        : "Approve protected action";
+
+    return (
+      <section aria-label={label} className={styles.approvalCard}>
+        <strong>{label}</strong>
+        <p>Agent Hub will continue automatically after your decision.</p>
         <div className={styles.approvalActions}>
           <button
             onClick={() => respondToApproval?.({ approved: true })}
@@ -76,7 +81,14 @@ function ToolCall({
             Reject
           </button>
         </div>
-      ) : null}
+      </section>
+    );
+  }
+
+  return (
+    <section className={styles.toolCall}>
+      <strong>{toolName}</strong>
+      <pre>{JSON.stringify(args, null, 2)}</pre>
       {result !== undefined ? <p>{String(result)}</p> : null}
     </section>
   );

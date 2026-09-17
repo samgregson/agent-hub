@@ -7,6 +7,7 @@ from deepagents.middleware._fs_interrupt import _build_interrupt_on_from_permiss
 from langchain.tools.tool_node import ToolCallRequest
 
 from agent_hub_api.modules.agent_execution._deep_agent import (
+    _AGENT_SYSTEM_PROMPT,
     PostgresDeepAgentRunner,
     _project_file_permissions,
 )
@@ -35,6 +36,14 @@ def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:
             SimpleNamespace(tool_call={"args": {"file_path": "/scratch/notes.md"}}),
         )
     )
+
+
+def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
+    assert (
+        "Start the Project file write without asking for approval in chat first."
+        in _AGENT_SYSTEM_PROMPT
+    )
+    assert "The approval card is shown automatically after the tool call." in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
