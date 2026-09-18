@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     project_file_max_bytes: int = Field(default=1_000_000, ge=1_024, le=20_000_000)
     project_file_max_files: int = Field(default=1_000, ge=1, le=100_000)
     project_file_search_max_matches: int = Field(default=200, ge=1, le=10_000)
+    plugin_tool_timeout_seconds: float = Field(default=30, ge=1, le=300)
+    plugin_result_max_bytes: int = Field(default=1_000_000, ge=1_024, le=20_000_000)
 
     @field_validator("openai_api_key", mode="before")
     @classmethod

@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -47,18 +47,19 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
     assert "The approval card is shown automatically after the tool call." in _AGENT_SYSTEM_PROMPT
 
 
-def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_events(
+@pytest.mark.asyncio
+async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_events(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner = object.__new__(PostgresDeepAgentRunner)
-    runner._agents = {}
-    runner._checkpointer = object()
-    runner._model = object()
-    runner._project_files = object()
-    runner._settings = SimpleNamespace(
+    runner._checkpointer = cast(Any, object())
+    runner._model = cast(Any, object())
+    runner._project_files = cast(Any, object())
+    runner._plugin_gateway = None
+    runner._settings = cast(Any, SimpleNamespace(
         agent_recursion_limit=10,
         enable_foundation_test_tool=False,
-    )
+    ))
 
     monkeypatch.setattr(
         deep_agent,
@@ -66,7 +67,7 @@ def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_events(
         lambda **_kwargs: SimpleNamespace(nodes={}),
     )
 
-    agent = runner._agent_for("project-1")
+    agent = await runner._agent_for("project-1")
 
     assert agent.emit_interrupt_outcome is True
     assert agent.enable_legacy_on_interrupt_event is False
@@ -93,7 +94,7 @@ async def test_scratch_preview_reads_the_state_backend_route_relative_path(
         return None
 
     monkeypatch.setattr(runner, "open", open_runner)
-    monkeypatch.setattr(runner, "_agent_for", lambda _project_id: agent)
+    monkeypatch.setattr(runner, "_agent_for", AsyncMock(return_value=agent))
 
     file = await runner.load_scratch_file(
         "thread-1", project_id="project-1", path="/scratch/dummy.md"

@@ -23,6 +23,7 @@ from agent_hub_api.modules.agent_execution._execution import (
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
+from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.settings import Settings
 
@@ -56,11 +57,16 @@ def _project_file_permissions() -> list[FilesystemPermission]:
 class PostgresDeepAgentRunner:
     """Lazily owns the Deep Agent and its long-lived PostgreSQL checkpointer."""
 
-    def __init__(self, settings: Settings, project_files: ProjectFilesModule) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        project_files: ProjectFilesModule,
+        plugin_gateway: PluginGatewayModule | None = None,
+    ) -> None:
         self._settings = settings
         self._project_files = project_files
+        self._plugin_gateway = plugin_gateway
         self._stack: AsyncExitStack | None = None
-        self._agents: dict[str, AgentHubLangGraphAgent] = {}
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
 
@@ -90,13 +96,12 @@ class PostgresDeepAgentRunner:
         self._model = model
         self._stack = stack
 
-    def _agent_for(self, project_id: str) -> AgentHubLangGraphAgent:
-        existing = self._agents.get(project_id)
-        if existing is not None:
-            return existing
+    async def _agent_for(self, project_id: str) -> AgentHubLangGraphAgent:
         assert self._checkpointer is not None
         assert self._model is not None
         tools = [foundation_protected_action] if self._settings.enable_foundation_test_tool else []
+        if self._plugin_gateway is not None:
+            tools.extend(await self._plugin_gateway.agent_tools(project_id))
         interrupt_on: dict[str, bool | InterruptOnConfig] | None = (
             {
                 "foundation_protected_action": {
@@ -123,26 +128,24 @@ class PostgresDeepAgentRunner:
             enable_legacy_on_interrupt_event=False,
             emit_interrupt_outcome=True,
         )
-        self._agents[project_id] = agent
         return agent
 
     async def close(self) -> None:
         if self._stack is not None:
             await self._stack.aclose()
         self._stack = None
-        self._agents.clear()
         self._checkpointer = None
         self._model = None
 
     async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
         await self.open()
-        request_agent = self._agent_for(project_id).clone()
+        request_agent = (await self._agent_for(project_id)).clone()
         async for event in request_agent.run(input_data):
             yield event
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         await self.open()
-        agent = self._agent_for(project_id)
+        agent = await self._agent_for(project_id)
         state = await agent.graph.aget_state({"configurable": {"thread_id": thread_id}})
         messages = state.values.get("messages", [])
         interrupts = [interrupt for task in state.tasks for interrupt in (task.interrupts or ())]
@@ -155,7 +158,7 @@ class PostgresDeepAgentRunner:
         if not _is_scratch_file_path(path):
             raise ScratchFileNotFound
         await self.open()
-        agent = self._agent_for(project_id)
+        agent = await self._agent_for(project_id)
         state = await agent.graph.aget_state({"configurable": {"thread_id": thread_id}})
         files = state.values.get("files")
         if not isinstance(files, dict):

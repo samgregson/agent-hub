@@ -45,19 +45,22 @@ def create_app(
     resolved_identity = identity or create_identity_module(resolved_settings)
     resolved_projects = projects or create_postgres_project_module(resolved_settings)
     resolved_project_files = create_postgres_project_files(resolved_settings, resolved_projects)
+    resolved_plugin_gateway = plugin_gateway or create_postgres_plugin_gateway(
+        resolved_settings,
+        resolved_projects,
+    )
     deep_agent_runner = None
     if agent_execution is None:
-        deep_agent_runner = PostgresDeepAgentRunner(resolved_settings, resolved_project_files)
+        deep_agent_runner = PostgresDeepAgentRunner(
+            resolved_settings,
+            resolved_project_files,
+            resolved_plugin_gateway,
+        )
         resolved_agent_execution = create_postgres_agent_execution(
             resolved_settings, deep_agent_runner
         )
     else:
         resolved_agent_execution = agent_execution
-    resolved_plugin_gateway = plugin_gateway or create_postgres_plugin_gateway(
-        resolved_settings,
-        resolved_projects,
-        clients={},
-    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

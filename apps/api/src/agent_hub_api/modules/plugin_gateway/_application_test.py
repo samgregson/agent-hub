@@ -50,6 +50,7 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
 
     with pytest.raises(PluginNotEnabled):
         await gateway.call(access, project.id, "foundation-fixture", "foundation_status", {})
+    assert await gateway.agent_tools(project.id) == ()
 
     await gateway.enable(access, project.id, "foundation-fixture")
 
@@ -58,9 +59,15 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
     assert await gateway.capabilities(access, project.id) == (
         PluginCapability(plugin_id="foundation-fixture", tool_name="foundation_status"),
     )
+    agent_tool = (await gateway.agent_tools(project.id))[0]
+    assert agent_tool.name == "foundation_fixture__foundation_status"
+    assert "available" in await agent_tool.ainvoke({})
     result = await gateway.call(access, project.id, "foundation-fixture", "foundation_status", {})
     assert result.structured_content == {"status": "available"}
-    assert client.calls == [("foundation_status", {})]
+    assert client.calls == [
+        ("foundation_status", {}),
+        ("foundation_status", {}),
+    ]
 
     await gateway.disable(access, project.id, "foundation-fixture")
     assert (await gateway.selections(access, project.id))[0].enabled is False

@@ -1,7 +1,9 @@
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from langchain_core.tools import BaseTool, StructuredTool
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
@@ -13,6 +15,7 @@ from agent_hub_api.settings import Settings
 class PluginTool:
     name: str
     read_only: bool
+    description: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +133,15 @@ class PluginGatewayModule:
         arguments: Mapping[str, object],
     ) -> PluginToolResult:
         await self._projects.load(access, project_id)
+        return await self._call_enabled(project_id, plugin_id, tool_name, arguments)
+
+    async def _call_enabled(
+        self,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> PluginToolResult:
         manifest = self._catalog.get(plugin_id)
         if manifest is None:
             raise PluginNotAvailable
@@ -141,6 +153,20 @@ class PluginGatewayModule:
         if client is None:
             raise PluginNotAvailable
         return await client.call_tool(tool_name, arguments)
+
+    async def agent_tools(self, project_id: str) -> tuple[BaseTool, ...]:
+        """Return only currently enabled capabilities for an authorized Run.
+
+        Agent Transport authorizes the Project before it starts a Run. This
+        method deliberately does not accept browser-controlled identity input.
+        """
+        enabled = set(await self._enablements.enabled_plugin_ids(project_id))
+        return tuple(
+            _agent_tool(self, project_id, manifest, plugin_tool)
+            for manifest in self._catalog.values()
+            if manifest.id in enabled
+            for plugin_tool in manifest.tools
+        )
 
 
 class MemoryPluginEnablementStore:
@@ -211,24 +237,55 @@ class PostgresPluginEnablementStore:
 def create_postgres_plugin_gateway(
     settings: Settings,
     projects: ProjectModule,
-    clients: Mapping[str, PluginClient],
 ) -> PluginGatewayModule:
     """Compose the deployment-controlled initial catalog.
 
     The endpoint remains source-controlled; it is never supplied by a browser
     request or a Project configuration record.
     """
+    fixture = PluginManifest(
+        id="foundation-fixture",
+        name="Foundation fixture",
+        version="0.1.0",
+        endpoint="http://foundation-fixture:8000/mcp",
+        tools=(PluginTool(name="foundation_status", read_only=True),),
+    )
+    from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
+
     return PluginGatewayModule(
         projects,
-        catalog=(
-            PluginManifest(
-                id="foundation-fixture",
-                name="Foundation fixture",
-                version="0.1.0",
-                endpoint="http://foundation-fixture:8000/mcp",
-                tools=(PluginTool(name="foundation_status", read_only=True),),
-            ),
-        ),
+        catalog=(fixture,),
         enablements=PostgresPluginEnablementStore(settings),
-        clients=clients,
+        clients={
+            fixture.id: McpPluginClient(
+                endpoint=fixture.endpoint,
+                timeout_seconds=settings.plugin_tool_timeout_seconds,
+                max_result_bytes=settings.plugin_result_max_bytes,
+            )
+        },
+    )
+
+
+def _agent_tool(
+    gateway: PluginGatewayModule,
+    project_id: str,
+    manifest: PluginManifest,
+    plugin_tool: PluginTool,
+) -> BaseTool:
+    async def invoke() -> str:
+        try:
+            result = await gateway._call_enabled(
+                project_id,
+                manifest.id,
+                plugin_tool.name,
+                {},
+            )
+        except Exception as error:
+            return f"Plugin tool failed: {error}"
+        return "\n".join((*result.content, json.dumps(result.structured_content, sort_keys=True)))
+
+    return StructuredTool.from_function(
+        coroutine=invoke,
+        name=f"{manifest.id.replace('-', '_')}__{plugin_tool.name}",
+        description=plugin_tool.description or f"Run {plugin_tool.name} from {manifest.name}.",
     )
