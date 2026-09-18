@@ -87,6 +87,25 @@ test("opening a virtual file makes the Artifact surface visible on a phone", () 
   assert.equal(state.projects["project-a"].mobileSurface, "chat");
 });
 
+test("opening a Project Artifact selects its generic view and clears a file preview", () => {
+  let state = workspaceReducer(createWorkspaceState(), {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  state = workspaceReducer(state, {
+    path: "/project/notes.md",
+    type: "openProjectFile",
+  });
+  state = workspaceReducer(state, {
+    artifactId: "artifact-a",
+    type: "openArtifact",
+  });
+
+  assert.equal(state.projects["project-a"].selectedArtifactId, "artifact-a");
+  assert.equal(state.projects["project-a"].selectedFilePath, null);
+  assert.equal(state.projects["project-a"].mobileSurface, "artifact");
+});
+
 test("activity changes are ignored until a Project is selected", () => {
   const state = createWorkspaceState();
   assert.equal(

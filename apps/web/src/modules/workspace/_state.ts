@@ -25,6 +25,7 @@ export interface WorkspaceState {
 export type WorkspaceAction =
   | { projectId: string | null; type: "selectProject" }
   | { activity: ActivityView; type: "selectActivity" }
+  | { artifactId: string | null; type: "openArtifact" }
   | { path: string | null; type: "openProjectFile" }
   | { path: string | null; threadId: string; type: "openScratchFile" }
   | { type: "showChat" }
@@ -83,6 +84,7 @@ export function workspaceReducer(
         ...state.projects,
         [state.selectedProjectId]: {
           ...state.projects[state.selectedProjectId],
+          selectedArtifactId: null,
           selectedFilePath: action.path,
           selectedScratchThreadId: null,
           mobileSurface: action.path === null ? "chat" : "artifact",
@@ -97,6 +99,7 @@ export function workspaceReducer(
         ...state.projects,
         [state.selectedProjectId]: {
           ...state.projects[state.selectedProjectId],
+          selectedArtifactId: null,
           selectedFilePath: action.path,
           selectedScratchThreadId:
             action.path === null ? null : action.threadId,
@@ -113,6 +116,21 @@ export function workspaceReducer(
         [state.selectedProjectId]: {
           ...state.projects[state.selectedProjectId],
           mobileSurface: "chat",
+        },
+      },
+    };
+  }
+  if (action.type === "openArtifact") {
+    return {
+      ...state,
+      projects: {
+        ...state.projects,
+        [state.selectedProjectId]: {
+          ...state.projects[state.selectedProjectId],
+          selectedArtifactId: action.artifactId,
+          selectedFilePath: null,
+          selectedScratchThreadId: null,
+          mobileSurface: action.artifactId === null ? "chat" : "artifact",
         },
       },
     };

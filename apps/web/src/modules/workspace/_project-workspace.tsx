@@ -11,6 +11,10 @@ import {
 
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
 import {
+  ArtifactCatalog,
+  ArtifactDocumentPreview,
+} from "@/modules/artifact-view-host";
+import {
   ProjectFileCatalog,
   ProjectFilePreview,
 } from "@/modules/project-files";
@@ -407,6 +411,9 @@ export function ProjectWorkspace() {
         <ProjectNavigator
           onCreateThread={() => void handleCreateThread()}
           onDeleteThread={(thread) => void handleDeleteThread(thread)}
+          onOpenArtifact={(artifactId) =>
+            dispatch({ artifactId, type: "openArtifact" })
+          }
           onRenameThread={(thread) => void handleRenameThread(thread)}
           onOpenProjectFile={(path) =>
             dispatch({ path, type: "openProjectFile" })
@@ -464,6 +471,10 @@ export function ProjectWorkspace() {
               <ProjectNavigator
                 onCreateThread={() => void handleCreateThread()}
                 onDeleteThread={(thread) => void handleDeleteThread(thread)}
+                onOpenArtifact={(artifactId) => {
+                  dispatch({ artifactId, type: "openArtifact" });
+                  setIsMobileNavigationOpen(false);
+                }}
                 onRenameThread={(thread) => void handleRenameThread(thread)}
                 onOpenProjectFile={(path) => {
                   dispatch({ path, type: "openProjectFile" });
@@ -527,6 +538,12 @@ export function ProjectWorkspace() {
           Back to chat
         </button>
         {selectedProject &&
+        selectedWorkspace?.selectedArtifactId ? (
+          <ArtifactDocumentPreview
+            artifactId={selectedWorkspace.selectedArtifactId}
+            projectId={selectedProject.id}
+          />
+        ) : selectedProject &&
         selectedWorkspace?.selectedFilePath &&
         selectedWorkspace.selectedScratchThreadId ? (
           <ScratchFilePreview
@@ -556,6 +573,7 @@ export function ProjectWorkspace() {
 interface ProjectNavigatorProps {
   onCreateThread: () => void;
   onDeleteThread: (thread: Thread) => void;
+  onOpenArtifact: (artifactId: string) => void;
   onOpenProjectFile: (path: string) => void;
   onRenameThread: (thread: Thread) => void;
   onSelectThread: (threadId: string) => void;
@@ -568,6 +586,7 @@ interface ProjectNavigatorProps {
 function ProjectNavigator({
   onCreateThread,
   onDeleteThread,
+  onOpenArtifact,
   onOpenProjectFile,
   onRenameThread,
   onSelectThread,
@@ -612,7 +631,10 @@ function ProjectNavigator({
           </div>
         </>
       ) : selectedActivity === "artifacts" && project ? (
-        <ProjectFileCatalog onOpen={onOpenProjectFile} projectId={project.id} />
+        <>
+          <ArtifactCatalog onOpen={onOpenArtifact} projectId={project.id} />
+          <ProjectFileCatalog onOpen={onOpenProjectFile} projectId={project.id} />
+        </>
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />
       ) : (

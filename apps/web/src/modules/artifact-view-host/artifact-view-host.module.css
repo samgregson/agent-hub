@@ -1,0 +1,82 @@
+.catalog,
+.preview {
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.catalog p,
+.preview p,
+.preview footer {
+  color: var(--muted);
+  margin: 0;
+}
+
+.catalog button {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  color: inherit;
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.625rem;
+  text-align: left;
+}
+
+.catalog button:hover {
+  border-color: var(--accent);
+}
+
+.catalog button span,
+.catalog button small,
+.preview code,
+.preview dd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog button small,
+.preview header span {
+  color: var(--muted);
+}
+
+.preview header {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.preview dl {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.preview dl div {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.preview dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.preview dd {
+  margin: 0;
+}
+
+.preview pre {
+  background: var(--background);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  margin: 0;
+  overflow: auto;
+  padding: 0.75rem;
+}
+
+.error {
+  color: var(--danger);
+}
