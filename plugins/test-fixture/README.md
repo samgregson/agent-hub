@@ -26,3 +26,13 @@ uv sync
 Then run the fixture locally with `uv run agent-hub-foundation-fixture`, or run
 the generic-client conformance test with `uv run pytest`. Build its independent
 container with `docker build -t agent-hub-foundation-fixture .`.
+
+## Current runtime finding
+
+The pinned FastMCP 4.0.4 dependency starts the fixture under Python 3.14, but
+a bare read-only tool call times out in its in-memory and stdio client paths.
+The conformance test is a strict expected failure so that the limitation stays
+visible and becomes a failure if the behaviour changes unexpectedly. Do not
+treat it as completed transport validation; repeat the test against the
+container's HTTP endpoint when the FastMCP/Python compatibility issue is
+resolved.

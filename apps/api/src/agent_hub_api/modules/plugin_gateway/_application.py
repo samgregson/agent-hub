@@ -16,6 +16,7 @@ class PluginManifest:
     id: str
     name: str
     version: str
+    endpoint: str
     tools: tuple[PluginTool, ...]
 
 
@@ -35,6 +36,12 @@ class PluginToolResult:
     structured_content: Mapping[str, object] | None
 
 
+@dataclass(frozen=True, slots=True)
+class PluginSelection:
+    manifest: PluginManifest
+    enabled: bool
+
+
 class PluginNotAvailable(Exception):
     """The Plugin is absent from the reviewed deployment catalog."""
 
@@ -51,6 +58,8 @@ class PluginEnablementStore(Protocol):
     async def enabled_plugin_ids(self, project_id: str) -> Sequence[str]: ...
 
     async def enable(self, project_id: str, plugin_id: str) -> None: ...
+
+    async def disable(self, project_id: str, plugin_id: str) -> None: ...
 
 
 class PluginClient(Protocol):
@@ -79,6 +88,22 @@ class PluginGatewayModule:
         if plugin_id not in self._catalog:
             raise PluginNotAvailable
         await self._enablements.enable(project_id, plugin_id)
+
+    async def disable(self, access: ProjectAccess, project_id: str, plugin_id: str) -> None:
+        await self._projects.load(access, project_id)
+        if plugin_id not in self._catalog:
+            raise PluginNotAvailable
+        await self._enablements.disable(project_id, plugin_id)
+
+    async def selections(
+        self, access: ProjectAccess, project_id: str
+    ) -> tuple[PluginSelection, ...]:
+        await self._projects.load(access, project_id)
+        enabled = set(await self._enablements.enabled_plugin_ids(project_id))
+        return tuple(
+            PluginSelection(manifest=manifest, enabled=manifest.id in enabled)
+            for manifest in self._catalog.values()
+        )
 
     async def capabilities(
         self, access: ProjectAccess, project_id: str
@@ -123,3 +148,6 @@ class MemoryPluginEnablementStore:
 
     async def enable(self, project_id: str, plugin_id: str) -> None:
         self._enabled.setdefault(project_id, set()).add(plugin_id)
+
+    async def disable(self, project_id: str, plugin_id: str) -> None:
+        self._enabled.setdefault(project_id, set()).discard(plugin_id)

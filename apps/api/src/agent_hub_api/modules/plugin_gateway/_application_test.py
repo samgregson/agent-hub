@@ -40,6 +40,7 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
                 id="foundation-fixture",
                 name="Foundation fixture",
                 version="0.1.0",
+                endpoint="http://foundation-fixture:8000/mcp",
                 tools=(PluginTool(name="foundation_status", read_only=True),),
             )
         ],
@@ -52,9 +53,14 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
 
     await gateway.enable(access, project.id, "foundation-fixture")
 
+    assert (await gateway.selections(access, project.id))[0].enabled is True
+
     assert await gateway.capabilities(access, project.id) == (
         PluginCapability(plugin_id="foundation-fixture", tool_name="foundation_status"),
     )
     result = await gateway.call(access, project.id, "foundation-fixture", "foundation_status", {})
     assert result.structured_content == {"status": "available"}
     assert client.calls == [("foundation_status", {})]
+
+    await gateway.disable(access, project.id, "foundation-fixture")
+    assert (await gateway.selections(access, project.id))[0].enabled is False
