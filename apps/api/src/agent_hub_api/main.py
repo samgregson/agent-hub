@@ -15,6 +15,11 @@ from agent_hub_api.modules.agent_transport import (
     create_agent_transport_router,
 )
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
+from agent_hub_api.modules.plugin_gateway import (
+    PluginGatewayModule,
+    create_plugin_gateway_router,
+    create_postgres_plugin_gateway,
+)
 from agent_hub_api.modules.project_files import (
     create_postgres_project_files,
     create_project_files_router,
@@ -34,6 +39,7 @@ def create_app(
     identity: IdentityModule | None = None,
     projects: ProjectModule | None = None,
     agent_execution: AgentExecutionModule | None = None,
+    plugin_gateway: PluginGatewayModule | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_identity = identity or create_identity_module(resolved_settings)
@@ -47,6 +53,11 @@ def create_app(
         )
     else:
         resolved_agent_execution = agent_execution
+    resolved_plugin_gateway = plugin_gateway or create_postgres_plugin_gateway(
+        resolved_settings,
+        resolved_projects,
+        clients={},
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -69,6 +80,10 @@ def create_app(
     )
     application.include_router(
         create_project_files_router(resolved_identity, resolved_project_files),
+        prefix="/api",
+    )
+    application.include_router(
+        create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),
         prefix="/api",
     )
     application.include_router(

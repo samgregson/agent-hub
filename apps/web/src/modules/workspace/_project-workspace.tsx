@@ -14,6 +14,7 @@ import {
   ProjectFileCatalog,
   ProjectFilePreview,
 } from "@/modules/project-files";
+import { PluginCatalog } from "@/modules/plugin-gateway";
 import { Menu, MenuItem } from "@/shared/ui";
 
 import styles from "./workspace.module.css";
@@ -612,6 +613,8 @@ function ProjectNavigator({
         </>
       ) : selectedActivity === "artifacts" && project ? (
         <ProjectFileCatalog onOpen={onOpenProjectFile} projectId={project.id} />
+      ) : selectedActivity === "plugins" && project ? (
+        <PluginCatalog projectId={project.id} />
       ) : (
         <p>
           {project

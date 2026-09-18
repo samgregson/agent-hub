@@ -2,7 +2,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
+
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule
+from agent_hub_api.settings import Settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,3 +155,80 @@ class MemoryPluginEnablementStore:
 
     async def disable(self, project_id: str, plugin_id: str) -> None:
         self._enabled.setdefault(project_id, set()).discard(plugin_id)
+
+
+class PostgresPluginEnablementStore:
+    """Persist the reviewed Plugin IDs selected by each authorized Project."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+
+    async def _connect(self) -> AsyncConnection[dict[str, object]]:
+        return await AsyncConnection.connect(
+            str(self._settings.database_url),
+            connect_timeout=self._settings.database_connect_timeout_seconds,
+            row_factory=dict_row,
+        )
+
+    async def enabled_plugin_ids(self, project_id: str) -> Sequence[str]:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                SELECT plugin_id
+                FROM project_plugin_selections
+                WHERE project_id = %s
+                ORDER BY plugin_id
+                """,
+                (project_id,),
+            )
+            return tuple(str(row["plugin_id"]) for row in await cursor.fetchall())
+
+    async def enable(self, project_id: str, plugin_id: str) -> None:
+        connection = await self._connect()
+        async with connection:
+            await connection.execute(
+                """
+                INSERT INTO project_plugin_selections (project_id, plugin_id)
+                VALUES (%s, %s)
+                ON CONFLICT (project_id, plugin_id) DO NOTHING
+                """,
+                (project_id, plugin_id),
+            )
+
+    async def disable(self, project_id: str, plugin_id: str) -> None:
+        connection = await self._connect()
+        async with connection:
+            await connection.execute(
+                """
+                DELETE FROM project_plugin_selections
+                WHERE project_id = %s AND plugin_id = %s
+                """,
+                (project_id, plugin_id),
+            )
+
+
+def create_postgres_plugin_gateway(
+    settings: Settings,
+    projects: ProjectModule,
+    clients: Mapping[str, PluginClient],
+) -> PluginGatewayModule:
+    """Compose the deployment-controlled initial catalog.
+
+    The endpoint remains source-controlled; it is never supplied by a browser
+    request or a Project configuration record.
+    """
+    return PluginGatewayModule(
+        projects,
+        catalog=(
+            PluginManifest(
+                id="foundation-fixture",
+                name="Foundation fixture",
+                version="0.1.0",
+                endpoint="http://foundation-fixture:8000/mcp",
+                tools=(PluginTool(name="foundation_status", read_only=True),),
+            ),
+        ),
+        enablements=PostgresPluginEnablementStore(settings),
+        clients=clients,
+    )
