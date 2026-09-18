@@ -153,6 +153,11 @@ Only this Module makes outbound MCP connections. Tool names and metadata from a 
 
 The portable Plugin contract remains ordinary MCP: concise `content`, UI-oriented `structuredContent`, a complete Artifact replacement for semantic edits, and an optional standard MCP App resource. Agent Hub persistence and provenance are host enhancements, not Plugin requirements.
 
+Reference Plugins are independently deployable Python/FastMCP services using
+Streamable HTTP. They can package an optional React/Vite MCP App as a standard
+`ui://` resource. The gateway is intentionally implementation-neutral and may
+connect to another reviewed conforming MCP server when appropriate.
+
 ### Persistence Module — API
 
 Provides transaction-scoped adapters for Agent Hub application records and the Project VFS. LangGraph uses its supported PostgreSQL checkpointer separately. One PostgreSQL service is used, but ownership and migrations remain explicit.

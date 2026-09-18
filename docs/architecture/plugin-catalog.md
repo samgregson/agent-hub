@@ -22,6 +22,14 @@ A catalog entry identifies:
 
 The exact serialization format is an implementation choice. The manifest is configuration and policy input, not executable Plugin code.
 
+## Reference Plugin deployment
+
+The reference Plugin server implementation is Python/FastMCP, deployed as an
+independent Streamable HTTP service. It may package an optional React/Vite MCP
+App as a standard `ui://` resource. This is a developer default rather than a
+gateway requirement: the catalog and gateway consume reviewed, standards-
+compatible MCP endpoints and do not expose FastMCP-specific behaviour.
+
 ## Lifecycle
 
 1. A developer adds or updates a reviewed catalog entry.
