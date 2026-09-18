@@ -29,9 +29,8 @@ export function ProjectFileCatalog({
   }, [projectId]);
 
   return (
-    <section className={styles.catalog}>
+    <section aria-label="Project files" className={styles.catalog}>
       <strong>Project files</strong>
-      <p>Shared working files. Opening one does not create an Artifact.</p>
       {!catalog ? <p>Loading files…</p> : null}
       {catalog?.files.map((file) => (
         <button key={file.path} onClick={() => onOpen(file.path)} type="button">

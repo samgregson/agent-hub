@@ -46,10 +46,8 @@ An Artifact without an available MCP App uses Agent Hub's generic safe renderer.
       "version": "1.2.0"
     },
     "provenance": {
-      "createdByThreadId": "thr_01J...",
-      "createdByRunId": "run_01J...",
-      "lastChangedByThreadId": "thr_01K...",
-      "lastChangedByRunId": "run_01K..."
+      "createdBy": { "kind": "agentRun", "threadId": "thr_01J...", "runId": "run_01J..." },
+      "lastChangedBy": { "kind": "userAction", "userActionId": "act_01K..." }
     },
     "relations": []
   },
@@ -73,7 +71,7 @@ This is an architectural example, not the calculation schema. Project ownership 
 | --- | --- | --- | --- |
 | `artifact.id` | Agent Hub | Preserve if supplied | Assign and preserve |
 | `artifact.documentVersion` | Agent Hub | Echo expected version | Compare and increment |
-| Provenance | Agent Hub | Preserve; may propose operation metadata | Recompute from authenticated Thread and Agent Run |
+| Provenance | Agent Hub | Preserve; may propose operation metadata | Recompute as an authenticated Agent Run or direct User Action |
 | Relations | Agent Hub | May propose typed relations | Authorize and persist accepted relations |
 | Type and schema binding | Shared contract | Declare supported values | Verify against enabled catalog version |
 | Title and summary | User/host | May propose useful updates | Apply through host policy |
@@ -116,6 +114,10 @@ A patch may accompany the replacement later for review UX or efficiency, but the
 7. Return the saved document and refresh or reopen the MCP App view.
 
 Outside Agent Hub, another MCP client can pass the same inline document to the Plugin and explicitly save the returned replacement. It loses automatic Project lookup, provenance, discovery, and persistence, but not calculation, validation, editing, or rendering behavior.
+
+## Provenance actors
+
+Every creation and change records one explicit host actor. An `agentRun` actor carries the Thread and Agent Run IDs that initiated the change. A `userAction` actor carries a host-issued action ID for a direct save from Plugin UI; it deliberately does not invent a Thread or Agent Run. The action ID is an audit correlation handle, not an access-control token and not a Plugin requirement.
 
 ## Initial limits
 

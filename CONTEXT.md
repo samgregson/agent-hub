@@ -9,7 +9,7 @@ A durable workspace that groups related threads, artifacts, sources, instruction
 _Avoid_: Local project, project folder
 
 **Artifact**:
-A durable, self-describing, serializable work product owned by a project. It carries provenance linking it to the thread and agent run that produced it and may be inspected or reused by other threads in the project. A project file becomes an artifact only through an explicit, reviewable elevation action.
+A durable, self-describing, serializable work product owned by a project. It carries provenance to either the thread and agent run that produced it or a direct user action, and may be inspected or reused by other threads in the project. A project file becomes an artifact only through an explicit, reviewable elevation action.
 _Avoid_: Attachment, thread output, working file
 
 **Project File**:

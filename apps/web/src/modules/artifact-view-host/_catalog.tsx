@@ -40,8 +40,6 @@ export function ArtifactCatalog({
 
   return (
     <section className={styles.catalog}>
-      <strong>Artifacts</strong>
-      <p>Durable project work products. Project files appear below until elevated.</p>
       {error ? <p className={styles.error}>{error}</p> : null}
       {!catalog && !error ? <p>Loading Artifacts…</p> : null}
       {catalog?.artifacts.map((artifact) => (

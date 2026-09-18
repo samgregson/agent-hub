@@ -47,14 +47,27 @@ class ArtifactPluginBinding(BaseModel):
     version: Annotated[str, Field(min_length=1)]
 
 
+class Kind(StrEnum):
+    agent_run = "agentRun"
+    user_action = "userAction"
+
+
+class ArtifactProvenanceActor(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    kind: Kind
+    thread_id: Annotated[EntityId | None, Field(alias="threadId")] = None
+    run_id: Annotated[EntityId | None, Field(alias="runId")] = None
+    user_action_id: Annotated[EntityId | None, Field(alias="userActionId")] = None
+
+
 class ArtifactProvenance(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    created_by_thread_id: Annotated[EntityId, Field(alias="createdByThreadId")]
-    created_by_run_id: Annotated[EntityId, Field(alias="createdByRunId")]
-    last_changed_by_thread_id: Annotated[EntityId, Field(alias="lastChangedByThreadId")]
-    last_changed_by_run_id: Annotated[EntityId, Field(alias="lastChangedByRunId")]
+    created_by: Annotated[ArtifactProvenanceActor, Field(alias="createdBy")]
+    last_changed_by: Annotated[ArtifactProvenanceActor, Field(alias="lastChangedBy")]
 
 
 class ArtifactRelation(BaseModel):
@@ -189,8 +202,12 @@ class FoundationContracts(BaseModel):
         extra="forbid",
     )
     agent_run: Annotated[AgentRun | None, Field(alias="agentRun")] = None
-    artifact_catalog: Annotated[ArtifactCatalog | None, Field(alias="artifactCatalog")] = None
-    artifact_document: Annotated[ArtifactDocument | None, Field(alias="artifactDocument")] = None
+    artifact_catalog: Annotated[
+        ArtifactCatalog | None, Field(alias="artifactCatalog")
+    ] = None
+    artifact_document: Annotated[
+        ArtifactDocument | None, Field(alias="artifactDocument")
+    ] = None
     error: ErrorEnvelope | None = None
     project_file_preview: Annotated[
         ProjectFilePreview | None, Field(alias="projectFilePreview")

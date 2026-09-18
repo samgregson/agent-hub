@@ -1,10 +1,11 @@
 import pytest
 
-from agent_hub_api.contracts import EntityId
+from agent_hub_api.contracts import ArtifactProvenanceActor, EntityId
 from agent_hub_api.modules.artifacts import (
     ArtifactAuthorityError,
     ArtifactDraft,
     ArtifactMutationAccess,
+    ArtifactUserActionAccess,
     ArtifactVersionConflict,
     create_memory_artifact_module,
 )
@@ -66,7 +67,11 @@ async def test_artifact_replacement_preserves_host_fields_and_increments_version
                 update={
                     "document_version": 999,
                     "provenance": created.artifact.provenance.model_copy(
-                        update={"created_by_run_id": EntityId.model_validate("forged")}
+                        update={
+                            "created_by": ArtifactProvenanceActor.model_validate(
+                                {"kind": "agentRun", "runId": "forged", "threadId": "forged"}
+                            )
+                        }
                     ),
                     "relations": [],
                 }
@@ -86,9 +91,40 @@ async def test_artifact_replacement_preserves_host_fields_and_increments_version
     assert saved.payload == {"status": "updated"}
     assert saved.artifact.id == created.artifact.id
     assert saved.artifact.document_version == 2
-    assert saved.artifact.provenance.created_by_run_id.root == "run-a"
-    assert saved.artifact.provenance.last_changed_by_thread_id.root == "thread-b"
-    assert saved.artifact.provenance.last_changed_by_run_id.root == "run-b"
+    assert saved.artifact.provenance.created_by.run_id == EntityId.model_validate("run-a")
+    assert saved.artifact.provenance.last_changed_by.thread_id == EntityId.model_validate(
+        "thread-b"
+    )
+    assert saved.artifact.provenance.last_changed_by.run_id == EntityId.model_validate("run-b")
+
+
+@pytest.mark.asyncio
+async def test_user_initiated_artifact_changes_have_user_action_provenance() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
+    artifacts = create_memory_artifact_module(projects)
+    created = await artifacts.create(
+        ArtifactUserActionAccess(subject="sam", user_action_id="action-create"),
+        project.id,
+        _draft(),
+    )
+
+    saved = await artifacts.replace(
+        ArtifactUserActionAccess(subject="sam", user_action_id="action-edit"),
+        project.id,
+        created.artifact.id.root,
+        expected_version=1,
+        replacement=created.model_copy(update={"payload": {"status": "unavailable"}}),
+    )
+
+    assert created.artifact.provenance.created_by.kind == "userAction"
+    assert created.artifact.provenance.created_by.user_action_id == EntityId.model_validate(
+        "action-create"
+    )
+    assert saved.artifact.provenance.last_changed_by.kind == "userAction"
+    assert saved.artifact.provenance.last_changed_by.user_action_id == EntityId.model_validate(
+        "action-edit"
+    )
 
 
 @pytest.mark.asyncio
@@ -154,7 +190,7 @@ async def test_enabled_plugin_draft_is_saved_with_host_assigned_artifact_fields(
     assert created.artifact.document_version == 1
     assert created.artifact.plugin.id == "foundation-fixture"
     assert created.artifact.plugin.version == "0.1.0"
-    assert created.artifact.provenance.created_by_run_id.root == "run-a"
+    assert created.artifact.provenance.created_by.run_id == EntityId.model_validate("run-a")
     assert created.payload == {"status": "available"}
     assert gateway.calls == [
         ("foundation-fixture", "create_status_artifact", {"title": "Bridge status"})
@@ -190,7 +226,7 @@ async def test_enabled_plugin_replacement_is_applied_through_the_artifact_author
 
     assert saved.payload == {"status": "unavailable"}
     assert saved.artifact.document_version == 2
-    assert saved.artifact.provenance.last_changed_by_run_id.root == "run-b"
+    assert saved.artifact.provenance.last_changed_by.run_id == EntityId.model_validate("run-b")
     plugin_id, tool_name, arguments = gateway.calls[0]
     assert (plugin_id, tool_name) == ("foundation-fixture", "set_status_artifact_status")
     assert arguments["status"] == "unavailable"

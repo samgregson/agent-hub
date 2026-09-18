@@ -91,6 +91,53 @@ test("project creation is unavailable before the workspace hydrates", async ({
   await context.close();
 });
 
+test("Artifact navigation is a compact list rather than explanatory copy", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-18T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-18T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({
+      json: {
+        artifacts: [
+          {
+            documentVersion: 1,
+            id: "artifact-123",
+            pluginId: "foundation-fixture",
+            pluginVersion: "0.1.0",
+            title: "Foundation status",
+            type: "agent-hub.fixture.status",
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Artifacts" }).click();
+
+  await expect(page.getByRole("button", { name: "Foundation status" })).toBeVisible();
+  await expect(
+    page.getByText("Durable project work products. Project files appear below until elevated."),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Shared working files. Opening one does not create an Artifact."),
+  ).toHaveCount(0);
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 

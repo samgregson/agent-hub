@@ -53,20 +53,24 @@
         "version": { "type": "string", "minLength": 1 }
       }
     },
+    "ArtifactProvenanceActor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["agentRun", "userAction"] },
+        "threadId": { "$ref": "#/$defs/EntityId" },
+        "runId": { "$ref": "#/$defs/EntityId" },
+        "userActionId": { "$ref": "#/$defs/EntityId" }
+      }
+    },
     "ArtifactProvenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "createdByThreadId",
-        "createdByRunId",
-        "lastChangedByThreadId",
-        "lastChangedByRunId"
-      ],
+      "required": ["createdBy", "lastChangedBy"],
       "properties": {
-        "createdByThreadId": { "$ref": "#/$defs/EntityId" },
-        "createdByRunId": { "$ref": "#/$defs/EntityId" },
-        "lastChangedByThreadId": { "$ref": "#/$defs/EntityId" },
-        "lastChangedByRunId": { "$ref": "#/$defs/EntityId" }
+        "createdBy": { "$ref": "#/$defs/ArtifactProvenanceActor" },
+        "lastChangedBy": { "$ref": "#/$defs/ArtifactProvenanceActor" }
       }
     },
     "ArtifactRelation": {

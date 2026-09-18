@@ -7,7 +7,7 @@ from uuid import uuid4
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from agent_hub_api.contracts import ArtifactDocument, EntityId
+from agent_hub_api.contracts import ArtifactDocument, ArtifactProvenanceActor
 from agent_hub_api.modules.plugin_gateway import (
     PluginSelection,
     PluginToolResult,
@@ -24,9 +24,20 @@ class ArtifactAccess:
 
 @dataclass(frozen=True, slots=True)
 class ArtifactMutationAccess(ArtifactAccess):
+    """Trusted provenance for a change initiated by one Agent Run."""
+
     thread_id: str
     run_id: str
 
+
+@dataclass(frozen=True, slots=True)
+class ArtifactUserActionAccess(ArtifactAccess):
+    """Trusted provenance for one direct, user-initiated Artifact action."""
+
+    user_action_id: str
+
+
+ArtifactWriteAccess = ArtifactMutationAccess | ArtifactUserActionAccess
 
 @dataclass(frozen=True, slots=True)
 class ArtifactDraft:
@@ -111,9 +122,10 @@ class ArtifactModule:
         self._plugin_gateway = plugin_gateway
 
     async def create(
-        self, access: ArtifactMutationAccess, project_id: str, draft: ArtifactDraft
+        self, access: ArtifactWriteAccess, project_id: str, draft: ArtifactDraft
     ) -> ArtifactDocument:
         await self._authorize(access, project_id)
+        actor = _provenance_actor(access)
         document = ArtifactDocument.model_validate(
             {
                 "artifact": {
@@ -125,10 +137,8 @@ class ArtifactModule:
                     "schema": {"id": draft.schema_id, "version": draft.schema_version},
                     "plugin": {"id": draft.plugin_id, "version": draft.plugin_version},
                     "provenance": {
-                        "createdByThreadId": access.thread_id,
-                        "createdByRunId": access.run_id,
-                        "lastChangedByThreadId": access.thread_id,
-                        "lastChangedByRunId": access.run_id,
+                        "createdBy": actor.model_dump(by_alias=True),
+                        "lastChangedBy": actor.model_dump(by_alias=True),
                     },
                     "relations": [],
                 },
@@ -139,7 +149,7 @@ class ArtifactModule:
 
     async def create_from_plugin(
         self,
-        access: ArtifactMutationAccess,
+        access: ArtifactWriteAccess,
         project_id: str,
         *,
         plugin_id: str,
@@ -165,7 +175,7 @@ class ArtifactModule:
 
     async def apply_plugin_operation(
         self,
-        access: ArtifactMutationAccess,
+        access: ArtifactWriteAccess,
         project_id: str,
         artifact_id: str,
         *,
@@ -225,7 +235,7 @@ class ArtifactModule:
 
     async def replace(
         self,
-        access: ArtifactMutationAccess,
+        access: ArtifactWriteAccess,
         project_id: str,
         artifact_id: str,
         expected_version: int,
@@ -241,10 +251,7 @@ class ArtifactModule:
                 "id": current.artifact.id,
                 "document_version": current.artifact.document_version + 1,
                 "provenance": current.artifact.provenance.model_copy(
-                    update={
-                        "last_changed_by_thread_id": EntityId.model_validate(access.thread_id),
-                        "last_changed_by_run_id": EntityId.model_validate(access.run_id),
-                    }
+                    update={"last_changed_by": _provenance_actor(access)}
                 ),
                 "relations": current.artifact.relations,
             }
@@ -294,6 +301,25 @@ def _require_same_plugin_binding(current: ArtifactDocument, replacement: Artifac
         or current.artifact.plugin != replacement.artifact.plugin
     ):
         raise ArtifactAuthorityError("A Plugin cannot change an Artifact binding.")
+
+
+def _provenance_actor(access: ArtifactWriteAccess) -> ArtifactProvenanceActor:
+    if isinstance(access, ArtifactMutationAccess):
+        return ArtifactProvenanceActor.model_validate(
+            {"kind": "agentRun", "threadId": access.thread_id, "runId": access.run_id}
+        )
+    return ArtifactProvenanceActor.model_validate(
+        {"kind": "userAction", "userActionId": access.user_action_id}
+    )
+
+
+def _catalog_actor_values(actor: Any) -> tuple[str, str | None, str | None, str | None]:
+    return (
+        actor.kind,
+        actor.thread_id.root if actor.thread_id else None,
+        actor.run_id.root if actor.run_id else None,
+        actor.user_action_id.root if actor.user_action_id else None,
+    )
 
 
 def _draft_from_plugin_result(
@@ -384,6 +410,8 @@ class PostgresArtifactStore:
     async def create(self, record: ArtifactRecord) -> ArtifactRecord:
         document = record.document
         artifact = document.artifact
+        created_by = _catalog_actor_values(artifact.provenance.created_by)
+        last_changed_by = _catalog_actor_values(artifact.provenance.last_changed_by)
         path = _artifact_path(artifact.id.root)
         content = _serialize_document(document)
         connection = await self._connect()
@@ -406,9 +434,11 @@ class PostgresArtifactStore:
                 INSERT INTO artifact_catalog
                     (project_id, artifact_id, path, document_version, type, title, summary,
                      plugin_id, plugin_version, schema_id, schema_version,
-                     created_by_thread_id, created_by_run_id,
-                     last_changed_by_thread_id, last_changed_by_run_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     created_by_kind, created_by_thread_id, created_by_run_id,
+                     created_by_user_action_id, last_changed_by_kind,
+                     last_changed_by_thread_id, last_changed_by_run_id,
+                     last_changed_by_user_action_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     record.project_id,
@@ -422,10 +452,8 @@ class PostgresArtifactStore:
                     artifact.plugin.version,
                     artifact.schema_.id,
                     artifact.schema_.version,
-                    artifact.provenance.created_by_thread_id.root,
-                    artifact.provenance.created_by_run_id.root,
-                    artifact.provenance.last_changed_by_thread_id.root,
-                    artifact.provenance.last_changed_by_run_id.root,
+                    *created_by,
+                    *last_changed_by,
                 ),
             )
         return record
@@ -469,6 +497,7 @@ class PostgresArtifactStore:
         self, project_id: str, artifact_id: str, document: ArtifactDocument
     ) -> ArtifactRecord | None:
         artifact = document.artifact
+        last_changed_by = _catalog_actor_values(artifact.provenance.last_changed_by)
         expected_version = artifact.document_version - 1
         connection = await self._connect()
         async with connection:
@@ -476,7 +505,8 @@ class PostgresArtifactStore:
                 """
                 UPDATE artifact_catalog
                 SET document_version = %s, title = %s, summary = %s,
-                    last_changed_by_thread_id = %s, last_changed_by_run_id = %s,
+                    last_changed_by_kind = %s, last_changed_by_thread_id = %s,
+                    last_changed_by_run_id = %s, last_changed_by_user_action_id = %s,
                     updated_at = now()
                 WHERE project_id = %s AND artifact_id = %s AND document_version = %s
                 RETURNING path
@@ -485,8 +515,7 @@ class PostgresArtifactStore:
                     artifact.document_version,
                     artifact.title,
                     artifact.summary,
-                    artifact.provenance.last_changed_by_thread_id.root,
-                    artifact.provenance.last_changed_by_run_id.root,
+                    *last_changed_by,
                     project_id,
                     artifact_id,
                     expected_version,

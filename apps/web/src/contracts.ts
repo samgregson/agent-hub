@@ -37,11 +37,8 @@ export interface ErrorEnvelope {
     [k: string]: unknown;
   };
 }
-export interface ArtifactDocument {
-  artifact: ArtifactEnvelope;
-  payload: {
-    [k: string]: unknown;
-  };
+export interface ArtifactCatalog {
+  artifacts: ArtifactSummary[];
 }
 export interface ArtifactSummary {
   id: EntityId;
@@ -52,8 +49,11 @@ export interface ArtifactSummary {
   pluginId: string;
   pluginVersion: string;
 }
-export interface ArtifactCatalog {
-  artifacts: ArtifactSummary[];
+export interface ArtifactDocument {
+  artifact: ArtifactEnvelope;
+  payload: {
+    [k: string]: unknown;
+  };
 }
 export interface ArtifactEnvelope {
   id: EntityId;
@@ -75,10 +75,14 @@ export interface ArtifactPluginBinding {
   version: string;
 }
 export interface ArtifactProvenance {
-  createdByThreadId: EntityId;
-  createdByRunId: EntityId;
-  lastChangedByThreadId: EntityId;
-  lastChangedByRunId: EntityId;
+  createdBy: ArtifactProvenanceActor;
+  lastChangedBy: ArtifactProvenanceActor;
+}
+export interface ArtifactProvenanceActor {
+  kind: "agentRun" | "userAction";
+  threadId?: EntityId;
+  runId?: EntityId;
+  userActionId?: EntityId;
 }
 export interface ArtifactRelation {
   type: string;
