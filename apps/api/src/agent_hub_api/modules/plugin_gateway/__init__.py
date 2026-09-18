@@ -14,11 +14,16 @@ from agent_hub_api.modules.plugin_gateway._application import (
     create_postgres_plugin_gateway,
 )
 from agent_hub_api.modules.plugin_gateway._http import create_plugin_gateway_router
-from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient, PluginTransportError
+from agent_hub_api.modules.plugin_gateway._mcp import (
+    McpPluginClient,
+    PluginEndpointRejected,
+    PluginTransportError,
+)
 
 __all__ = [
     "MemoryPluginEnablementStore",
     "McpPluginClient",
+    "PluginEndpointRejected",
     "PostgresPluginEnablementStore",
     "PluginCapability",
     "PluginDiscoveredTool",

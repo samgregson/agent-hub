@@ -1,7 +1,10 @@
+import ipaddress
 import json
+import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from mcp import Client
 
@@ -12,6 +15,10 @@ class PluginTransportError(Exception):
     """The reviewed Plugin did not return a usable MCP result."""
 
 
+class PluginEndpointRejected(PluginTransportError):
+    """The deployment catalog endpoint violates outbound connection policy."""
+
+
 @dataclass(frozen=True, slots=True)
 class McpPluginClient:
     """One bounded Streamable HTTP call to a deployment-controlled Plugin endpoint."""
@@ -19,8 +26,10 @@ class McpPluginClient:
     endpoint: str
     timeout_seconds: float
     max_result_bytes: int
+    allow_private_network: bool = False
 
     async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+        self._validate_endpoint()
         try:
             async with Client(self.endpoint, read_timeout_seconds=self.timeout_seconds) as client:
                 result = await client.list_tools()
@@ -40,6 +49,7 @@ class McpPluginClient:
     async def call_tool(
         self, tool_name: str, arguments: Mapping[str, object]
     ) -> PluginToolResult:
+        self._validate_endpoint()
         try:
             async with Client(self.endpoint, read_timeout_seconds=self.timeout_seconds) as client:
                 response = await client.call_tool(
@@ -67,6 +77,39 @@ class McpPluginClient:
             raise PluginTransportError("The Plugin result exceeded the configured size limit.")
         return PluginToolResult(content=content, structured_content=structured_content)
 
+    def _validate_endpoint(self) -> None:
+        parsed = urlsplit(self.endpoint)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise PluginEndpointRejected("The configured Plugin endpoint is not a safe MCP URL.")
+        if self.allow_private_network:
+            return
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            resolved = socket.getaddrinfo(parsed.hostname, port)
+        except (socket.gaierror, ValueError) as error:
+            raise PluginEndpointRejected(
+                "The configured Plugin hostname could not be resolved."
+            ) from error
+        addresses: set[str] = set()
+        for entry in resolved:
+            address = entry[4][0]
+            if not isinstance(address, str):
+                raise PluginEndpointRejected(
+                    "The configured Plugin returned an invalid address."
+                )
+            addresses.add(address)
+        if not addresses or any(_is_private_address(address) for address in addresses):
+            raise PluginEndpointRejected(
+                "The configured Plugin endpoint resolves to a private address."
+            )
+
 
 def _content_text(item: object) -> str:
     text = getattr(item, "text", None)
@@ -91,3 +134,20 @@ def _json_value(value: object) -> Any:
     if callable(model_dump):
         return model_dump(mode="json")
     return value
+
+
+def _is_private_address(address: str) -> bool:
+    try:
+        candidate = ipaddress.ip_address(address)
+    except ValueError as error:
+        raise PluginEndpointRejected(
+            "The configured Plugin returned an invalid address."
+        ) from error
+    return (
+        candidate.is_private
+        or candidate.is_loopback
+        or candidate.is_link_local
+        or candidate.is_reserved
+        or candidate.is_unspecified
+        or candidate.is_multicast
+    )

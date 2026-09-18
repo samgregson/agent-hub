@@ -46,8 +46,12 @@ def create_project_files_router(
             ) from error
         return ProjectFileCatalog(
             files=[
-                ProjectFileSummary(
-                    path=f"/project{file.path}", version=file.version, updatedAt=file.updated_at
+                ProjectFileSummary.model_validate(
+                    {
+                        "path": f"/project{file.path}",
+                        "version": file.version,
+                        "updatedAt": file.updated_at,
+                    }
                 )
                 for file in files
             ]

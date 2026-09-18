@@ -1,8 +1,14 @@
+import socket
 from dataclasses import dataclass
 
 import pytest
 
-from agent_hub_api.modules.plugin_gateway import McpPluginClient, PluginTransportError, _mcp
+from agent_hub_api.modules.plugin_gateway import (
+    McpPluginClient,
+    PluginEndpointRejected,
+    PluginTransportError,
+    _mcp,
+)
 
 
 @dataclass
@@ -53,6 +59,7 @@ async def test_mcp_client_normalizes_a_bounded_result(monkeypatch: pytest.Monkey
         endpoint="http://foundation-fixture:8000/mcp",
         timeout_seconds=12,
         max_result_bytes=1_024,
+        allow_private_network=True,
     )
 
     result = await client.call_tool("foundation_status", {})
@@ -73,7 +80,46 @@ async def test_mcp_client_rejects_an_oversized_result(monkeypatch: pytest.Monkey
         endpoint="http://foundation-fixture:8000/mcp",
         timeout_seconds=12,
         max_result_bytes=32,
+        allow_private_network=True,
     )
 
     with pytest.raises(PluginTransportError, match="size limit"):
         await client.call_tool("foundation_status", {})
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "ftp://plugin.example/mcp",
+        "https://user:password@plugin.example/mcp",
+        "https://plugin.example/mcp?token=secret",
+        "https://plugin.example/mcp#fragment",
+        "http://127.0.0.1/mcp",
+    ],
+)
+def test_mcp_client_rejects_unsafe_endpoint(endpoint: str) -> None:
+    client = McpPluginClient(
+        endpoint=endpoint,
+        timeout_seconds=12,
+        max_result_bytes=1_024,
+    )
+
+    with pytest.raises(PluginEndpointRejected):
+        client._validate_endpoint()
+
+
+def test_internal_fixture_endpoint_requires_an_explicit_catalog_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def should_not_resolve(*_: object, **__: object) -> None:
+        raise AssertionError("private-network exception must not resolve the endpoint")
+
+    monkeypatch.setattr(socket, "getaddrinfo", should_not_resolve)
+    client = McpPluginClient(
+        endpoint="http://foundation-fixture:8000/mcp",
+        timeout_seconds=12,
+        max_result_bytes=1_024,
+        allow_private_network=True,
+    )
+
+    client._validate_endpoint()

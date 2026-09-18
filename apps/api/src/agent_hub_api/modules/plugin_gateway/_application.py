@@ -295,6 +295,7 @@ def create_postgres_plugin_gateway(
                 endpoint=fixture.endpoint,
                 timeout_seconds=settings.plugin_tool_timeout_seconds,
                 max_result_bytes=settings.plugin_result_max_bytes,
+                allow_private_network=True,
             )
         },
         discovery_cache_seconds=settings.plugin_discovery_cache_seconds,
