@@ -17,6 +17,7 @@ class PluginTool:
     name: str
     read_only: bool
     description: str = ""
+    agent_visible: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,7 +184,7 @@ class PluginGatewayModule:
             tools.extend(
                 _agent_tool(self, project_id, manifest, plugin_tool, discovered[plugin_tool.name])
                 for plugin_tool in manifest.tools
-                if plugin_tool.name in discovered
+                if plugin_tool.agent_visible and plugin_tool.name in discovered
             )
         return tuple(tools)
 
@@ -282,7 +283,24 @@ def create_postgres_plugin_gateway(
         name="Foundation fixture",
         version="0.1.0",
         endpoint="http://foundation-fixture:8000/mcp",
-        tools=(PluginTool(name="foundation_status", read_only=True),),
+        tools=(
+            PluginTool(name="foundation_status", read_only=True),
+            PluginTool(
+                name="create_status_artifact",
+                read_only=False,
+                agent_visible=False,
+            ),
+            PluginTool(
+                name="validate_status_artifact",
+                read_only=True,
+                agent_visible=False,
+            ),
+            PluginTool(
+                name="set_status_artifact_status",
+                read_only=False,
+                agent_visible=False,
+            ),
+        ),
     )
     from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
 

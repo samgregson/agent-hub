@@ -51,12 +51,14 @@ def create_app(
     resolved_identity = identity or create_identity_module(resolved_settings)
     resolved_projects = projects or create_postgres_project_module(resolved_settings)
     resolved_project_files = create_postgres_project_files(resolved_settings, resolved_projects)
-    resolved_artifacts = artifacts or create_postgres_artifact_module(
-        resolved_settings, resolved_projects
-    )
     resolved_plugin_gateway = plugin_gateway or create_postgres_plugin_gateway(
         resolved_settings,
         resolved_projects,
+    )
+    resolved_artifacts = artifacts or create_postgres_artifact_module(
+        resolved_settings,
+        resolved_projects,
+        resolved_plugin_gateway,
     )
     deep_agent_runner = None
     if agent_execution is None:

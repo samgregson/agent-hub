@@ -8,6 +8,10 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from agent_hub_api.contracts import ArtifactDocument, EntityId
+from agent_hub_api.modules.plugin_gateway import (
+    PluginSelection,
+    PluginToolResult,
+)
 from agent_hub_api.modules.project_files import ARTIFACT_ROOT
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.settings import Settings
@@ -54,6 +58,33 @@ class ArtifactAuthorityError(Exception):
     """A Plugin replacement changed a field owned by Agent Hub."""
 
 
+class ArtifactPluginUnavailable(Exception):
+    """The requested Plugin is not enabled in the authorized Project."""
+
+
+class ArtifactPluginDraftInvalid(Exception):
+    """The Plugin did not return a usable portable Artifact draft."""
+
+
+class ArtifactPluginReplacementInvalid(Exception):
+    """The Plugin did not return a usable portable Artifact replacement."""
+
+
+class ArtifactPluginGateway(Protocol):
+    async def selections(
+        self, access: ProjectAccess, project_id: str
+    ) -> Sequence[PluginSelection]: ...
+
+    async def call(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> PluginToolResult: ...
+
+
 class ArtifactStore(Protocol):
     async def create(self, record: ArtifactRecord) -> ArtifactRecord: ...
 
@@ -69,9 +100,15 @@ class ArtifactStore(Protocol):
 class ArtifactModule:
     """Own portable Artifact documents and restore host authority before persistence."""
 
-    def __init__(self, projects: ProjectModule, store: ArtifactStore) -> None:
+    def __init__(
+        self,
+        projects: ProjectModule,
+        store: ArtifactStore,
+        plugin_gateway: ArtifactPluginGateway | None = None,
+    ) -> None:
         self._projects = projects
         self._store = store
+        self._plugin_gateway = plugin_gateway
 
     async def create(
         self, access: ArtifactMutationAccess, project_id: str, draft: ArtifactDraft
@@ -99,6 +136,77 @@ class ArtifactModule:
             }
         )
         return (await self._store.create(ArtifactRecord(project_id, document))).document
+
+    async def create_from_plugin(
+        self,
+        access: ArtifactMutationAccess,
+        project_id: str,
+        *,
+        plugin_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> ArtifactDocument:
+        """Persist an enabled Plugin's portable draft with host-owned fields."""
+        await self._authorize(access, project_id)
+        selection = await self._enabled_plugin(access, project_id, plugin_id)
+        assert self._plugin_gateway is not None
+        result = await self._plugin_gateway.call(
+            ProjectAccess(subject=access.subject),
+            project_id,
+            plugin_id,
+            tool_name,
+            arguments,
+        )
+        return await self.create(
+            access,
+            project_id,
+            _draft_from_plugin_result(result, selection.manifest.id, selection.manifest.version),
+        )
+
+    async def apply_plugin_operation(
+        self,
+        access: ArtifactMutationAccess,
+        project_id: str,
+        artifact_id: str,
+        *,
+        expected_version: int,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> ArtifactDocument:
+        """Apply a Plugin's complete replacement to one current Artifact document."""
+        current = await self.load(access, project_id, artifact_id)
+        selection = await self._enabled_plugin(access, project_id, current.artifact.plugin.id)
+        if selection.manifest.version != current.artifact.plugin.version:
+            raise ArtifactPluginUnavailable
+        if "document" in arguments:
+            raise ArtifactPluginReplacementInvalid(
+                "The host, rather than the caller, supplies the current Artifact document."
+            )
+        assert self._plugin_gateway is not None
+        result = await self._plugin_gateway.call(
+            ProjectAccess(subject=access.subject),
+            project_id,
+            selection.manifest.id,
+            tool_name,
+            {"document": current.model_dump(by_alias=True), **arguments},
+        )
+        if result.structured_content is None:
+            raise ArtifactPluginReplacementInvalid(
+                "The Plugin result did not include a structured Artifact replacement."
+            )
+        try:
+            replacement = ArtifactDocument.model_validate(result.structured_content)
+        except ValueError as error:
+            raise ArtifactPluginReplacementInvalid(
+                "The Plugin result has an invalid Artifact replacement."
+            ) from error
+        return await self.replace(
+            access,
+            project_id,
+            artifact_id,
+            expected_version,
+            replacement,
+        )
 
     async def load(
         self, access: ArtifactAccess, project_id: str, artifact_id: str
@@ -158,6 +266,26 @@ class ArtifactModule:
         except ProjectNotFound as error:
             raise ArtifactNotFound from error
 
+    async def _enabled_plugin(
+        self, access: ArtifactAccess, project_id: str, plugin_id: str
+    ) -> PluginSelection:
+        if self._plugin_gateway is None:
+            raise ArtifactPluginUnavailable
+        selections = await self._plugin_gateway.selections(
+            ProjectAccess(subject=access.subject), project_id
+        )
+        selection = next(
+            (
+                candidate
+                for candidate in selections
+                if candidate.enabled and candidate.manifest.id == plugin_id
+            ),
+            None,
+        )
+        if selection is None:
+            raise ArtifactPluginUnavailable
+        return selection
+
 
 def _require_same_plugin_binding(current: ArtifactDocument, replacement: ArtifactDocument) -> None:
     if (
@@ -166,6 +294,45 @@ def _require_same_plugin_binding(current: ArtifactDocument, replacement: Artifac
         or current.artifact.plugin != replacement.artifact.plugin
     ):
         raise ArtifactAuthorityError("A Plugin cannot change an Artifact binding.")
+
+
+def _draft_from_plugin_result(
+    result: PluginToolResult, plugin_id: str, plugin_version: str
+) -> ArtifactDraft:
+    value = result.structured_content
+    if value is None:
+        raise ArtifactPluginDraftInvalid(
+            "The Plugin result did not include a structured Artifact draft."
+        )
+    type_ = value.get("type")
+    title = value.get("title")
+    summary = value.get("summary")
+    schema = value.get("schema")
+    payload = value.get("payload")
+    if (
+        not isinstance(type_, str)
+        or not isinstance(title, str)
+        or not isinstance(summary, str | type(None))
+        or not isinstance(schema, Mapping)
+        or not isinstance(payload, Mapping)
+    ):
+        raise ArtifactPluginDraftInvalid("The Plugin result has an invalid Artifact draft shape.")
+    schema_id = schema.get("id")
+    schema_version = schema.get("version")
+    if not isinstance(schema_id, str) or not isinstance(schema_version, str):
+        raise ArtifactPluginDraftInvalid(
+            "The Plugin result has an invalid Artifact schema binding."
+        )
+    return ArtifactDraft(
+        type=type_,
+        title=title,
+        summary=summary,
+        plugin_id=plugin_id,
+        plugin_version=plugin_version,
+        schema_id=schema_id,
+        schema_version=schema_version,
+        payload=dict(payload),
+    )
 
 
 class MemoryArtifactStore:
@@ -360,9 +527,15 @@ def _document_from_row(row: Mapping[str, object]) -> ArtifactDocument:
     return ArtifactDocument.model_validate(json.loads(content))
 
 
-def create_memory_artifact_module(projects: ProjectModule) -> ArtifactModule:
-    return ArtifactModule(projects, MemoryArtifactStore())
+def create_memory_artifact_module(
+    projects: ProjectModule, plugin_gateway: ArtifactPluginGateway | None = None
+) -> ArtifactModule:
+    return ArtifactModule(projects, MemoryArtifactStore(), plugin_gateway)
 
 
-def create_postgres_artifact_module(settings: Settings, projects: ProjectModule) -> ArtifactModule:
-    return ArtifactModule(projects, PostgresArtifactStore(settings))
+def create_postgres_artifact_module(
+    settings: Settings,
+    projects: ProjectModule,
+    plugin_gateway: ArtifactPluginGateway | None = None,
+) -> ArtifactModule:
+    return ArtifactModule(projects, PostgresArtifactStore(settings), plugin_gateway)
