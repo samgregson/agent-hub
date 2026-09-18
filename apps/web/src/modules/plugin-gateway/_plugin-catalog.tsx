@@ -20,10 +20,12 @@ export function PluginCatalog({ projectId }: PluginCatalogProps) {
 
   useEffect(() => {
     let active = true;
-    setError(null);
     listPluginSelections(projectId)
       .then((loaded) => {
-        if (active) setSelections(loaded);
+        if (active) {
+          setError(null);
+          setSelections(loaded);
+        }
       })
       .catch(() => {
         if (active) setError("Plugins are temporarily unavailable.");
@@ -51,7 +53,8 @@ export function PluginCatalog({ projectId }: PluginCatalogProps) {
   }
 
   if (error) return <p className={styles.error}>{error}</p>;
-  if (!selections.length) return <p className={styles.empty}>No reviewed Plugins are available.</p>;
+  if (!selections.length)
+    return <p className={styles.empty}>No reviewed Plugins are available.</p>;
 
   return (
     <div className={styles.catalog}>

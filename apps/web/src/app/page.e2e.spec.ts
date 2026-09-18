@@ -1,5 +1,53 @@
 import { expect, test } from "@playwright/test";
 
+test("Plugins are available through the browser-facing Project API", async ({
+  request,
+}) => {
+  const projectResponse = await request.post("/api/projects", {
+    data: { name: "Plugin proxy verification" },
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as { id: string };
+
+  const pluginsResponse = await request.get(
+    `/api/projects/${project.id}/plugins`,
+  );
+
+  expect(pluginsResponse.status()).toBe(200);
+  await expect(pluginsResponse.json()).resolves.toEqual([
+    {
+      enabled: false,
+      id: "foundation-fixture",
+      name: "Foundation fixture",
+      tools: [{ name: "foundation_status", readOnly: true }],
+      version: "0.1.0",
+    },
+  ]);
+});
+
+test("Plugin selections can be updated through the browser-facing Project API", async ({
+  request,
+}) => {
+  const projectResponse = await request.post("/api/projects", {
+    data: { name: "Plugin selection proxy verification" },
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as { id: string };
+  const selectionUrl = `/api/projects/${project.id}/plugins/foundation-fixture`;
+
+  const enabledResponse = await request.put(selectionUrl);
+  expect(enabledResponse.status()).toBe(204);
+  const enabledPlugins = await request.get(
+    `/api/projects/${project.id}/plugins`,
+  );
+  await expect(enabledPlugins.json()).resolves.toMatchObject([
+    { enabled: true, id: "foundation-fixture" },
+  ]);
+
+  const disabledResponse = await request.delete(selectionUrl);
+  expect(disabledResponse.status()).toBe(204);
+});
+
 test("user can create a Project", async ({ page }) => {
   const project = {
     createdAt: "2026-09-15T00:00:00.000Z",
@@ -127,7 +175,7 @@ test.describe("at phone width", () => {
     await expect(drawer).toBeVisible();
     await drawer.getByRole("button", { name: "+ New Thread" }).click();
     await expect(
-      drawer.getByRole("button", { name: "New Thread 1" }),
+      drawer.getByRole("button", { name: "New Thread 1", exact: true }),
     ).toBeVisible();
 
     await drawer.getByRole("button", { name: "Artifacts" }).click();
@@ -195,6 +243,7 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       await route.fulfill({
         contentType: "text/event-stream",
         body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
           {
             type: "TOOL_CALL_START",
             toolCallId: "tool-123",
@@ -225,6 +274,9 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       });
     },
   );
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
   await page.route("**/api/projects/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.endsWith("/agent")) {
