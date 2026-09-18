@@ -12,10 +12,6 @@ from agent_hub_foundation_fixture._server import (
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason="FastMCP 4.0.4 tool calls time out under Python 3.14; verify via HTTP after fixing it.",
-)
 async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
     async with Client(create_fixture_server(), timeout=1, init_timeout=1) as client:
         tools = await client.list_tools()
@@ -32,5 +28,5 @@ async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
         resources = await client.list_resources()
         assert any(str(resource.uri) == FIXTURE_APP_RESOURCE_URI for resource in resources)
         contents = await client.read_resource(FIXTURE_APP_RESOURCE_URI)
-        assert contents[0].mimeType == "text/html;profile=mcp-app"
+        assert contents[0].mime_type == "text/html;profile=mcp-app"
         assert "Foundation fixture available" in contents[0].text

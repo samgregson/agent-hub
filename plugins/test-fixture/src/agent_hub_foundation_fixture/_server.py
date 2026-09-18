@@ -18,7 +18,7 @@ def create_fixture_server() -> FastMCP:
         annotations={"readOnlyHint": True, "idempotentHint": True},
         app=AppConfig(resource_uri=FIXTURE_APP_RESOURCE_URI),
     )
-    def foundation_status() -> dict[str, str]:
+    async def foundation_status() -> dict[str, str]:
         """Return the portable fixture's small read-only status."""
         return {
             "status": "available",
@@ -33,7 +33,7 @@ def create_fixture_server() -> FastMCP:
         annotations={"readOnlyHint": True, "idempotentHint": True},
         meta={"ui": app_config_to_meta_dict(AppConfig())},
     )
-    def foundation_status_view() -> str:
+    async def foundation_status_view() -> str:
         return _APP_PATH.read_text(encoding="utf-8")
 
     return mcp

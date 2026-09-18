@@ -29,12 +29,10 @@ With the repository Compose stack, the API remains at `http://localhost:8000`
 and the fixture MCP endpoint is `http://localhost:8001/mcp`. The latter is a
 Streamable HTTP protocol endpoint, rather than a browser-rendered page.
 
-## Current runtime finding
+## Runtime compatibility
 
-The pinned FastMCP 4.0.4 dependency starts the fixture under Python 3.14, but
-a bare read-only tool call times out in its in-memory and stdio client paths.
-The conformance test is a strict expected failure so that the limitation stays
-visible and becomes a failure if the behaviour changes unexpectedly. Do not
-treat it as completed transport validation; repeat the test against the
-container's HTTP endpoint when the FastMCP/Python compatibility issue is
-resolved.
+Under Python 3.14, FastMCP's synchronous handler path did not complete a
+tool or resource call. The fixture deliberately uses asynchronous handlers and
+its ordinary MCP-client conformance test is required to pass. Keep future
+fixture handlers asynchronous unless the pinned FastMCP/Python combination is
+revalidated.
