@@ -13,9 +13,7 @@ container, not a separate production web server.
 
 ## First install
 
-FastMCP 4.0.4 cannot currently be resolved from this workspace's network. Once
-package access is available, create the lockfile and install the pinned
-dependency:
+Install the pinned dependency and its lockfile:
 
 ```bash
 cd plugins/test-fixture
@@ -26,6 +24,10 @@ uv sync
 Then run the fixture locally with `uv run agent-hub-foundation-fixture`, or run
 the generic-client conformance test with `uv run pytest`. Build its independent
 container with `docker build -t agent-hub-foundation-fixture .`.
+
+With the repository Compose stack, the API remains at `http://localhost:8000`
+and the fixture MCP endpoint is `http://localhost:8001/mcp`. The latter is a
+Streamable HTTP protocol endpoint, rather than a browser-rendered page.
 
 ## Current runtime finding
 

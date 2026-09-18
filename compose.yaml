@@ -43,6 +43,15 @@ services:
     ports:
       - "8000:8000"
 
+  foundation-fixture:
+    build:
+      context: ./plugins/test-fixture
+      dockerfile: Dockerfile
+    ports:
+      # The API owns localhost:8000. Expose this independently deployed MCP
+      # server on a distinct host port for generic MCP-client testing.
+      - "8001:8000"
+
   web:
     build:
       context: .
