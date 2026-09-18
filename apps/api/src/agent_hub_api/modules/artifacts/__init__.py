@@ -4,10 +4,13 @@ from agent_hub_api.modules.artifacts._application import (
     ArtifactAuthorityError,
     ArtifactDraft,
     ArtifactModule,
+    ArtifactMutationAccess,
     ArtifactNotFound,
     ArtifactVersionConflict,
     create_memory_artifact_module,
+    create_postgres_artifact_module,
 )
+from agent_hub_api.modules.artifacts._http import create_artifact_router
 
 __all__ = [
     "ArtifactAccess",
@@ -15,7 +18,10 @@ __all__ = [
     "ArtifactDocument",
     "ArtifactDraft",
     "ArtifactModule",
+    "ArtifactMutationAccess",
     "ArtifactNotFound",
     "ArtifactVersionConflict",
     "create_memory_artifact_module",
+    "create_postgres_artifact_module",
+    "create_artifact_router",
 ]

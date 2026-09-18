@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "properties": {
     "agentRun": { "$ref": "#/$defs/AgentRun" },
+    "artifactCatalog": { "$ref": "#/$defs/ArtifactCatalog" },
     "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
     "error": { "$ref": "#/$defs/ErrorEnvelope" },
     "projectFilePreview": { "$ref": "#/$defs/ProjectFilePreview" },
@@ -112,6 +113,31 @@
       "properties": {
         "artifact": { "$ref": "#/$defs/ArtifactEnvelope" },
         "payload": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "ArtifactSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "documentVersion", "title", "pluginId", "pluginVersion"],
+      "properties": {
+        "id": { "$ref": "#/$defs/EntityId" },
+        "type": { "type": "string", "minLength": 1 },
+        "documentVersion": { "type": "integer", "minimum": 1 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "summary": { "type": "string", "maxLength": 2000 },
+        "pluginId": { "type": "string", "minLength": 1 },
+        "pluginVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ArtifactCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifacts"],
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ArtifactSummary" }
+        }
       }
     },
     "AgentRunStatus": {

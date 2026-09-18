@@ -11,6 +11,7 @@ export type AgentRunStatus = "queued" | "running" | "interrupted" | "cancelling"
  */
 export interface FoundationContracts {
   agentRun?: AgentRun;
+  artifactCatalog?: ArtifactCatalog;
   artifactDocument?: ArtifactDocument;
   error?: ErrorEnvelope;
   projectFilePreview?: ProjectFilePreview;
@@ -41,6 +42,18 @@ export interface ArtifactDocument {
   payload: {
     [k: string]: unknown;
   };
+}
+export interface ArtifactSummary {
+  id: EntityId;
+  type: string;
+  documentVersion: number;
+  title: string;
+  summary?: string;
+  pluginId: string;
+  pluginVersion: string;
+}
+export interface ArtifactCatalog {
+  artifacts: ArtifactSummary[];
 }
 export interface ArtifactEnvelope {
   id: EntityId;

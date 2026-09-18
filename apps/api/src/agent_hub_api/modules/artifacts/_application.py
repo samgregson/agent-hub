@@ -1,15 +1,25 @@
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
 
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
+
 from agent_hub_api.contracts import ArtifactDocument, EntityId
+from agent_hub_api.modules.project_files import ARTIFACT_ROOT
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
+from agent_hub_api.settings import Settings
 
 
 @dataclass(frozen=True, slots=True)
 class ArtifactAccess:
     subject: str
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactMutationAccess(ArtifactAccess):
     thread_id: str
     run_id: str
 
@@ -64,7 +74,7 @@ class ArtifactModule:
         self._store = store
 
     async def create(
-        self, access: ArtifactAccess, project_id: str, draft: ArtifactDraft
+        self, access: ArtifactMutationAccess, project_id: str, draft: ArtifactDraft
     ) -> ArtifactDocument:
         await self._authorize(access, project_id)
         document = ArtifactDocument.model_validate(
@@ -107,7 +117,7 @@ class ArtifactModule:
 
     async def replace(
         self,
-        access: ArtifactAccess,
+        access: ArtifactMutationAccess,
         project_id: str,
         artifact_id: str,
         expected_version: int,
@@ -187,5 +197,172 @@ class MemoryArtifactStore:
         return record
 
 
+class PostgresArtifactStore:
+    """Keep one canonical Artifact document in the reserved Project VFS namespace.
+
+    ``artifact_catalog`` is an indexed projection of the host envelope. It is
+    intentionally not a second copy of the portable document.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+
+    async def _connect(self) -> AsyncConnection[dict[str, object]]:
+        return await AsyncConnection.connect(
+            str(self._settings.database_url),
+            connect_timeout=self._settings.database_connect_timeout_seconds,
+            row_factory=dict_row,
+        )
+
+    async def create(self, record: ArtifactRecord) -> ArtifactRecord:
+        document = record.document
+        artifact = document.artifact
+        path = _artifact_path(artifact.id.root)
+        content = _serialize_document(document)
+        connection = await self._connect()
+        async with connection:
+            project = await connection.execute(
+                "SELECT 1 FROM projects WHERE id = %s FOR UPDATE", (record.project_id,)
+            )
+            if await project.fetchone() is None:
+                raise ArtifactNotFound
+            await connection.execute(
+                """
+                INSERT INTO project_files
+                    (project_id, path, content, version, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, now(), now())
+                """,
+                (record.project_id, path, content, artifact.document_version),
+            )
+            await connection.execute(
+                """
+                INSERT INTO artifact_catalog
+                    (project_id, artifact_id, path, document_version, type, title, summary,
+                     plugin_id, plugin_version, schema_id, schema_version,
+                     created_by_thread_id, created_by_run_id,
+                     last_changed_by_thread_id, last_changed_by_run_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    record.project_id,
+                    artifact.id.root,
+                    path,
+                    artifact.document_version,
+                    artifact.type,
+                    artifact.title,
+                    artifact.summary,
+                    artifact.plugin.id,
+                    artifact.plugin.version,
+                    artifact.schema_.id,
+                    artifact.schema_.version,
+                    artifact.provenance.created_by_thread_id.root,
+                    artifact.provenance.created_by_run_id.root,
+                    artifact.provenance.last_changed_by_thread_id.root,
+                    artifact.provenance.last_changed_by_run_id.root,
+                ),
+            )
+        return record
+
+    async def load(self, project_id: str, artifact_id: str) -> ArtifactRecord | None:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                SELECT project_files.content
+                FROM artifact_catalog
+                JOIN project_files
+                  ON project_files.project_id = artifact_catalog.project_id
+                 AND project_files.path = artifact_catalog.path
+                WHERE artifact_catalog.project_id = %s AND artifact_catalog.artifact_id = %s
+                """,
+                (project_id, artifact_id),
+            )
+            row = await cursor.fetchone()
+        return None if row is None else ArtifactRecord(project_id, _document_from_row(row))
+
+    async def list(self, project_id: str) -> Sequence[ArtifactRecord]:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                SELECT project_files.content
+                FROM artifact_catalog
+                JOIN project_files
+                  ON project_files.project_id = artifact_catalog.project_id
+                 AND project_files.path = artifact_catalog.path
+                WHERE artifact_catalog.project_id = %s
+                ORDER BY artifact_catalog.title, artifact_catalog.artifact_id
+                """,
+                (project_id,),
+            )
+            rows = await cursor.fetchall()
+        return tuple(ArtifactRecord(project_id, _document_from_row(row)) for row in rows)
+
+    async def replace(
+        self, project_id: str, artifact_id: str, document: ArtifactDocument
+    ) -> ArtifactRecord | None:
+        artifact = document.artifact
+        expected_version = artifact.document_version - 1
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                UPDATE artifact_catalog
+                SET document_version = %s, title = %s, summary = %s,
+                    last_changed_by_thread_id = %s, last_changed_by_run_id = %s,
+                    updated_at = now()
+                WHERE project_id = %s AND artifact_id = %s AND document_version = %s
+                RETURNING path
+                """,
+                (
+                    artifact.document_version,
+                    artifact.title,
+                    artifact.summary,
+                    artifact.provenance.last_changed_by_thread_id.root,
+                    artifact.provenance.last_changed_by_run_id.root,
+                    project_id,
+                    artifact_id,
+                    expected_version,
+                ),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                raise ArtifactVersionConflict
+            path = row["path"]
+            assert isinstance(path, str)
+            await connection.execute(
+                """
+                UPDATE project_files
+                SET content = %s, version = %s, updated_at = now()
+                WHERE project_id = %s AND path = %s
+                """,
+                (
+                    _serialize_document(document),
+                    artifact.document_version,
+                    project_id,
+                    path,
+                ),
+            )
+        return ArtifactRecord(project_id, document)
+
+
+def _artifact_path(artifact_id: str) -> str:
+    return f"{ARTIFACT_ROOT}/{artifact_id}.json"
+
+
+def _serialize_document(document: ArtifactDocument) -> str:
+    return json.dumps(document.model_dump(by_alias=True), separators=(",", ":"))
+
+
+def _document_from_row(row: Mapping[str, object]) -> ArtifactDocument:
+    content = row["content"]
+    assert isinstance(content, str)
+    return ArtifactDocument.model_validate(json.loads(content))
+
+
 def create_memory_artifact_module(projects: ProjectModule) -> ArtifactModule:
     return ArtifactModule(projects, MemoryArtifactStore())
+
+
+def create_postgres_artifact_module(settings: Settings, projects: ProjectModule) -> ArtifactModule:
+    return ArtifactModule(projects, PostgresArtifactStore(settings))

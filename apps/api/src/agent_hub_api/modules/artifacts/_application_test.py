@@ -2,9 +2,9 @@ import pytest
 
 from agent_hub_api.contracts import EntityId
 from agent_hub_api.modules.artifacts import (
-    ArtifactAccess,
     ArtifactAuthorityError,
     ArtifactDraft,
+    ArtifactMutationAccess,
     ArtifactVersionConflict,
     create_memory_artifact_module,
 )
@@ -29,7 +29,7 @@ async def test_artifact_replacement_preserves_host_fields_and_increments_version
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Bridge")
     artifacts = create_memory_artifact_module(projects)
-    creator = ArtifactAccess(subject="sam", thread_id="thread-a", run_id="run-a")
+    creator = ArtifactMutationAccess(subject="sam", thread_id="thread-a", run_id="run-a")
     created = await artifacts.create(creator, project.id, _draft())
     replacement = created.model_copy(
         update={
@@ -47,7 +47,7 @@ async def test_artifact_replacement_preserves_host_fields_and_increments_version
     )
 
     saved = await artifacts.replace(
-        ArtifactAccess(subject="sam", thread_id="thread-b", run_id="run-b"),
+        ArtifactMutationAccess(subject="sam", thread_id="thread-b", run_id="run-b"),
         project.id,
         created.artifact.id.root,
         expected_version=1,
@@ -68,7 +68,7 @@ async def test_artifact_replacement_rejects_stale_or_rebound_documents() -> None
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Bridge")
     artifacts = create_memory_artifact_module(projects)
-    access = ArtifactAccess(subject="sam", thread_id="thread-a", run_id="run-a")
+    access = ArtifactMutationAccess(subject="sam", thread_id="thread-a", run_id="run-a")
     created = await artifacts.create(access, project.id, _draft())
 
     with pytest.raises(ArtifactVersionConflict):

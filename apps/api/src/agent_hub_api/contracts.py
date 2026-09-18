@@ -88,6 +88,26 @@ class ArtifactDocument(BaseModel):
     payload: dict[str, Any]
 
 
+class ArtifactSummary(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    id: EntityId
+    type: Annotated[str, Field(min_length=1)]
+    document_version: Annotated[int, Field(alias="documentVersion", ge=1)]
+    title: Annotated[str, Field(max_length=240, min_length=1)]
+    summary: Annotated[str | None, Field(max_length=2000)] = None
+    plugin_id: Annotated[str, Field(alias="pluginId", min_length=1)]
+    plugin_version: Annotated[str, Field(alias="pluginVersion", min_length=1)]
+
+
+class ArtifactCatalog(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    artifacts: list[ArtifactSummary]
+
+
 class AgentRunStatus(StrEnum):
     queued = "queued"
     running = "running"
@@ -169,6 +189,7 @@ class FoundationContracts(BaseModel):
         extra="forbid",
     )
     agent_run: Annotated[AgentRun | None, Field(alias="agentRun")] = None
+    artifact_catalog: Annotated[ArtifactCatalog | None, Field(alias="artifactCatalog")] = None
     artifact_document: Annotated[ArtifactDocument | None, Field(alias="artifactDocument")] = None
     error: ErrorEnvelope | None = None
     project_file_preview: Annotated[

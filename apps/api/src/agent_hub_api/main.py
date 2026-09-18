@@ -14,6 +14,11 @@ from agent_hub_api.modules.agent_transport import (
     AgentTransportModule,
     create_agent_transport_router,
 )
+from agent_hub_api.modules.artifacts import (
+    ArtifactModule,
+    create_artifact_router,
+    create_postgres_artifact_module,
+)
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
@@ -40,11 +45,15 @@ def create_app(
     projects: ProjectModule | None = None,
     agent_execution: AgentExecutionModule | None = None,
     plugin_gateway: PluginGatewayModule | None = None,
+    artifacts: ArtifactModule | None = None,
 ) -> FastAPI:
     resolved_settings = settings or get_settings()
     resolved_identity = identity or create_identity_module(resolved_settings)
     resolved_projects = projects or create_postgres_project_module(resolved_settings)
     resolved_project_files = create_postgres_project_files(resolved_settings, resolved_projects)
+    resolved_artifacts = artifacts or create_postgres_artifact_module(
+        resolved_settings, resolved_projects
+    )
     resolved_plugin_gateway = plugin_gateway or create_postgres_plugin_gateway(
         resolved_settings,
         resolved_projects,
@@ -84,6 +93,9 @@ def create_app(
     application.include_router(
         create_project_files_router(resolved_identity, resolved_project_files),
         prefix="/api",
+    )
+    application.include_router(
+        create_artifact_router(resolved_identity, resolved_artifacts), prefix="/api"
     )
     application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),
