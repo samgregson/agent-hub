@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastmcp import FastMCP
-from fastmcp.apps import AppConfig
+from fastmcp.apps import AppConfig, app_config_to_meta_dict
 
 FIXTURE_TOOL_NAME = "foundation_status"
 FIXTURE_APP_RESOURCE_URI = "ui://agent-hub-foundation/status.html"
@@ -31,7 +31,7 @@ def create_fixture_server() -> FastMCP:
         description="A small standards-compatible MCP App for the fixture status.",
         mime_type=FIXTURE_APP_MIME_TYPE,
         annotations={"readOnlyHint": True, "idempotentHint": True},
-        meta={"ui": {"prefersBorder": True}},
+        meta={"ui": app_config_to_meta_dict(AppConfig())},
     )
     def foundation_status_view() -> str:
         return _APP_PATH.read_text(encoding="utf-8")
