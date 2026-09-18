@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     project_file_search_max_matches: int = Field(default=200, ge=1, le=10_000)
     plugin_tool_timeout_seconds: float = Field(default=30, ge=1, le=300)
     plugin_result_max_bytes: int = Field(default=1_000_000, ge=1_024, le=20_000_000)
+    plugin_discovery_cache_seconds: float = Field(default=300, ge=1, le=3600)
 
     @field_validator("openai_api_key", mode="before")
     @classmethod

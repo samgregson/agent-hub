@@ -1,6 +1,7 @@
 from agent_hub_api.modules.plugin_gateway._application import (
     MemoryPluginEnablementStore,
     PluginCapability,
+    PluginDiscoveredTool,
     PluginGatewayModule,
     PluginManifest,
     PluginNotAvailable,
@@ -20,6 +21,7 @@ __all__ = [
     "McpPluginClient",
     "PostgresPluginEnablementStore",
     "PluginCapability",
+    "PluginDiscoveredTool",
     "PluginGatewayModule",
     "PluginManifest",
     "PluginNotAvailable",

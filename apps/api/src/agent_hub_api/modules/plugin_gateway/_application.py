@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -44,6 +45,13 @@ class PluginToolResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PluginDiscoveredTool:
+    name: str
+    description: str
+    read_only: bool
+
+
+@dataclass(frozen=True, slots=True)
 class PluginSelection:
     manifest: PluginManifest
     enabled: bool
@@ -70,6 +78,8 @@ class PluginEnablementStore(Protocol):
 
 
 class PluginClient(Protocol):
+    async def discover_tools(self) -> Sequence[PluginDiscoveredTool]: ...
+
     async def call_tool(
         self, tool_name: str, arguments: Mapping[str, object]
     ) -> PluginToolResult: ...
@@ -84,11 +94,15 @@ class PluginGatewayModule:
         catalog: Sequence[PluginManifest],
         enablements: PluginEnablementStore,
         clients: Mapping[str, PluginClient],
+        *,
+        discovery_cache_seconds: float = 300,
     ) -> None:
         self._projects = projects
         self._catalog = {manifest.id: manifest for manifest in catalog}
         self._enablements = enablements
         self._clients = dict(clients)
+        self._discovery_cache_seconds = discovery_cache_seconds
+        self._discoveries: dict[str, tuple[float, tuple[PluginDiscoveredTool, ...]]] = {}
 
     async def enable(self, access: ProjectAccess, project_id: str, plugin_id: str) -> None:
         await self._projects.load(access, project_id)
@@ -161,12 +175,32 @@ class PluginGatewayModule:
         method deliberately does not accept browser-controlled identity input.
         """
         enabled = set(await self._enablements.enabled_plugin_ids(project_id))
-        return tuple(
-            _agent_tool(self, project_id, manifest, plugin_tool)
-            for manifest in self._catalog.values()
-            if manifest.id in enabled
-            for plugin_tool in manifest.tools
+        tools: list[BaseTool] = []
+        for manifest in self._catalog.values():
+            if manifest.id not in enabled:
+                continue
+            discovered = {tool.name: tool for tool in await self._discover(manifest)}
+            tools.extend(
+                _agent_tool(self, project_id, manifest, plugin_tool, discovered[plugin_tool.name])
+                for plugin_tool in manifest.tools
+                if plugin_tool.name in discovered
+            )
+        return tuple(tools)
+
+    async def _discover(self, manifest: PluginManifest) -> tuple[PluginDiscoveredTool, ...]:
+        cached = self._discoveries.get(manifest.id)
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < self._discovery_cache_seconds:
+            return cached[1]
+        client = self._clients.get(manifest.id)
+        if client is None:
+            raise PluginNotAvailable
+        allowed = {tool.name: tool for tool in manifest.tools}
+        discovered = tuple(
+            tool for tool in await client.discover_tools() if tool.name in allowed
         )
+        self._discoveries[manifest.id] = (now, discovered)
+        return discovered
 
 
 class MemoryPluginEnablementStore:
@@ -263,6 +297,7 @@ def create_postgres_plugin_gateway(
                 max_result_bytes=settings.plugin_result_max_bytes,
             )
         },
+        discovery_cache_seconds=settings.plugin_discovery_cache_seconds,
     )
 
 
@@ -271,6 +306,7 @@ def _agent_tool(
     project_id: str,
     manifest: PluginManifest,
     plugin_tool: PluginTool,
+    discovered: PluginDiscoveredTool,
 ) -> BaseTool:
     async def invoke() -> str:
         try:
@@ -287,5 +323,7 @@ def _agent_tool(
     return StructuredTool.from_function(
         coroutine=invoke,
         name=f"{manifest.id.replace('-', '_')}__{plugin_tool.name}",
-        description=plugin_tool.description or f"Run {plugin_tool.name} from {manifest.name}.",
+        description=discovered.description
+        or plugin_tool.description
+        or f"Run {plugin_tool.name} from {manifest.name}.",
     )

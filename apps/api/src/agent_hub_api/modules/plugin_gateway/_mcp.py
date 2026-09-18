@@ -5,7 +5,7 @@ from typing import Any
 
 from mcp import Client
 
-from agent_hub_api.modules.plugin_gateway._application import PluginToolResult
+from agent_hub_api.modules.plugin_gateway._application import PluginDiscoveredTool, PluginToolResult
 
 
 class PluginTransportError(Exception):
@@ -19,6 +19,23 @@ class McpPluginClient:
     endpoint: str
     timeout_seconds: float
     max_result_bytes: int
+
+    async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+        try:
+            async with Client(self.endpoint, read_timeout_seconds=self.timeout_seconds) as client:
+                result = await client.list_tools()
+        except Exception as error:
+            raise PluginTransportError(
+                "The Plugin server is unavailable or did not respond."
+            ) from error
+        return tuple(
+            PluginDiscoveredTool(
+                name=tool.name,
+                description=tool.description or "",
+                read_only=bool(tool.annotations and tool.annotations.read_only_hint),
+            )
+            for tool in result.tools
+        )
 
     async def call_tool(
         self, tool_name: str, arguments: Mapping[str, object]

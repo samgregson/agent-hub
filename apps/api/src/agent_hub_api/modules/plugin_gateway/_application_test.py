@@ -6,6 +6,7 @@ import pytest
 from agent_hub_api.modules.plugin_gateway import (
     MemoryPluginEnablementStore,
     PluginCapability,
+    PluginDiscoveredTool,
     PluginGatewayModule,
     PluginManifest,
     PluginNotEnabled,
@@ -18,6 +19,20 @@ from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_
 @dataclass
 class FixtureClient:
     calls: list[tuple[str, Mapping[str, object]]]
+    discoveries: int = 0
+
+    async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+        self.discoveries += 1
+        return (
+            PluginDiscoveredTool(
+                name="foundation_status",
+                description="Return fixture status.",
+                read_only=True,
+            ),
+            PluginDiscoveredTool(
+                name="unreviewed_tool", description="Must not be exposed.", read_only=True
+            ),
+        )
 
     async def call_tool(self, tool_name: str, arguments: Mapping[str, object]) -> PluginToolResult:
         self.calls.append((tool_name, arguments))
@@ -61,7 +76,10 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
     )
     agent_tool = (await gateway.agent_tools(project.id))[0]
     assert agent_tool.name == "foundation_fixture__foundation_status"
+    assert agent_tool.description == "Return fixture status."
     assert "available" in await agent_tool.ainvoke({})
+    assert len(await gateway.agent_tools(project.id)) == 1
+    assert client.discoveries == 1
     result = await gateway.call(access, project.id, "foundation-fixture", "foundation_status", {})
     assert result.structured_content == {"status": "available"}
     assert client.calls == [
