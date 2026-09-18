@@ -75,6 +75,48 @@ async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_ev
 
 
 @pytest.mark.asyncio
+async def test_agent_artifact_mutations_are_bound_to_a_run_and_require_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = object.__new__(PostgresDeepAgentRunner)
+    runner._checkpointer = cast(Any, object())
+    runner._model = cast(Any, object())
+    runner._project_files = cast(Any, object())
+    runner._plugin_gateway = None
+    runner._artifacts = cast(Any, object())
+    runner._settings = cast(
+        Any,
+        SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
+    )
+    captured: dict[str, Any] = {}
+
+    def create_agent(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(nodes={})
+
+    monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
+
+    await runner._agent_for(
+        "project-1", thread_id="thread-1", run_id="run-1", subject="sam"
+    )
+
+    names = {registered.name for registered in captured["tools"]}
+    assert {
+        "create_foundation_status_artifact",
+        "set_foundation_status_artifact_status",
+    } <= names
+    interrupt_on = captured["interrupt_on"]
+    assert interrupt_on["create_foundation_status_artifact"]["allowed_decisions"] == [
+        "approve",
+        "reject",
+    ]
+    assert interrupt_on["set_foundation_status_artifact_status"]["allowed_decisions"] == [
+        "approve",
+        "reject",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_scratch_preview_reads_the_state_backend_route_relative_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

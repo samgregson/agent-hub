@@ -7,7 +7,7 @@ from ag_ui_langgraph.utils import langchain_messages_to_agui
 from deepagents import create_deep_agent
 from deepagents.middleware.filesystem import FilesystemPermission
 from langchain.agents.middleware import InterruptOnConfig
-from langchain_core.tools import tool
+from langchain_core.tools import BaseTool, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -23,6 +23,7 @@ from agent_hub_api.modules.agent_execution._execution import (
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
+from agent_hub_api.modules.artifacts import ArtifactModule, ArtifactMutationAccess
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.settings import Settings
@@ -37,6 +38,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "card is shown automatically after the tool call. Do not tell the user that they "
         "need to separately grant approval or ask whether you may proceed; wait for the "
         "tool result after their decision.",
+        "Creating or changing a Project Artifact also requires user approval. When the "
+        "requested Artifact title or status is clear, call the Artifact tool without asking "
+        "for approval in chat first; the approval card is shown automatically.",
         "Never claim access to the host filesystem. When referring to a virtual file in "
         "a response, link it as Markdown using its absolute /project or /scratch path.",
     )
@@ -62,10 +66,12 @@ class PostgresDeepAgentRunner:
         settings: Settings,
         project_files: ProjectFilesModule,
         plugin_gateway: PluginGatewayModule | None = None,
+        artifacts: ArtifactModule | None = None,
     ) -> None:
         self._settings = settings
         self._project_files = project_files
         self._plugin_gateway = plugin_gateway
+        self._artifacts = artifacts
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
@@ -96,27 +102,60 @@ class PostgresDeepAgentRunner:
         self._model = model
         self._stack = stack
 
-    async def _agent_for(self, project_id: str) -> AgentHubLangGraphAgent:
+    async def _agent_for(
+        self,
+        project_id: str,
+        *,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        subject: str | None = None,
+    ) -> AgentHubLangGraphAgent:
         assert self._checkpointer is not None
         assert self._model is not None
         tools = [foundation_protected_action] if self._settings.enable_foundation_test_tool else []
         if self._plugin_gateway is not None:
             tools.extend(await self._plugin_gateway.agent_tools(project_id))
-        interrupt_on: dict[str, bool | InterruptOnConfig] | None = (
-            {
+        artifacts = getattr(self, "_artifacts", None)
+        has_artifact_context = (
+            artifacts is not None
+            and thread_id is not None
+            and run_id is not None
+            and subject is not None
+        )
+        if has_artifact_context:
+            assert artifacts is not None
+            assert thread_id is not None
+            assert run_id is not None
+            assert subject is not None
+            tools.extend(self._artifact_tools(artifacts, project_id, thread_id, run_id, subject))
+        interrupt_on: dict[str, bool | InterruptOnConfig] = {}
+        if self._settings.enable_foundation_test_tool:
+            interrupt_on.update(
+                {
                 "foundation_protected_action": {
                     "allowed_decisions": ["approve", "reject"],
                     "description": "Run the harmless foundation approval test action?",
                 }
-            }
-            if self._settings.enable_foundation_test_tool
-            else None
-        )
+                }
+            )
+        if has_artifact_context:
+            interrupt_on.update(
+                {
+                    "create_foundation_status_artifact": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Create this Project Artifact?",
+                    },
+                    "set_foundation_status_artifact_status": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Change this Project Artifact?",
+                    },
+                }
+            )
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
             system_prompt=_AGENT_SYSTEM_PROMPT,
-            interrupt_on=interrupt_on,
+            interrupt_on=interrupt_on or None,
             permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),
             checkpointer=self._checkpointer,
@@ -130,6 +169,49 @@ class PostgresDeepAgentRunner:
         )
         return agent
 
+    @staticmethod
+    def _artifact_tools(
+        artifacts: ArtifactModule, project_id: str, thread_id: str, run_id: str, subject: str
+    ) -> list[BaseTool]:
+        access = ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id)
+
+        @tool
+        async def create_foundation_status_artifact(title: str) -> str:
+            """Create a Foundation status Artifact in the selected Project."""
+            document = await artifacts.create_from_plugin(
+                access,
+                project_id,
+                plugin_id="foundation-fixture",
+                tool_name="create_status_artifact",
+                arguments={"title": title},
+            )
+            return (
+                f"Created Project Artifact '{document.artifact.title}' "
+                f"({document.artifact.id.root})."
+            )
+
+        @tool
+        async def set_foundation_status_artifact_status(
+            artifact_id: str,
+            expected_version: int,
+            status: str,
+        ) -> str:
+            """Set a Foundation status Artifact to available or unavailable."""
+            document = await artifacts.apply_plugin_operation(
+                access,
+                project_id,
+                artifact_id,
+                expected_version=expected_version,
+                tool_name="set_status_artifact_status",
+                arguments={"status": status},
+            )
+            return (
+                f"Updated Project Artifact '{document.artifact.title}' "
+                f"to version {document.artifact.document_version}."
+            )
+
+        return [create_foundation_status_artifact, set_foundation_status_artifact_status]
+
     async def close(self) -> None:
         if self._stack is not None:
             await self._stack.aclose()
@@ -137,9 +219,18 @@ class PostgresDeepAgentRunner:
         self._checkpointer = None
         self._model = None
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
         await self.open()
-        request_agent = (await self._agent_for(project_id)).clone()
+        request_agent = (
+            await self._agent_for(
+                project_id,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id,
+                subject=subject,
+            )
+        ).clone()
         async for event in request_agent.run(input_data):
             yield event
 

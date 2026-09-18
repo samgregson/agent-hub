@@ -38,7 +38,9 @@ class DeterministicRunner:
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
         del project_id
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)

@@ -72,7 +72,9 @@ class CreateAgentRunResult(StrEnum):
 
 
 class AgentRunner(Protocol):
-    def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]: ...
+    def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]: ...
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState: ...
 
@@ -99,7 +101,12 @@ class AgentExecutionModule:
         self._store = store
 
     async def start(
-        self, input_data: RunAgentInput, *, project_id: str, request_id: str
+        self,
+        input_data: RunAgentInput,
+        *,
+        project_id: str,
+        request_id: str,
+        subject: str | None = None,
     ) -> AsyncIterator[BaseEvent]:
         if input_data.resume:
             thread_state = await self._runner.load_thread_state(
@@ -123,15 +130,23 @@ class AgentExecutionModule:
             raise DuplicateAgentRun
         if create_result is CreateAgentRunResult.THREAD_ACTIVE:
             raise AgentRunAlreadyActive
-        return self._stream(run, input_data, project_id, request_id)
+        return self._stream(run, input_data, project_id, request_id, subject)
 
     async def _stream(
-        self, run: AgentRun, input_data: RunAgentInput, project_id: str, request_id: str
+        self,
+        run: AgentRun,
+        input_data: RunAgentInput,
+        project_id: str,
+        request_id: str,
+        subject: str | None,
     ) -> AsyncIterator[BaseEvent]:
         terminal_status = AgentRunStatus.SUCCEEDED
         terminal_error: ErrorEnvelope | None = None
         try:
-            async for event in self._runner.run(input_data, project_id=project_id):
+            events = self._runner.run(input_data, project_id=project_id)
+            if subject is not None:
+                events = self._runner.run(input_data, project_id=project_id, subject=subject)
+            async for event in events:
                 if isinstance(event, RunErrorEvent):
                     terminal_status = AgentRunStatus.FAILED
                     terminal_error = ErrorEnvelope.model_validate(

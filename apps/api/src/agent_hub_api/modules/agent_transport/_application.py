@@ -73,6 +73,7 @@ class AgentTransportModule:
                 input_data,
                 project_id=access.project_id,
                 request_id=access.request_id,
+                subject=access.subject,
             )
         except DuplicateAgentRun as error:
             raise DuplicateAgentTransportRun from error

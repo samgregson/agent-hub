@@ -51,8 +51,10 @@ class DeterministicRunner(ScratchlessRunner):
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
-        del project_id
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield TextMessageContentEvent(message_id="message-1", delta="Hello")
         yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
@@ -63,8 +65,10 @@ class FailingRunner(ScratchlessRunner):
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
-        del project_id
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         raise RuntimeError("provider unavailable")
 
@@ -74,8 +78,10 @@ class InterruptingRunner(ScratchlessRunner):
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
-        del project_id
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunFinishedEvent(
             thread_id=input_data.thread_id,
@@ -91,8 +97,10 @@ class ErrorEventRunner(ScratchlessRunner):
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
-        del project_id
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         yield RunErrorEvent(message="model overloaded", code="MODEL_OVERLOADED")
 
@@ -102,8 +110,10 @@ class CancelledRunner(ScratchlessRunner):
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
-        del project_id
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         raise asyncio.CancelledError
 
@@ -113,8 +123,10 @@ class HangingRunner(ScratchlessRunner):
         del thread_id, project_id
         return AgentThreadState(messages=(), interrupts=())
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
-        del project_id
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
         await asyncio.Event().wait()
 
@@ -131,8 +143,10 @@ class ResumableRunner(ScratchlessRunner):
             interrupts=((Interrupt(id="approval-1", reason="tool_call"),) if self.pending else ()),
         )
 
-    async def run(self, input_data: RunAgentInput, *, project_id: str) -> AsyncIterator[BaseEvent]:
-        del project_id
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
         self.run_count += 1
         self.pending = False
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
