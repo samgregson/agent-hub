@@ -8,7 +8,13 @@ from urllib.parse import urlsplit
 
 from mcp import Client
 
-from agent_hub_api.modules.plugin_gateway._application import PluginDiscoveredTool, PluginToolResult
+from agent_hub_api.modules.plugin_gateway._application import (
+    PluginDiscoveredTool,
+    PluginToolResult,
+    PluginUiResource,
+)
+
+MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
 
 
 class PluginTransportError(Exception):
@@ -46,9 +52,7 @@ class McpPluginClient:
             for tool in result.tools
         )
 
-    async def call_tool(
-        self, tool_name: str, arguments: Mapping[str, object]
-    ) -> PluginToolResult:
+    async def call_tool(self, tool_name: str, arguments: Mapping[str, object]) -> PluginToolResult:
         self._validate_endpoint()
         try:
             async with Client(self.endpoint, read_timeout_seconds=self.timeout_seconds) as client:
@@ -77,6 +81,41 @@ class McpPluginClient:
             raise PluginTransportError("The Plugin result exceeded the configured size limit.")
         return PluginToolResult(content=content, structured_content=structured_content)
 
+    async def read_ui_resource(self, resource_uri: str) -> PluginUiResource:
+        """Read one declared HTML MCP App resource and reject all other payloads."""
+        self._validate_endpoint()
+        try:
+            async with Client(self.endpoint, read_timeout_seconds=self.timeout_seconds) as client:
+                resources = await client.list_resources()
+                declared = next(
+                    (resource for resource in resources.resources if resource.uri == resource_uri),
+                    None,
+                )
+                if declared is None or declared.mime_type != MCP_APP_MIME_TYPE:
+                    raise PluginTransportError(
+                        "The Plugin did not declare a compatible App resource."
+                    )
+                response = await client.read_resource(resource_uri)
+        except PluginTransportError:
+            raise
+        except Exception as error:
+            raise PluginTransportError(
+                "The Plugin App resource is unavailable or did not respond."
+            ) from error
+
+        if len(response.contents) != 1:
+            raise PluginTransportError("The Plugin App resource returned an invalid response.")
+        content = response.contents[0]
+        html = getattr(content, "text", None)
+        if (
+            getattr(content, "uri", None) != resource_uri
+            or getattr(content, "mime_type", None) not in {None, MCP_APP_MIME_TYPE}
+            or not isinstance(html, str)
+            or len(html.encode("utf-8")) > self.max_result_bytes
+        ):
+            raise PluginTransportError("The Plugin App resource is not safe HTML.")
+        return PluginUiResource(uri=resource_uri, html=html)
+
     def _validate_endpoint(self) -> None:
         parsed = urlsplit(self.endpoint)
         if (
@@ -101,9 +140,7 @@ class McpPluginClient:
         for entry in resolved:
             address = entry[4][0]
             if not isinstance(address, str):
-                raise PluginEndpointRejected(
-                    "The configured Plugin returned an invalid address."
-                )
+                raise PluginEndpointRejected("The configured Plugin returned an invalid address.")
             addresses.add(address)
         if not addresses or any(_is_private_address(address) for address in addresses):
             raise PluginEndpointRejected(

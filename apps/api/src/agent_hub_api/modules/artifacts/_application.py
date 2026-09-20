@@ -11,6 +11,7 @@ from agent_hub_api.contracts import ArtifactDocument, ArtifactProvenanceActor
 from agent_hub_api.modules.plugin_gateway import (
     PluginSelection,
     PluginToolResult,
+    PluginUiResource,
 )
 from agent_hub_api.modules.project_files import ARTIFACT_ROOT
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
@@ -81,6 +82,10 @@ class ArtifactPluginReplacementInvalid(Exception):
     """The Plugin did not return a usable portable Artifact replacement."""
 
 
+class ArtifactAppUnavailable(Exception):
+    """The Artifact's reviewed MCP App cannot be safely rendered."""
+
+
 class ArtifactPluginGateway(Protocol):
     async def selections(
         self, access: ProjectAccess, project_id: str
@@ -94,6 +99,14 @@ class ArtifactPluginGateway(Protocol):
         tool_name: str,
         arguments: Mapping[str, object],
     ) -> PluginToolResult: ...
+
+    async def read_ui_resource(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        resource_uri: str,
+    ) -> PluginUiResource: ...
 
 
 class ArtifactStore(Protocol):
@@ -216,6 +229,52 @@ class ArtifactModule:
             artifact_id,
             expected_version,
             replacement,
+        )
+
+    async def app_resource(
+        self, access: ArtifactAccess, project_id: str, artifact_id: str
+    ) -> PluginUiResource:
+        """Resolve the single reviewed App resource for an authorized Artifact."""
+        current = await self.load(access, project_id, artifact_id)
+        selection = await self._enabled_plugin(access, project_id, current.artifact.plugin.id)
+        if (
+            selection.manifest.version != current.artifact.plugin.version
+            or selection.manifest.app_resource_uri is None
+        ):
+            raise ArtifactAppUnavailable
+        assert self._plugin_gateway is not None
+        try:
+            return await self._plugin_gateway.read_ui_resource(
+                ProjectAccess(subject=access.subject),
+                project_id,
+                selection.manifest.id,
+                selection.manifest.app_resource_uri,
+            )
+        except Exception as error:
+            raise ArtifactAppUnavailable from error
+
+    async def apply_app_operation(
+        self,
+        access: ArtifactUserActionAccess,
+        project_id: str,
+        artifact_id: str,
+        *,
+        expected_version: int,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> ArtifactDocument:
+        """Apply the narrowly allowed semantic operation requested by a mounted App."""
+        current = await self.load(access, project_id, artifact_id)
+        selection = await self._enabled_plugin(access, project_id, current.artifact.plugin.id)
+        if tool_name not in selection.manifest.app_tool_names:
+            raise ArtifactAppUnavailable
+        return await self.apply_plugin_operation(
+            access,
+            project_id,
+            artifact_id,
+            expected_version=expected_version,
+            tool_name=tool_name,
+            arguments=arguments,
         )
 
     async def load(

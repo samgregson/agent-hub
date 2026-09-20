@@ -27,7 +27,13 @@ export async function forwardBackendRequest(
   } as RequestInit & { duplex: "half" });
 
   const responseHeaders = new Headers();
-  for (const name of ["cache-control", "content-type"]) {
+  for (const name of [
+    "cache-control",
+    "content-security-policy",
+    "content-type",
+    "referrer-policy",
+    "x-content-type-options",
+  ]) {
     const value = response.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }

@@ -1,6 +1,7 @@
 from agent_hub_api.contracts import ArtifactDocument
 from agent_hub_api.modules.artifacts._application import (
     ArtifactAccess,
+    ArtifactAppUnavailable,
     ArtifactAuthorityError,
     ArtifactDraft,
     ArtifactModule,
@@ -18,6 +19,7 @@ from agent_hub_api.modules.artifacts._http import create_artifact_router
 
 __all__ = [
     "ArtifactAccess",
+    "ArtifactAppUnavailable",
     "ArtifactAuthorityError",
     "ArtifactDocument",
     "ArtifactDraft",

@@ -7,8 +7,66 @@
   </head>
   <body>
     <main>
-      <h1>Foundation fixture available</h1>
-      <p>This portable MCP App is served by the FastMCP fixture.</p>
+      <h1 id="title">Foundation fixture</h1>
+      <p id="status">Waiting for Artifact data…</p>
+      <button id="available" type="button">Set available</button>
+      <button id="unavailable" type="button">Set unavailable</button>
     </main>
+    <script>
+      let nextId = 1;
+      const pending = new Map();
+
+      function send(message) {
+        window.parent.postMessage(message, "*");
+      }
+
+      function request(method, params) {
+        const id = nextId++;
+        send({ jsonrpc: "2.0", id, method, params });
+        return new Promise((resolve) => pending.set(id, resolve));
+      }
+
+      function render(artifactDocument) {
+        document.getElementById("title").textContent = artifactDocument.artifact.title;
+        document.getElementById("status").textContent =
+          `Status: ${artifactDocument.payload.status} (version ${artifactDocument.artifact.documentVersion})`;
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent || !event.data || event.data.jsonrpc !== "2.0") return;
+        const message = event.data;
+        if (message.id && pending.has(message.id)) {
+          pending.get(message.id)(message.result);
+          pending.delete(message.id);
+          return;
+        }
+        if (message.method === "ui/notifications/tool-result" && message.params.structuredContent) {
+          render(message.params.structuredContent);
+        }
+      });
+
+      async function setStatus(status) {
+        const result = await request("tools/call", {
+          name: "set_status_artifact_status",
+          arguments: { status },
+        });
+        if (result && result.structuredContent) render(result.structuredContent);
+        if (result && result.isError) {
+          document.getElementById("status").textContent = result.content?.[0]?.text || "Change rejected.";
+        }
+      }
+
+      document.getElementById("available").addEventListener("click", () => setStatus("available"));
+      document.getElementById("unavailable").addEventListener("click", () => setStatus("unavailable"));
+
+      (async () => {
+        await request("ui/initialize", {
+          appInfo: { name: "Foundation fixture", version: "0.1.0" },
+          appCapabilities: {},
+          protocolVersion: "2026-01-26",
+        });
+        send({ jsonrpc: "2.0", method: "ui/notifications/initialized" });
+      })();
+    </script>
   </body>
 </html>

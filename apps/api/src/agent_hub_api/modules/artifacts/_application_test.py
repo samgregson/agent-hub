@@ -2,6 +2,7 @@ import pytest
 
 from agent_hub_api.contracts import ArtifactProvenanceActor, EntityId
 from agent_hub_api.modules.artifacts import (
+    ArtifactAppUnavailable,
     ArtifactAuthorityError,
     ArtifactDraft,
     ArtifactMutationAccess,
@@ -14,6 +15,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginSelection,
     PluginTool,
     PluginToolResult,
+    PluginUiResource,
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 
@@ -51,6 +53,13 @@ class FixtureGateway:
     ) -> PluginToolResult:
         self.calls.append((plugin_id, tool_name, arguments))
         return self.result
+
+    async def read_ui_resource(
+        self, _: object, __: str, plugin_id: str, resource_uri: str
+    ) -> PluginUiResource:
+        if plugin_id != self.manifest.id or resource_uri != self.manifest.app_resource_uri:
+            raise RuntimeError("resource is not permitted")
+        return PluginUiResource(uri=resource_uri, html="<main>Fixture App</main>")
 
 
 @pytest.mark.asyncio
@@ -231,3 +240,58 @@ async def test_enabled_plugin_replacement_is_applied_through_the_artifact_author
     assert (plugin_id, tool_name) == ("foundation-fixture", "set_status_artifact_status")
     assert arguments["status"] == "unavailable"
     assert arguments["document"] == created.model_dump(by_alias=True)
+
+
+@pytest.mark.asyncio
+async def test_app_resource_and_reviewed_app_operation_stay_inside_artifact_authority() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
+    gateway = FixtureGateway(PluginToolResult(content=("",), structured_content={}))
+    gateway.manifest = PluginManifest(
+        id="foundation-fixture",
+        name="Foundation fixture",
+        version="0.1.0",
+        endpoint="https://fixture.example/mcp",
+        tools=(PluginTool(name="set_status_artifact_status", read_only=False),),
+        app_resource_uri="ui://agent-hub-foundation/status.html",
+        app_tool_names=("set_status_artifact_status",),
+    )
+    artifacts = create_memory_artifact_module(projects, plugin_gateway=gateway)  # type: ignore[arg-type]
+    created = await artifacts.create(
+        ArtifactMutationAccess(subject="sam", thread_id="thread-a", run_id="run-a"),
+        project.id,
+        _draft(),
+    )
+    replacement = created.model_copy(update={"payload": {"status": "unavailable"}})
+    gateway.result = PluginToolResult(
+        content=("Set unavailable.",),
+        structured_content=replacement.model_dump(by_alias=True),
+    )
+
+    resource = await artifacts.app_resource(
+        ArtifactMutationAccess(subject="sam", thread_id="thread-a", run_id="run-a"),
+        project.id,
+        created.artifact.id.root,
+    )
+    saved = await artifacts.apply_app_operation(
+        ArtifactUserActionAccess(subject="sam", user_action_id="action-1"),
+        project.id,
+        created.artifact.id.root,
+        expected_version=1,
+        tool_name="set_status_artifact_status",
+        arguments={"status": "unavailable"},
+    )
+
+    assert resource.html == "<main>Fixture App</main>"
+    assert saved.payload == {"status": "unavailable"}
+    assert saved.artifact.provenance.last_changed_by.kind == "userAction"
+
+    with pytest.raises(ArtifactAppUnavailable):
+        await artifacts.apply_app_operation(
+            ArtifactUserActionAccess(subject="sam", user_action_id="action-2"),
+            project.id,
+            created.artifact.id.root,
+            expected_version=2,
+            tool_name="validate_status_artifact",
+            arguments={},
+        )

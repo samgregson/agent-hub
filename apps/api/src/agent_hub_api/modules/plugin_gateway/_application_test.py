@@ -12,6 +12,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginNotEnabled,
     PluginTool,
     PluginToolResult,
+    PluginUiResource,
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 
@@ -40,6 +41,9 @@ class FixtureClient:
             content=("Agent Hub's portable MCP fixture is available.",),
             structured_content={"status": "available"},
         )
+
+    async def read_ui_resource(self, resource_uri: str) -> PluginUiResource:
+        return PluginUiResource(uri=resource_uri, html="<main>Fixture App</main>")
 
 
 @pytest.mark.asyncio

@@ -32,7 +32,8 @@ async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
         assert any(str(resource.uri) == FIXTURE_APP_RESOURCE_URI for resource in resources)
         contents = await client.read_resource(FIXTURE_APP_RESOURCE_URI)
         assert contents[0].mime_type == "text/html;profile=mcp-app"
-        assert "Foundation fixture available" in contents[0].text
+        assert "set_status_artifact_status" in contents[0].text
+        assert "ui/initialize" in contents[0].text
 
 
 @pytest.mark.asyncio

@@ -27,6 +27,8 @@ class PluginManifest:
     version: str
     endpoint: str
     tools: tuple[PluginTool, ...]
+    app_resource_uri: str | None = None
+    app_tool_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +45,14 @@ class PluginCapability:
 class PluginToolResult:
     content: tuple[str, ...]
     structured_content: Mapping[str, object] | None
+
+
+@dataclass(frozen=True, slots=True)
+class PluginUiResource:
+    """A reviewed MCP App HTML resource, ready for a sandboxed host."""
+
+    uri: str
+    html: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +94,8 @@ class PluginClient(Protocol):
     async def call_tool(
         self, tool_name: str, arguments: Mapping[str, object]
     ) -> PluginToolResult: ...
+
+    async def read_ui_resource(self, resource_uri: str) -> PluginUiResource: ...
 
 
 class PluginGatewayModule:
@@ -150,6 +162,27 @@ class PluginGatewayModule:
         await self._projects.load(access, project_id)
         return await self._call_enabled(project_id, plugin_id, tool_name, arguments)
 
+    async def read_ui_resource(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        resource_uri: str,
+    ) -> PluginUiResource:
+        """Load only the reviewed App resource of an enabled Plugin."""
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
+            raise PluginNotEnabled
+        if manifest.app_resource_uri != resource_uri:
+            raise PluginToolNotAllowed
+        client = self._clients.get(plugin_id)
+        if client is None:
+            raise PluginNotAvailable
+        return await client.read_ui_resource(resource_uri)
+
     async def _call_enabled(
         self,
         project_id: str,
@@ -197,9 +230,7 @@ class PluginGatewayModule:
         if client is None:
             raise PluginNotAvailable
         allowed = {tool.name: tool for tool in manifest.tools}
-        discovered = tuple(
-            tool for tool in await client.discover_tools() if tool.name in allowed
-        )
+        discovered = tuple(tool for tool in await client.discover_tools() if tool.name in allowed)
         self._discoveries[manifest.id] = (now, discovered)
         return discovered
 
@@ -301,6 +332,8 @@ def create_postgres_plugin_gateway(
                 agent_visible=False,
             ),
         ),
+        app_resource_uri="ui://agent-hub-foundation/status.html",
+        app_tool_names=("set_status_artifact_status",),
     )
     from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
 

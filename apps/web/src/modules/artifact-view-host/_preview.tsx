@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { ArtifactDocument } from "@/contracts";
 
+import { ArtifactApp } from "./_app";
 import styles from "./artifact-view-host.module.css";
 
 interface PreviewResult {
@@ -79,8 +80,16 @@ export function ArtifactDocumentPreview({
               </dd>
             </div>
           </dl>
-          <pre>{JSON.stringify(document.payload, null, 2)}</pre>
-          <footer>Generic safe view. A compatible MCP App may replace this view later.</footer>
+          <ArtifactApp
+            artifactId={artifactId}
+            document={document}
+            onSaved={(saved) => setResult({ document: saved, error: null, key })}
+            projectId={projectId}
+          />
+          <details className={styles.fallback}>
+            <summary>Generic safe view</summary>
+            <pre>{JSON.stringify(document.payload, null, 2)}</pre>
+          </details>
         </>
       ) : null}
     </section>

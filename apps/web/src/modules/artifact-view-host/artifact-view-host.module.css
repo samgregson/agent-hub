@@ -77,6 +77,24 @@
   padding: 0.75rem;
 }
 
+.app {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.appFrame {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  min-height: 16rem;
+  width: 100%;
+}
+
+.fallback summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+
 .error {
   color: var(--danger);
 }
