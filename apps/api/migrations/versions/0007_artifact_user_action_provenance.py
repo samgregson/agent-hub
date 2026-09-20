@@ -16,6 +16,16 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Alembic creates this bookkeeping column as VARCHAR(32) by default. This
+    # revision identifier is longer, so widen it before Alembic records the
+    # successful upgrade at the end of this transaction.
+    op.alter_column(
+        "alembic_version",
+        "version_num",
+        existing_type=sa.String(length=32),
+        type_=sa.String(length=255),
+        existing_nullable=False,
+    )
     op.add_column(
         "artifact_catalog",
         sa.Column(
