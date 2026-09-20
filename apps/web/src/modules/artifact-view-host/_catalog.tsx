@@ -6,6 +6,12 @@ import type { ArtifactCatalog as Catalog } from "@/contracts";
 
 import styles from "./artifact-view-host.module.css";
 
+interface CatalogResult {
+  catalog: Catalog | null;
+  error: string | null;
+  projectId: string;
+}
+
 export function ArtifactCatalog({
   onOpen,
   projectId,
@@ -13,13 +19,16 @@ export function ArtifactCatalog({
   onOpen: (artifactId: string) => void;
   projectId: string;
 }) {
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CatalogResult>({
+    catalog: null,
+    error: null,
+    projectId: "",
+  });
+  const catalog = result.projectId === projectId ? result.catalog : null;
+  const error = result.projectId === projectId ? result.error : null;
 
   useEffect(() => {
     let active = true;
-    setCatalog(null);
-    setError(null);
     fetch(`/api/projects/${encodeURIComponent(projectId)}/artifacts`, {
       cache: "no-store",
     })
@@ -28,10 +37,16 @@ export function ArtifactCatalog({
         return (await response.json()) as Catalog;
       })
       .then((result) => {
-        if (active) setCatalog(result);
+        if (active) setResult({ catalog: result, error: null, projectId });
       })
       .catch(() => {
-        if (active) setError("Artifacts are temporarily unavailable.");
+        if (active) {
+          setResult({
+            catalog: null,
+            error: "Artifacts are temporarily unavailable.",
+            projectId,
+          });
+        }
       });
     return () => {
       active = false;
@@ -43,7 +58,11 @@ export function ArtifactCatalog({
       {error ? <p className={styles.error}>{error}</p> : null}
       {!catalog && !error ? <p>Loading Artifacts…</p> : null}
       {catalog?.artifacts.map((artifact) => (
-        <button key={artifact.id} onClick={() => onOpen(artifact.id)} type="button">
+        <button
+          key={artifact.id}
+          onClick={() => onOpen(artifact.id)}
+          type="button"
+        >
           <span>{artifact.title}</span>
           <small>
             {artifact.type} · v{artifact.documentVersion}

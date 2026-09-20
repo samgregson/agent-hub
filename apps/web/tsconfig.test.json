@@ -18,6 +18,7 @@
     "src/modules/agent-ui/_history.test.ts",
     "src/modules/agent-ui/_project-links.ts",
     "src/modules/agent-ui/_project-links.test.ts",
-    "src/modules/agent-ui/_ag-ui-contract.test.ts"
+    "src/modules/agent-ui/_ag-ui-contract.test.ts",
+    "src/modules/agent-ui/_approval.test.ts"
   ]
 }

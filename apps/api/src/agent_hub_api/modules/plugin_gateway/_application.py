@@ -337,7 +337,9 @@ def _agent_tool(
             )
         except Exception as error:
             return f"Plugin tool failed: {error}"
-        return "\n".join((*result.content, json.dumps(result.structured_content, sort_keys=True)))
+        if result.content:
+            return "\n".join(result.content)
+        return json.dumps(result.structured_content, sort_keys=True)
 
     return StructuredTool.from_function(
         coroutine=invoke,

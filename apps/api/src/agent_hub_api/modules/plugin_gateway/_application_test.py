@@ -77,7 +77,7 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
     agent_tool = (await gateway.agent_tools(project.id))[0]
     assert agent_tool.name == "foundation_fixture__foundation_status"
     assert agent_tool.description == "Return fixture status."
-    assert "available" in await agent_tool.ainvoke({})
+    assert await agent_tool.ainvoke({}) == "Agent Hub's portable MCP fixture is available."
     assert len(await gateway.agent_tools(project.id)) == 1
     assert client.discoveries == 1
     result = await gateway.call(access, project.id, "foundation-fixture", "foundation_status", {})

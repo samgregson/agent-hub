@@ -31,6 +31,7 @@ import type { AgentRun } from "@/contracts";
 import { Markdown } from "@/shared/ui";
 
 import { restoreInterruptMetadata } from "./_history";
+import { approvalLabel, isApprovalOnlyTool } from "./_approval";
 import styles from "./agent-ui.module.css";
 
 const OpenVirtualFileContext = createContext<(path: string) => void>(() => {});
@@ -53,10 +54,7 @@ function ToolCall({
     approval.resolution === undefined;
 
   if (waitingForDecision) {
-    const label =
-      toolName === "write_file" || toolName === "edit_file"
-        ? "Approve Project File change"
-        : "Approve protected action";
+    const label = approvalLabel(toolName);
 
     return (
       <section aria-label={label} className={styles.approvalCard}>
@@ -84,6 +82,8 @@ function ToolCall({
       </section>
     );
   }
+
+  if (isApprovalOnlyTool(toolName)) return null;
 
   return (
     <section className={styles.toolCall}>

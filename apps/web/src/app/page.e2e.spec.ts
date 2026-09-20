@@ -365,6 +365,7 @@ test("approving a tool call resumes through the AG-UI transport contract", async
   await expect(page.getByText("Approve Project File change")).toBeVisible();
   await expect(page.getByText("write_file", { exact: true })).toBeHidden();
   await page.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText("write_file", { exact: true })).toBeHidden();
 
   await expect
     .poll(() => resumeRequests)
