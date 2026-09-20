@@ -91,7 +91,7 @@ test("project creation is unavailable before the workspace hydrates", async ({
   await context.close();
 });
 
-test("Artifact navigation is a compact list rather than explanatory copy", async ({
+test("Work navigation combines Artifacts and Project files into one list", async ({
   page,
 }) => {
   const project = {
@@ -122,19 +122,41 @@ test("Artifact navigation is a compact list rather than explanatory copy", async
   await page.route(
     `**/api/projects/${project.id}/files/index`,
     async (route) => {
-      await route.fulfill({ json: { files: [] } });
+      await route.fulfill({
+        json: {
+          files: [
+            {
+              path: "/project/foundation-notes.md",
+              updatedAt: "2026-09-18T00:00:00.000Z",
+              version: 1,
+            },
+          ],
+        },
+      });
     },
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Artifacts" }).click();
+  await page.getByRole("button", { name: "Work" }).click();
 
-  await expect(page.getByRole("button", { name: "Foundation status" })).toBeVisible();
   await expect(
-    page.getByText("Durable project work products. Project files appear below until elevated."),
+    page.getByRole("button", { name: "Foundation status" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Work items")).toContainText(
+    "Foundation status",
+  );
+  await expect(page.getByLabel("Work items")).toContainText(
+    "/project/foundation-notes.md",
+  );
+  await expect(
+    page.getByText(
+      "Durable project work products. Project files appear below until elevated.",
+    ),
   ).toHaveCount(0);
   await expect(
-    page.getByText("Shared working files. Opening one does not create an Artifact."),
+    page.getByText(
+      "Shared working files. Opening one does not create an Artifact.",
+    ),
   ).toHaveCount(0);
 });
 
@@ -225,8 +247,7 @@ test.describe("at phone width", () => {
       drawer.getByRole("button", { name: "New Thread 1", exact: true }),
     ).toBeVisible();
 
-    await drawer.getByRole("button", { name: "Artifacts" }).click();
-    await expect(drawer.getByText("Project files")).toBeVisible();
+    await drawer.getByRole("button", { name: "Work" }).click();
     await drawer
       .getByRole("button", { name: /\/project\/notes\/check\.md/ })
       .click();

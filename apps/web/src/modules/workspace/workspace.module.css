@@ -198,6 +198,44 @@
   line-height: 1.6;
 }
 
+.workCatalog {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.workCatalog p {
+  margin: 0;
+}
+
+.workCatalog button {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.7rem;
+  border: 1px solid #35342f;
+  border-radius: 8px;
+  background: transparent;
+  color: #d7d4cb;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+}
+
+.workCatalog button:hover {
+  border-color: #e9ff70;
+}
+
+.workCatalog button span,
+.workCatalog button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workCatalog button small {
+  color: #8e8a82;
+  font-size: 11px;
+}
+
 .newThread,
 .threadButton {
   width: 100%;

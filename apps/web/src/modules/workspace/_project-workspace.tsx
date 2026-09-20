@@ -10,14 +10,8 @@ import {
 } from "react";
 
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
-import {
-  ArtifactCatalog,
-  ArtifactDocumentPreview,
-} from "@/modules/artifact-view-host";
-import {
-  ProjectFileCatalog,
-  ProjectFilePreview,
-} from "@/modules/project-files";
+import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
+import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
 import { Menu, MenuItem } from "@/shared/ui";
 
@@ -43,6 +37,7 @@ import {
   createWorkspaceState,
   workspaceReducer,
 } from "./_state";
+import { WorkCatalog } from "./_work-catalog";
 
 const activityLabels = {
   artifacts: "Work",
@@ -537,15 +532,14 @@ export function ProjectWorkspace() {
         >
           Back to chat
         </button>
-        {selectedProject &&
-        selectedWorkspace?.selectedArtifactId ? (
+        {selectedProject && selectedWorkspace?.selectedArtifactId ? (
           <ArtifactDocumentPreview
             artifactId={selectedWorkspace.selectedArtifactId}
             projectId={selectedProject.id}
           />
         ) : selectedProject &&
-        selectedWorkspace?.selectedFilePath &&
-        selectedWorkspace.selectedScratchThreadId ? (
+          selectedWorkspace?.selectedFilePath &&
+          selectedWorkspace.selectedScratchThreadId ? (
           <ScratchFilePreview
             path={selectedWorkspace.selectedFilePath}
             projectId={selectedProject.id}
@@ -631,10 +625,11 @@ function ProjectNavigator({
           </div>
         </>
       ) : selectedActivity === "artifacts" && project ? (
-        <>
-          <ArtifactCatalog onOpen={onOpenArtifact} projectId={project.id} />
-          <ProjectFileCatalog onOpen={onOpenProjectFile} projectId={project.id} />
-        </>
+        <WorkCatalog
+          onOpenArtifact={onOpenArtifact}
+          onOpenProjectFile={onOpenProjectFile}
+          projectId={project.id}
+        />
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />
       ) : (
