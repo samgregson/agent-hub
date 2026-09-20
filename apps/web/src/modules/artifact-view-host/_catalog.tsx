@@ -55,6 +55,7 @@ export function ArtifactCatalog({
 
   return (
     <section className={styles.catalog}>
+      <strong>Artifacts</strong>
       {error ? <p className={styles.error}>{error}</p> : null}
       {!catalog && !error ? <p>Loading Artifacts…</p> : null}
       {catalog?.artifacts.map((artifact) => (

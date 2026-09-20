@@ -45,7 +45,7 @@ import {
 } from "./_state";
 
 const activityLabels = {
-  artifacts: "Artifacts",
+  artifacts: "Work",
   chats: "Chats",
   plugins: "Plugins",
   sources: "Sources",
@@ -558,10 +558,10 @@ export function ProjectWorkspace() {
           />
         ) : (
           <>
-            <strong>Artifact workspace</strong>
+            <strong>Work preview</strong>
             <p>
-              Project file previews open here. MCP App hosting arrives in Slice
-              7.
+              Open a Project file, an Artifact, or a Thread-local scratch file
+              to inspect it here.
             </p>
           </>
         )}

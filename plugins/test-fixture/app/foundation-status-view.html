@@ -3,14 +3,135 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Foundation status</title>
+    <title>Foundation bearing check</title>
+    <style>
+      :root {
+        color: #e8e8e3;
+        background: #121713;
+        font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+
+      body { margin: 0; }
+
+      main {
+        display: grid;
+        gap: 18px;
+        min-height: 100vh;
+        padding: 22px;
+        background:
+          radial-gradient(circle at 100% 0%, #233b2a 0, transparent 38%),
+          #121713;
+      }
+
+      .eyebrow {
+        margin: 0 0 5px;
+        color: #a6d97a;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      h1 { margin: 0; font-size: 22px; letter-spacing: -0.03em; }
+
+      .summary { margin: 6px 0 0; color: #b6bbb3; font-size: 13px; }
+
+      .result {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px;
+        border: 1px solid #415446;
+        border-radius: 12px;
+        background: rgb(25 36 28 / 75%);
+      }
+
+      .result.review {
+        border-color: #855d3c;
+        background: rgb(54 35 23 / 75%);
+      }
+
+      #status { margin: 0; font-size: 14px; font-weight: 750; }
+
+      #badge {
+        padding: 5px 8px;
+        border-radius: 999px;
+        background: #b9e982;
+        color: #182114;
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0.06em;
+      }
+
+      .review #badge { background: #f3bd7c; color: #34200f; }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .metric {
+        padding: 12px;
+        border: 1px solid #343d35;
+        border-radius: 10px;
+        background: #181e19;
+      }
+
+      .metric span { display: block; color: #aeb5ad; font-size: 11px; }
+      .metric strong { display: block; margin-top: 5px; font-size: 16px; }
+
+      .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+      button {
+        padding: 9px 11px;
+        border: 1px solid #516553;
+        border-radius: 8px;
+        background: #273b2c;
+        color: #eff7e9;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      button:last-child { border-color: #78563a; background: #3b281c; }
+      button:focus-visible { outline: 2px solid #d7ff9d; outline-offset: 2px; }
+
+      footer { color: #8f978e; font-size: 11px; line-height: 1.45; }
+    </style>
   </head>
   <body>
     <main>
-      <h1 id="title">Foundation fixture</h1>
-      <p id="status">Waiting for Artifact data…</p>
-      <button id="available" type="button">Set available</button>
-      <button id="unavailable" type="button">Set unavailable</button>
+      <header>
+        <p class="eyebrow">MCP App example · foundation check</p>
+        <h1 id="title">Foundation bearing check</h1>
+        <p class="summary">A small interactive Artifact view with an approval-gated update.</p>
+      </header>
+
+      <section class="result" id="result" aria-live="polite">
+        <p id="status">Waiting for Artifact data…</p>
+        <span id="badge">LOADING</span>
+      </section>
+
+      <section class="metrics" aria-label="Example check inputs">
+        <div class="metric"><span>Design action</span><strong>420 kN</strong></div>
+        <div class="metric"><span>Bearing capacity</span><strong>600 kN</strong></div>
+        <div class="metric"><span>Utilisation</span><strong id="utilisation">—</strong></div>
+      </section>
+
+      <div class="actions">
+        <button id="available" type="button">Mark check passed</button>
+        <button id="unavailable" type="button">Mark for review</button>
+      </div>
+
+      <footer>
+        Illustrative values only — this fixture demonstrates MCP App rendering and
+        safe Artifact updates, not an engineering calculation.
+      </footer>
     </main>
     <script>
       let nextId = 1;
@@ -28,8 +149,13 @@
 
       function render(artifactDocument) {
         document.getElementById("title").textContent = artifactDocument.artifact.title;
-        document.getElementById("status").textContent =
-          `Status: ${artifactDocument.payload.status} (version ${artifactDocument.artifact.documentVersion})`;
+        const isAvailable = artifactDocument.payload.status === "available";
+        document.getElementById("result").classList.toggle("review", !isAvailable);
+        document.getElementById("status").textContent = isAvailable
+          ? `Check passed · Artifact version ${artifactDocument.artifact.documentVersion}`
+          : `Review required · Artifact version ${artifactDocument.artifact.documentVersion}`;
+        document.getElementById("badge").textContent = isAvailable ? "PASS" : "REVIEW";
+        document.getElementById("utilisation").textContent = isAvailable ? "70%" : "Over limit";
       }
 
       window.addEventListener("message", (event) => {
@@ -53,6 +179,8 @@
         if (result && result.structuredContent) render(result.structuredContent);
         if (result && result.isError) {
           document.getElementById("status").textContent = result.content?.[0]?.text || "Change rejected.";
+          document.getElementById("badge").textContent = "BLOCKED";
+          document.getElementById("result").classList.add("review");
         }
       }
 

@@ -67,8 +67,8 @@ export function ScratchFilePreview({
       {!file && !error ? <p>Opening file…</p> : null}
       {file ? <pre>{file.content}</pre> : null}
       <footer>
-        Scratch files are visible only in this Thread and are never added to the
-        Project or Artifact catalog.
+        Thread-only working material. Scratch files stay out of Project-wide
+        files and deliverables.
       </footer>
     </section>
   );
