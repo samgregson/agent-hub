@@ -6,7 +6,7 @@
     "moduleResolution": "nodenext",
     "noEmit": false,
     "outDir": ".test-build",
-    "rootDir": "src/modules",
+    "rootDir": "src",
     "types": ["node"]
   },
   "include": [
@@ -18,7 +18,9 @@
     "src/modules/agent-ui/_history.test.ts",
     "src/modules/agent-ui/_project-links.ts",
     "src/modules/agent-ui/_project-links.test.ts",
+    "src/modules/agent-ui/_scratch-proxy.test.ts",
     "src/modules/agent-ui/_ag-ui-contract.test.ts",
-    "src/modules/agent-ui/_approval.test.ts"
+    "src/modules/agent-ui/_approval.test.ts",
+    "src/shared/http/_request-url.ts"
   ]
 }

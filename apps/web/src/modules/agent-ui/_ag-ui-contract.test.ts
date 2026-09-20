@@ -8,7 +8,7 @@ import { EventSchemas, RunAgentInputSchema } from "@ag-ui/core";
 test("pinned AG-UI fixture matches the browser contract", () => {
   const fixturePath = resolve(
     __dirname,
-    "../../../../packages/contracts/fixtures/ag-ui-0.0.59.json",
+    "../../../../../packages/contracts/fixtures/ag-ui-0.0.59.json",
   );
   const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as {
     events: unknown[];

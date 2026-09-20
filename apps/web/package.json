@@ -9,7 +9,7 @@
     "format:check": "prettier --check .",
     "lint": "eslint .",
     "start": "next start --hostname 0.0.0.0",
-    "test": "tsc --project tsconfig.test.json && node --test .test-build/workspace/_state.test.js .test-build/workspace/_thread-title.test.js .test-build/agent-ui/_history.test.js .test-build/agent-ui/_project-links.test.js .test-build/agent-ui/_ag-ui-contract.test.js .test-build/agent-ui/_approval.test.js",
+    "test": "tsc --project tsconfig.test.json && node --test .test-build/modules/workspace/_state.test.js .test-build/modules/workspace/_thread-title.test.js .test-build/modules/agent-ui/_history.test.js .test-build/modules/agent-ui/_project-links.test.js .test-build/modules/agent-ui/_scratch-proxy.test.js .test-build/modules/agent-ui/_ag-ui-contract.test.js .test-build/modules/agent-ui/_approval.test.js",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit"
   },

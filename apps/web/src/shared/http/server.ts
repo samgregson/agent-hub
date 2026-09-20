@@ -2,6 +2,8 @@ import "server-only";
 
 import { loadServerConfig } from "@/shared/config/server";
 
+import { backendRequestUrl } from "./_request-url";
+
 export async function forwardBackendRequest(
   request: Request,
   backendPath: string,
@@ -17,7 +19,7 @@ export async function forwardBackendRequest(
   if (contentType) headers.set("content-type", contentType);
   if (platformSubject) headers.set(identityHeader, platformSubject);
 
-  const response = await fetch(`${apiUrl}${backendPath}`, {
+  const response = await fetch(backendRequestUrl(apiUrl, backendPath, request.url), {
     body: request.method === "GET" ? undefined : request.body,
     cache: "no-store",
     duplex: "half",
