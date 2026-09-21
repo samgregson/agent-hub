@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from typing import Any
 
-from ag_ui.core import BaseEvent, RunAgentInput
+from ag_ui.core import BaseEvent, Context, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
 from deepagents import create_deep_agent
 from deepagents.middleware.filesystem import FilesystemPermission
@@ -129,25 +129,6 @@ class PostgresDeepAgentRunner:
             assert run_id is not None
             assert subject is not None
             tools.extend(self._artifact_tools(artifacts, project_id, thread_id, run_id, subject))
-        change_notices = ""
-        if has_artifact_context:
-            assert artifacts is not None and thread_id is not None and subject is not None
-            changed = [
-                document
-                for document in await artifacts.discover(
-                    ArtifactAccess(subject=subject), project_id
-                )
-                if document.artifact.provenance.last_changed_by.thread_id != thread_id
-            ]
-            if changed:
-                summaries = "; ".join(
-                    (
-                        f"{document.artifact.title} ({document.artifact.id.root}, "
-                        f"v{document.artifact.document_version})"
-                    )
-                    for document in changed
-                )
-                change_notices = f"\n\nProject change notices: {summaries}."
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -174,7 +155,7 @@ class PostgresDeepAgentRunner:
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
-            system_prompt=f"{_AGENT_SYSTEM_PROMPT}{change_notices}",
+            system_prompt=_AGENT_SYSTEM_PROMPT,
             interrupt_on=interrupt_on or None,
             permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),
@@ -272,16 +253,44 @@ class PostgresDeepAgentRunner:
         self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
     ) -> AsyncIterator[BaseEvent]:
         await self.open()
+        enriched = await self._with_change_notices(input_data, project_id, subject)
         request_agent = (
             await self._agent_for(
                 project_id,
-                thread_id=input_data.thread_id,
-                run_id=input_data.run_id,
+                thread_id=enriched.thread_id,
+                run_id=enriched.run_id,
                 subject=subject,
             )
         ).clone()
-        async for event in request_agent.run(input_data):
+        async for event in request_agent.run(enriched):
             yield event
+
+    async def _with_change_notices(
+        self, input_data: RunAgentInput, project_id: str, subject: str | None
+    ) -> RunAgentInput:
+        if self._artifacts is None or subject is None:
+            return input_data
+        documents = await self._artifacts.discover(ArtifactAccess(subject=subject), project_id)
+        changed = [
+            document
+            for document in documents
+            if document.artifact.provenance.last_changed_by.thread_id != input_data.thread_id
+        ]
+        if not changed:
+            return input_data
+        value = "; ".join(
+            f"{document.artifact.title} ({document.artifact.id.root}, "
+            f"v{document.artifact.document_version})"
+            for document in changed
+        )
+        return input_data.model_copy(
+            update={
+                "context": [
+                    *input_data.context,
+                    Context(description="Project change notices", value=value),
+                ]
+            }
+        )
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         await self.open()
