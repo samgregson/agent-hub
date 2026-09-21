@@ -28,6 +28,19 @@ export function ArtifactDocumentPreview({
   });
   const document = result.key === key ? result.document : null;
   const error = result.key === key ? result.error : null;
+  const [isStale, setIsStale] = useState(false);
+
+  async function reload() {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) throw new Error(String(response.status));
+    const loaded = (await response.json()) as ArtifactDocument;
+    setResult({ document: loaded, error: null, key });
+    setIsStale(false);
+    return loaded;
+  }
 
   useEffect(() => {
     let active = true;
@@ -56,6 +69,19 @@ export function ArtifactDocumentPreview({
     };
   }, [artifactId, key, projectId]);
 
+  useEffect(() => {
+    function checkOnFocus() {
+      if (!document) return;
+      void reload().then((loaded) => {
+        if (loaded.artifact.documentVersion !== document.artifact.documentVersion) {
+          setIsStale(true);
+        }
+      }).catch(() => {});
+    }
+    window.addEventListener("focus", checkOnFocus);
+    return () => window.removeEventListener("focus", checkOnFocus);
+  }, [document, artifactId, key, projectId]);
+
   return (
     <section className={styles.preview}>
       {error ? <p className={styles.error}>{error}</p> : null}
@@ -68,6 +94,11 @@ export function ArtifactDocumentPreview({
             <span>Version {document.artifact.documentVersion}</span>
           </header>
           {document.artifact.summary ? <p>{document.artifact.summary}</p> : null}
+          {isStale ? (
+            <p className={styles.error}>
+              This Artifact changed in another Thread. <button onClick={() => void reload()} type="button">Reload</button>
+            </p>
+          ) : null}
           <dl>
             <div>
               <dt>Type</dt>
@@ -78,6 +109,14 @@ export function ArtifactDocumentPreview({
               <dd>
                 {document.artifact.plugin.id} {document.artifact.plugin.version}
               </dd>
+            </div>
+            <div>
+              <dt>Created by</dt>
+              <dd>{provenanceLabel(document.artifact.provenance.createdBy)}</dd>
+            </div>
+            <div>
+              <dt>Last changed by</dt>
+              <dd>{provenanceLabel(document.artifact.provenance.lastChangedBy)}</dd>
             </div>
           </dl>
           <ArtifactApp
@@ -94,4 +133,10 @@ export function ArtifactDocumentPreview({
       ) : null}
     </section>
   );
+}
+
+function provenanceLabel(actor: ArtifactDocument["artifact"]["provenance"]["createdBy"]) {
+  return actor.kind === "agentRun"
+    ? `Thread ${actor.threadId} · Run ${actor.runId}`
+    : `User action ${actor.userActionId}`;
 }

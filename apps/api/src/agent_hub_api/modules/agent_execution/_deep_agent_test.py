@@ -78,12 +78,16 @@ async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_ev
 async def test_agent_artifact_mutations_are_bound_to_a_run_and_require_approval(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class ArtifactContext:
+        async def discover(self, *_: object) -> tuple[object, ...]:
+            return ()
+
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
     runner._model = cast(Any, object())
     runner._project_files = cast(Any, object())
     runner._plugin_gateway = None
-    runner._artifacts = cast(Any, object())
+    runner._artifacts = cast(Any, ArtifactContext())
     runner._settings = cast(
         Any,
         SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
@@ -102,6 +106,8 @@ async def test_agent_artifact_mutations_are_bound_to_a_run_and_require_approval(
 
     names = {registered.name for registered in captured["tools"]}
     assert {
+        "discover_project_artifacts",
+        "load_project_artifact",
         "create_foundation_status_artifact",
         "set_foundation_status_artifact_status",
     } <= names

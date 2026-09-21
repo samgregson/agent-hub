@@ -1,3 +1,4 @@
+import json
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack
 from typing import Any
@@ -23,7 +24,7 @@ from agent_hub_api.modules.agent_execution._execution import (
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
-from agent_hub_api.modules.artifacts import ArtifactModule, ArtifactMutationAccess
+from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.settings import Settings
@@ -128,6 +129,25 @@ class PostgresDeepAgentRunner:
             assert run_id is not None
             assert subject is not None
             tools.extend(self._artifact_tools(artifacts, project_id, thread_id, run_id, subject))
+        change_notices = ""
+        if has_artifact_context:
+            assert artifacts is not None and thread_id is not None and subject is not None
+            changed = [
+                document
+                for document in await artifacts.discover(
+                    ArtifactAccess(subject=subject), project_id
+                )
+                if document.artifact.provenance.last_changed_by.thread_id != thread_id
+            ]
+            if changed:
+                summaries = "; ".join(
+                    (
+                        f"{document.artifact.title} ({document.artifact.id.root}, "
+                        f"v{document.artifact.document_version})"
+                    )
+                    for document in changed
+                )
+                change_notices = f"\n\nProject change notices: {summaries}."
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -154,7 +174,7 @@ class PostgresDeepAgentRunner:
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
-            system_prompt=_AGENT_SYSTEM_PROMPT,
+            system_prompt=f"{_AGENT_SYSTEM_PROMPT}{change_notices}",
             interrupt_on=interrupt_on or None,
             permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),
@@ -174,6 +194,30 @@ class PostgresDeepAgentRunner:
         artifacts: ArtifactModule, project_id: str, thread_id: str, run_id: str, subject: str
     ) -> list[BaseTool]:
         access = ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id)
+
+        @tool
+        async def discover_project_artifacts() -> str:
+            """List compact summaries of Artifacts in this Project on demand."""
+            documents = await artifacts.discover(ArtifactAccess(subject=subject), project_id)
+            return json.dumps(
+                [
+                    {
+                        "id": document.artifact.id.root,
+                        "title": document.artifact.title,
+                        "type": document.artifact.type,
+                        "version": document.artifact.document_version,
+                    }
+                    for document in documents
+                ]
+            )
+
+        @tool
+        async def load_project_artifact(artifact_id: str) -> str:
+            """Load one Project Artifact by ID when its complete document is needed."""
+            document = await artifacts.load(
+                ArtifactAccess(subject=subject), project_id, artifact_id
+            )
+            return document.model_dump_json(by_alias=True)
 
         @tool
         async def create_foundation_status_artifact(title: str) -> str:
@@ -210,7 +254,12 @@ class PostgresDeepAgentRunner:
                 f"to version {document.artifact.document_version}."
             )
 
-        return [create_foundation_status_artifact, set_foundation_status_artifact_status]
+        return [
+            discover_project_artifacts,
+            load_project_artifact,
+            create_foundation_status_artifact,
+            set_foundation_status_artifact_status,
+        ]
 
     async def close(self) -> None:
         if self._stack is not None:
