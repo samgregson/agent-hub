@@ -50,16 +50,19 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
     assert "The approval card is shown automatically after the tool call." in _AGENT_SYSTEM_PROMPT
 
 
-def test_project_change_notice_is_transient_and_identifies_its_origin() -> None:
+@pytest.mark.asyncio
+async def test_project_change_notice_is_transient_and_identifies_its_origin() -> None:
     original: list[AnyMessage] = [HumanMessage(content="Please review the project.")]
     request = ModelRequest(model=cast(Any, object()), messages=original)
     received: list[AnyMessage] = []
 
-    def handler(overridden: ModelRequest) -> ModelResponse:
+    async def handler(overridden: ModelRequest) -> ModelResponse:
         received.extend(overridden.messages)
         return ModelResponse(result=[AIMessage(content="I will review it.")])
 
-    response = _project_change_notice_middleware("Bridge design (artifact-1, v2)").wrap_model_call(
+    response = await _project_change_notice_middleware(
+        "Bridge design (artifact-1, v2)"
+    ).awrap_model_call(
         request, handler
     )
 

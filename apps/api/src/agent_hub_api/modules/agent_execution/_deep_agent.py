@@ -1,5 +1,5 @@
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -70,10 +70,11 @@ def _project_change_notice_middleware(change_notice: str) -> AgentMiddleware[Any
     """Add an out-of-band Project change notice to each model call only."""
 
     @wrap_model_call
-    def inject_project_change_notice(
-        request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
+    async def inject_project_change_notice(
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
     ) -> ModelResponse:
-        return handler(
+        return await handler(
             request.override(
                 messages=[
                     *request.messages,

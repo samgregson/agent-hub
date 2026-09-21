@@ -30,28 +30,25 @@ export function ArtifactDocumentPreview({
   const error = result.key === key ? result.error : null;
   const [isStale, setIsStale] = useState(false);
 
-  async function reload() {
+  async function load() {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
       { cache: "no-store" },
     );
     if (!response.ok) throw new Error(String(response.status));
-    const loaded = (await response.json()) as ArtifactDocument;
+    return (await response.json()) as ArtifactDocument;
+  }
+
+  async function reload() {
+    const loaded = await load();
     setResult({ document: loaded, error: null, key });
     setIsStale(false);
-    return loaded;
   }
 
   useEffect(() => {
     let active = true;
-    fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
-      { cache: "no-store" },
-    )
-      .then(async (response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return (await response.json()) as ArtifactDocument;
-      })
+    setIsStale(false);
+    void load()
       .then((loaded) => {
         if (active) setResult({ document: loaded, error: null, key });
       })
@@ -72,11 +69,13 @@ export function ArtifactDocumentPreview({
   useEffect(() => {
     function checkOnFocus() {
       if (!document) return;
-      void reload().then((loaded) => {
-        if (loaded.artifact.documentVersion !== document.artifact.documentVersion) {
-          setIsStale(true);
-        }
-      }).catch(() => {});
+      void load()
+        .then((loaded) => {
+          if (loaded.artifact.documentVersion !== document.artifact.documentVersion) {
+            setIsStale(true);
+          }
+        })
+        .catch(() => {});
     }
     window.addEventListener("focus", checkOnFocus);
     return () => window.removeEventListener("focus", checkOnFocus);

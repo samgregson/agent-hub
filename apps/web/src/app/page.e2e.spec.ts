@@ -160,6 +160,98 @@ test("Work navigation combines Artifacts and Project files into one list", async
   ).toHaveCount(0);
 });
 
+test("an Artifact changed by another Thread stays open until the user reloads it", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-21T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-21T00:00:00.000Z",
+  };
+  const artifactId = "artifact-123";
+  let documentRequests = 0;
+  const artifactDocument = (documentVersion: number, threadId: string) => ({
+    artifact: {
+      documentVersion,
+      id: artifactId,
+      plugin: { id: "foundation-fixture", version: "0.1.0" },
+      provenance: {
+        createdBy: { kind: "agentRun", runId: "run-a", threadId: "thread-a" },
+        lastChangedBy: { kind: "agentRun", runId: "run-b", threadId },
+      },
+      relations: [],
+      schema: { id: "agent-hub.fixture.status", version: "1" },
+      title: "Foundation status",
+      type: "agent-hub.fixture.status",
+    },
+    payload: { status: documentVersion === 1 ? "available" : "unavailable" },
+  });
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({
+      json: {
+        artifacts: [
+          {
+            documentVersion: 1,
+            id: artifactId,
+            pluginId: "foundation-fixture",
+            pluginVersion: "0.1.0",
+            title: "Foundation status",
+            type: "agent-hub.fixture.status",
+          },
+        ],
+      },
+    });
+  });
+  await page.route(`**/api/projects/${project.id}/files/index`, async (route) => {
+    await route.fulfill({ json: { files: [] } });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+    async (route) => {
+      documentRequests += 1;
+      await route.fulfill({
+        json:
+          documentRequests <= 2
+            ? artifactDocument(1, "thread-a")
+            : artifactDocument(2, "thread-b"),
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}/app`,
+    async (route) => {
+      await route.fulfill({ status: 404 });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: "Foundation status" }).click();
+  const artifactPreview = page.locator("aside").last();
+  await expect(artifactPreview.getByText("Version 1")).toBeVisible();
+
+  const changedDocumentResponse = page.waitForResponse(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await changedDocumentResponse;
+
+  await expect(
+    page.getByText("This Artifact changed in another Thread."),
+  ).toBeVisible();
+  await expect(artifactPreview.getByText("Version 1")).toBeVisible();
+  await page.getByRole("button", { name: "Reload" }).click();
+  await expect(artifactPreview.getByText("Version 2")).toBeVisible();
+  await expect(
+    page.getByText("This Artifact changed in another Thread."),
+  ).toBeHidden();
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 
