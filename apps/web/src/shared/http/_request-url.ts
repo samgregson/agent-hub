@@ -3,5 +3,9 @@ export function backendRequestUrl(
   backendPath: string,
   requestUrl: string,
 ): string {
-  return `${apiUrl}${backendPath}${new URL(requestUrl).search}`;
+  const backendUrl = new URL(backendPath, apiUrl);
+  if (!backendUrl.search) {
+    backendUrl.search = new URL(requestUrl).search;
+  }
+  return backendUrl.toString();
 }

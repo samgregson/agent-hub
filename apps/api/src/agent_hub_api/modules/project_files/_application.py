@@ -205,7 +205,11 @@ class ProjectFilesModule:
             await self._projects.load(ProjectAccess(subject=access.subject), project_id)
         except ProjectNotFound as error:
             raise ProjectFileNotFound from error
-        return await self.list(project_id)
+        return tuple(
+            file
+            for file in await self.list(project_id)
+            if not (file.path == ARTIFACT_ROOT or file.path.startswith(f"{ARTIFACT_ROOT}/"))
+        )
 
     async def write(self, project_id: str, path: str, content: str) -> ProjectFile:
         normalized = _normalize_file_path(path)
