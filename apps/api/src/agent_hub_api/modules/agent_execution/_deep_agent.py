@@ -31,7 +31,7 @@ from agent_hub_api.modules.agent_execution._execution import (
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
-from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
+from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.settings import Settings
@@ -145,18 +145,11 @@ class PostgresDeepAgentRunner:
         if self._plugin_gateway is not None:
             tools.extend(await self._plugin_gateway.agent_tools(project_id))
         artifacts = getattr(self, "_artifacts", None)
-        has_artifact_context = (
-            artifacts is not None
-            and thread_id is not None
-            and run_id is not None
-            and subject is not None
-        )
+        has_artifact_context = artifacts is not None and subject is not None
         if has_artifact_context:
             assert artifacts is not None
-            assert thread_id is not None
-            assert run_id is not None
             assert subject is not None
-            tools.extend(self._artifact_tools(artifacts, project_id, thread_id, run_id, subject))
+            tools.extend(self._artifact_tools(artifacts, project_id, subject))
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -165,19 +158,6 @@ class PostgresDeepAgentRunner:
                     "allowed_decisions": ["approve", "reject"],
                     "description": "Run the harmless foundation approval test action?",
                 }
-                }
-            )
-        if has_artifact_context:
-            interrupt_on.update(
-                {
-                    "create_foundation_status_artifact": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Create this Project Artifact?",
-                    },
-                    "set_foundation_status_artifact_status": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Change this Project Artifact?",
-                    },
                 }
             )
         graph = create_deep_agent(
@@ -205,10 +185,8 @@ class PostgresDeepAgentRunner:
 
     @staticmethod
     def _artifact_tools(
-        artifacts: ArtifactModule, project_id: str, thread_id: str, run_id: str, subject: str
+        artifacts: ArtifactModule, project_id: str, subject: str
     ) -> list[BaseTool]:
-        access = ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id)
-
         @tool
         async def discover_project_artifacts() -> str:
             """List compact summaries of Artifacts in this Project on demand."""
@@ -233,47 +211,7 @@ class PostgresDeepAgentRunner:
             )
             return document.model_dump_json(by_alias=True)
 
-        @tool
-        async def create_foundation_status_artifact(title: str) -> str:
-            """Create a Foundation status Artifact in the selected Project."""
-            document = await artifacts.create_from_plugin(
-                access,
-                project_id,
-                plugin_id="foundation-fixture",
-                tool_name="create_status_artifact",
-                arguments={"title": title},
-            )
-            return (
-                f"Created Project Artifact '{document.artifact.title}' "
-                f"({document.artifact.id.root})."
-            )
-
-        @tool
-        async def set_foundation_status_artifact_status(
-            artifact_id: str,
-            expected_version: int,
-            status: str,
-        ) -> str:
-            """Set a Foundation status Artifact to available or unavailable."""
-            document = await artifacts.apply_plugin_operation(
-                access,
-                project_id,
-                artifact_id,
-                expected_version=expected_version,
-                tool_name="set_status_artifact_status",
-                arguments={"status": status},
-            )
-            return (
-                f"Updated Project Artifact '{document.artifact.title}' "
-                f"to version {document.artifact.document_version}."
-            )
-
-        return [
-            discover_project_artifacts,
-            load_project_artifact,
-            create_foundation_status_artifact,
-            set_foundation_status_artifact_status,
-        ]
+        return [discover_project_artifacts, load_project_artifact]
 
     async def close(self) -> None:
         if self._stack is not None:

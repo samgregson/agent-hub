@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { ArtifactDocument } from "@/contracts";
 
@@ -28,26 +28,26 @@ export function ArtifactDocumentPreview({
   });
   const document = result.key === key ? result.document : null;
   const error = result.key === key ? result.error : null;
-  const [isStale, setIsStale] = useState(false);
+  const [staleKey, setStaleKey] = useState<string | null>(null);
+  const isStale = staleKey === key;
 
-  async function load() {
+  const load = useCallback(async () => {
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
       { cache: "no-store" },
     );
     if (!response.ok) throw new Error(String(response.status));
     return (await response.json()) as ArtifactDocument;
-  }
+  }, [artifactId, projectId]);
 
   async function reload() {
     const loaded = await load();
     setResult({ document: loaded, error: null, key });
-    setIsStale(false);
+    setStaleKey(null);
   }
 
   useEffect(() => {
     let active = true;
-    setIsStale(false);
     void load()
       .then((loaded) => {
         if (active) setResult({ document: loaded, error: null, key });
@@ -64,7 +64,7 @@ export function ArtifactDocumentPreview({
     return () => {
       active = false;
     };
-  }, [artifactId, key, projectId]);
+  }, [key, load]);
 
   useEffect(() => {
     function checkOnFocus() {
@@ -72,14 +72,14 @@ export function ArtifactDocumentPreview({
       void load()
         .then((loaded) => {
           if (loaded.artifact.documentVersion !== document.artifact.documentVersion) {
-            setIsStale(true);
+            setStaleKey(key);
           }
         })
         .catch(() => {});
     }
     window.addEventListener("focus", checkOnFocus);
     return () => window.removeEventListener("focus", checkOnFocus);
-  }, [document, artifactId, key, projectId]);
+  }, [document, key, load]);
 
   return (
     <section className={styles.preview}>
@@ -120,8 +120,6 @@ export function ArtifactDocumentPreview({
           </dl>
           <ArtifactApp
             artifactId={artifactId}
-            document={document}
-            onSaved={(saved) => setResult({ document: saved, error: null, key })}
             projectId={projectId}
           />
           <details className={styles.fallback}>

@@ -314,26 +314,9 @@ def create_postgres_plugin_gateway(
         name="Foundation fixture",
         version="0.1.0",
         endpoint="http://foundation-fixture:8000/mcp",
-        tools=(
-            PluginTool(name="foundation_status", read_only=True),
-            PluginTool(
-                name="create_status_artifact",
-                read_only=False,
-                agent_visible=False,
-            ),
-            PluginTool(
-                name="validate_status_artifact",
-                read_only=True,
-                agent_visible=False,
-            ),
-            PluginTool(
-                name="set_status_artifact_status",
-                read_only=False,
-                agent_visible=False,
-            ),
-        ),
+        tools=(PluginTool(name="foundation_status", read_only=True),),
         app_resource_uri="ui://agent-hub-foundation/status.html",
-        app_tool_names=("set_status_artifact_status",),
+        app_tool_names=(),
     )
     from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
 

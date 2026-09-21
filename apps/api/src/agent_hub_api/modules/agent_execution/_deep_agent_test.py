@@ -102,7 +102,7 @@ async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_ev
 
 
 @pytest.mark.asyncio
-async def test_agent_artifact_mutations_are_bound_to_a_run_and_require_approval(
+async def test_agent_can_discover_and_load_project_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class ArtifactContext:
@@ -132,21 +132,9 @@ async def test_agent_artifact_mutations_are_bound_to_a_run_and_require_approval(
     )
 
     names = {registered.name for registered in captured["tools"]}
-    assert {
-        "discover_project_artifacts",
-        "load_project_artifact",
-        "create_foundation_status_artifact",
-        "set_foundation_status_artifact_status",
-    } <= names
-    interrupt_on = captured["interrupt_on"]
-    assert interrupt_on["create_foundation_status_artifact"]["allowed_decisions"] == [
-        "approve",
-        "reject",
-    ]
-    assert interrupt_on["set_foundation_status_artifact_status"]["allowed_decisions"] == [
-        "approve",
-        "reject",
-    ]
+    assert {"discover_project_artifacts", "load_project_artifact"} <= names
+    assert "create_foundation_status_artifact" not in names
+    assert "set_foundation_status_artifact_status" not in names
 
 
 @pytest.mark.asyncio
