@@ -4,12 +4,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 from deepagents.middleware._fs_interrupt import _build_interrupt_on_from_permissions
+from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain.tools.tool_node import ToolCallRequest
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 import agent_hub_api.modules.agent_execution._deep_agent as deep_agent
 from agent_hub_api.modules.agent_execution._deep_agent import (
     _AGENT_SYSTEM_PROMPT,
     PostgresDeepAgentRunner,
+    _project_change_notice_middleware,
     _project_file_permissions,
 )
 
@@ -45,6 +48,27 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
         in _AGENT_SYSTEM_PROMPT
     )
     assert "The approval card is shown automatically after the tool call." in _AGENT_SYSTEM_PROMPT
+
+
+def test_project_change_notice_is_transient_and_identifies_its_origin() -> None:
+    original: list[AnyMessage] = [HumanMessage(content="Please review the project.")]
+    request = ModelRequest(model=cast(Any, object()), messages=original)
+    received: list[AnyMessage] = []
+
+    def handler(overridden: ModelRequest) -> ModelResponse:
+        received.extend(overridden.messages)
+        return ModelResponse(result=[AIMessage(content="I will review it.")])
+
+    response = _project_change_notice_middleware("Bridge design (artifact-1, v2)").wrap_model_call(
+        request, handler
+    )
+
+    assert isinstance(response, ModelResponse)
+    assert response.result == [AIMessage(content="I will review it.")]
+    assert request.messages == original
+    assert received[-1] == HumanMessage(
+        content="[System Notification]: Bridge design (artifact-1, v2)"
+    )
 
 
 @pytest.mark.asyncio

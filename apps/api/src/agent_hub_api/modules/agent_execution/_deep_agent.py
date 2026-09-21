@@ -1,13 +1,20 @@
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
-from ag_ui.core import BaseEvent, Context, RunAgentInput
+from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
 from deepagents import create_deep_agent
 from deepagents.middleware.filesystem import FilesystemPermission
-from langchain.agents.middleware import InterruptOnConfig
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    InterruptOnConfig,
+    ModelRequest,
+    ModelResponse,
+    wrap_model_call,
+)
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -57,6 +64,25 @@ def foundation_protected_action(note: str) -> str:
 def _project_file_permissions() -> list[FilesystemPermission]:
     """Require an explicit decision before a Deep Agents file tool mutates a Project."""
     return [FilesystemPermission(operations=["write"], paths=["/project/**"], mode="interrupt")]
+
+
+def _project_change_notice_middleware(change_notice: str) -> AgentMiddleware[Any, Any]:
+    """Add an out-of-band Project change notice to each model call only."""
+
+    @wrap_model_call
+    def inject_project_change_notice(
+        request: ModelRequest, handler: Callable[[ModelRequest], ModelResponse]
+    ) -> ModelResponse:
+        return handler(
+            request.override(
+                messages=[
+                    *request.messages,
+                    HumanMessage(content=f"[System Notification]: {change_notice}"),
+                ]
+            )
+        )
+
+    return inject_project_change_notice
 
 
 class PostgresDeepAgentRunner:
@@ -110,6 +136,7 @@ class PostgresDeepAgentRunner:
         thread_id: str | None = None,
         run_id: str | None = None,
         subject: str | None = None,
+        change_notice: str | None = None,
     ) -> AgentHubLangGraphAgent:
         assert self._checkpointer is not None
         assert self._model is not None
@@ -160,6 +187,11 @@ class PostgresDeepAgentRunner:
             permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),
             checkpointer=self._checkpointer,
+            middleware=(
+                [_project_change_notice_middleware(change_notice)]
+                if change_notice is not None
+                else []
+            ),
         )
         agent = AgentHubLangGraphAgent(
             name="agent-hub",
@@ -253,23 +285,24 @@ class PostgresDeepAgentRunner:
         self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
     ) -> AsyncIterator[BaseEvent]:
         await self.open()
-        enriched = await self._with_change_notices(input_data, project_id, subject)
+        change_notice = await self._project_change_notice(input_data, project_id, subject)
         request_agent = (
             await self._agent_for(
                 project_id,
-                thread_id=enriched.thread_id,
-                run_id=enriched.run_id,
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id,
                 subject=subject,
+                change_notice=change_notice,
             )
         ).clone()
-        async for event in request_agent.run(enriched):
+        async for event in request_agent.run(input_data):
             yield event
 
-    async def _with_change_notices(
+    async def _project_change_notice(
         self, input_data: RunAgentInput, project_id: str, subject: str | None
-    ) -> RunAgentInput:
+    ) -> str | None:
         if self._artifacts is None or subject is None:
-            return input_data
+            return None
         documents = await self._artifacts.discover(ArtifactAccess(subject=subject), project_id)
         changed = [
             document
@@ -277,19 +310,11 @@ class PostgresDeepAgentRunner:
             if document.artifact.provenance.last_changed_by.thread_id != input_data.thread_id
         ]
         if not changed:
-            return input_data
-        value = "; ".join(
+            return None
+        return "; ".join(
             f"{document.artifact.title} ({document.artifact.id.root}, "
             f"v{document.artifact.document_version})"
             for document in changed
-        )
-        return input_data.model_copy(
-            update={
-                "context": [
-                    *input_data.context,
-                    Context(description="Project change notices", value=value),
-                ]
-            }
         )
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
