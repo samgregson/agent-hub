@@ -82,7 +82,7 @@ Unknown envelope fields should be preserved where possible. Agent Hub-specific o
 
 ## Tool Result Snapshots
 
-Plugins expose ordinary MCP tools with declared input and output schemas. A successful tool call with JSON `structuredContent` is independently eligible to become an Artifact: Agent Hub records its input and structured output as the Plugin-owned Tool Result Snapshot payload, then assigns the host-controlled envelope. It does not infer or invoke a server-wide state, so unrelated calls such as credits and lookups never become part of another calculation's snapshot.
+Plugins expose ordinary MCP tools with declared input and output schemas. Every successful tool call with JSON `structuredContent` becomes an Artifact: Agent Hub records its input and structured output as the Plugin-owned Tool Result Snapshot payload, then assigns the host-controlled envelope. It does not infer or invoke a server-wide state, so unrelated calls such as credits and lookups never become part of another calculation's snapshot.
 
 An MCP App may rehydrate the saved input/output snapshot, invoke the same ordinary tool with changed inputs, and request that Agent Hub replace the current Artifact with the new successful snapshot. Tool failures create no snapshot. A meaningful result that fails a domain check remains a normal structured result with Plugin-owned validation diagnostics; Agent Hub still validates envelope authority and the configured payload shape before persistence.
 
