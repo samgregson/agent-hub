@@ -28,6 +28,10 @@ _Avoid_: Payload, plugin state
 The domain-specific part of an artifact document whose schema and semantics are owned by its plugin.
 _Avoid_: Envelope, host metadata
 
+**Tool Result Snapshot**:
+The canonical, serializable inputs and structured output from one successful MCP tool invocation, saved as an Artifact Payload. It excludes transient MCP App UI state and unsuccessful tool calls.
+_Avoid_: MCP server state, tool transcript
+
 **Virtual Filesystem**:
 The project-shared hierarchical working state available to agents without providing access to the user's computer filesystem.
 _Avoid_: Local filesystem, user filesystem, thread filesystem

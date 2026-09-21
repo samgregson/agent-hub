@@ -80,40 +80,21 @@ This is an architectural example, not the calculation schema. Project ownership 
 
 Unknown envelope fields should be preserved where possible. Agent Hub-specific optional fields must be namespaced and cannot be required by the portable plugin contract.
 
-## Portable semantic edit
+## Tool Result Snapshots
 
-A state-changing Plugin tool accepts:
+Plugins expose ordinary MCP tools with declared input and output schemas. A successful tool call with JSON `structuredContent` is independently eligible to become an Artifact: Agent Hub records its input and structured output as the Plugin-owned Tool Result Snapshot payload, then assigns the host-controlled envelope. It does not infer or invoke a server-wide state, so unrelated calls such as credits and lookups never become part of another calculation's snapshot.
 
-```json
-{
-  "document": { "artifact": {}, "payload": {} },
-  "operation": {
-    "type": "plugin-defined-operation",
-    "arguments": {}
-  }
-}
-```
-
-It returns:
-
-- concise model-visible `content` describing the outcome;
-- a complete canonical replacement document in `structuredContent`;
-- an optional MCP App UI resource;
-- validation errors without a replacement document when the operation is invalid.
-
-A patch may accompany the replacement later for review UX or efficiency, but the complete replacement remains the portability and recovery floor.
+An MCP App may rehydrate the saved input/output snapshot, invoke the same ordinary tool with changed inputs, and request that Agent Hub replace the current Artifact with the new successful snapshot. Tool failures create no snapshot. A meaningful result that fails a domain check remains a normal structured result with Plugin-owned validation diagnostics; Agent Hub still validates envelope authority and the configured payload shape before persistence.
 
 ## Agent Hub edit sequence
 
-1. Resolve the Artifact ID inside the authenticated Project and load its current document.
-2. Check the expected document version when one is supplied.
-3. Invoke the responsible Plugin with the complete document and semantic operation.
-4. Validate the Plugin's structured result against its catalogued schema.
-5. Preserve or recompute host-controlled fields; reject an incompatible type/schema change.
-6. Persist the replacement payload, host envelope updates, provenance, and project-change notice atomically.
-7. Return the saved document and refresh or reopen the MCP App view.
+1. Invoke one ordinary reviewed MCP tool.
+2. On a successful JSON structured result, validate its configured payload shape.
+3. Assign or preserve the host-controlled fields, checking the expected document version on replacement.
+4. Persist the Tool Result Snapshot payload, host envelope updates, provenance, and project-change notice atomically.
+5. Return the saved document and refresh or reopen the MCP App view.
 
-Outside Agent Hub, another MCP client can pass the same inline document to the Plugin and explicitly save the returned replacement. It loses automatic Project lookup, provenance, discovery, and persistence, but not calculation, validation, editing, or rendering behavior.
+Outside Agent Hub, another MCP client can invoke the same ordinary tool with the same inputs and receive the same calculation, validation, and rendering data. It loses automatic Project lookup, provenance, discovery, and persistence.
 
 ## Provenance actors
 

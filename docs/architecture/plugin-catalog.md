@@ -22,6 +22,10 @@ A catalog entry identifies:
 
 The exact serialization format is an implementation choice. The manifest is configuration and policy input, not executable Plugin code.
 
+## Tool Result Snapshots
+
+Every successful reviewed MCP tool call with JSON `structuredContent` is eligible to become an Artifact. Agent Hub records the invocation input and structured output as the Plugin-owned Tool Result Snapshot payload and derives its Artifact type from the reviewed Plugin and tool identity. It never calls unrelated tools to assemble a snapshot: a credits or lookup call is independently represented only when it itself returns structured content. Tool errors and transient MCP App UI state are not Artifacts. This is a host persistence policy; it adds no Agent Hub-specific inputs, storage, or callbacks to the portable MCP tool contract.
+
 ## Reference Plugin deployment
 
 The reference Plugin server implementation is Python/FastMCP, deployed as an
