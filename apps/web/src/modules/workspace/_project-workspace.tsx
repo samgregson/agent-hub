@@ -541,6 +541,9 @@ export function ProjectWorkspace() {
           selectedWorkspace?.selectedFilePath &&
           selectedWorkspace.selectedScratchThreadId ? (
           <ScratchFilePreview
+            onSavedToProject={(path) =>
+              dispatch({ path, type: "openProjectFile" })
+            }
             path={selectedWorkspace.selectedFilePath}
             projectId={selectedProject.id}
             threadId={selectedWorkspace.selectedScratchThreadId}

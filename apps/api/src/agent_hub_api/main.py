@@ -107,7 +107,9 @@ def create_app(
     application.include_router(
         create_agent_transport_router(
             resolved_identity,
-            AgentTransportModule(resolved_projects, resolved_agent_execution),
+            AgentTransportModule(
+                resolved_projects, resolved_agent_execution, resolved_project_files
+            ),
         ),
         prefix="/api",
     )

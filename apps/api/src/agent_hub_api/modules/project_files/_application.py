@@ -84,6 +84,10 @@ class ProjectFileConflict(ProjectFileError):
     """An exact-string edit could not be applied to the current content."""
 
 
+class ProjectFileAlreadyExists(ProjectFileError):
+    """A direct user save cannot replace an existing Project file."""
+
+
 class ReservedProjectFilePath(ProjectFileError):
     """Only the Artifact Module may mutate the reserved Artifact namespace."""
 
@@ -94,6 +98,10 @@ class ProjectFileStore(Protocol):
     async def load(self, project_id: str, path: str) -> ProjectFile | None: ...
 
     async def write(
+        self, project_id: str, path: str, content: str, *, max_files: int
+    ) -> ProjectFile: ...
+
+    async def create(
         self, project_id: str, path: str, content: str, *, max_files: int
     ) -> ProjectFile: ...
 
@@ -204,6 +212,21 @@ class ProjectFilesModule:
         _require_mutable(normalized)
         self._check_content(content)
         return await self._store.write(project_id, normalized, content, max_files=self._max_files)
+
+    async def create_visible(
+        self, access: ProjectFileAccess, project_id: str, path: str, content: str
+    ) -> ProjectFile:
+        """Create a new Project file after user authorization, never replacing one."""
+        try:
+            await self._projects.load(ProjectAccess(subject=access.subject), project_id)
+        except ProjectNotFound as error:
+            raise ProjectFileNotFound from error
+        normalized = _normalize_file_path(path)
+        _require_mutable(normalized)
+        self._check_content(content)
+        return await self._store.create(
+            project_id, normalized, content, max_files=self._max_files
+        )
 
     async def edit(
         self,
@@ -327,6 +350,18 @@ class MemoryProjectFileStore:
         self._files[key] = saved
         return saved
 
+    async def create(
+        self, project_id: str, path: str, content: str, *, max_files: int
+    ) -> ProjectFile:
+        if (project_id, path) in self._files:
+            raise ProjectFileAlreadyExists
+        if len(await self.list(project_id)) >= max_files:
+            raise ProjectFileLimitExceeded("Project file-count limit reached")
+        now = datetime.now(UTC)
+        saved = ProjectFile(project_id, path, content, 1, now, now)
+        self._files[(project_id, path)] = saved
+        return saved
+
     async def edit(
         self,
         project_id: str,
@@ -434,6 +469,46 @@ class PostgresProjectFileStore:
                 SET content = EXCLUDED.content,
                     version = project_files.version + 1,
                     updated_at = EXCLUDED.updated_at
+                RETURNING project_id, path, content, version, created_at, updated_at
+                """,
+                (project_id, path, content, now, now),
+            )
+            row = await cursor.fetchone()
+            assert row is not None
+            return self._file(row)
+
+    async def create(
+        self, project_id: str, path: str, content: str, *, max_files: int
+    ) -> ProjectFile:
+        connection = await self._connect()
+        async with connection:
+            project = await connection.execute(
+                "SELECT 1 FROM projects WHERE id = %s FOR UPDATE", (project_id,)
+            )
+            if await project.fetchone() is None:
+                raise ProjectFileNotFound
+            existing = await connection.execute(
+                "SELECT 1 FROM project_files WHERE project_id = %s AND path = %s",
+                (project_id, path),
+            )
+            if await existing.fetchone() is not None:
+                raise ProjectFileAlreadyExists
+            count = await connection.execute(
+                "SELECT count(*) AS count FROM project_files WHERE project_id = %s",
+                (project_id,),
+            )
+            count_row = await count.fetchone()
+            assert count_row is not None
+            count_value = count_row["count"]
+            assert isinstance(count_value, int)
+            if count_value >= max_files:
+                raise ProjectFileLimitExceeded("Project file-count limit reached")
+            now = datetime.now(UTC)
+            cursor = await connection.execute(
+                """
+                INSERT INTO project_files
+                    (project_id, path, content, version, created_at, updated_at)
+                VALUES (%s, %s, %s, 1, %s, %s)
                 RETURNING project_id, path, content, version, created_at, updated_at
                 """,
                 (project_id, path, content, now, now),

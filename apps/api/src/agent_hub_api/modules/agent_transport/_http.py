@@ -6,11 +6,17 @@ from ag_ui.core import RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from agent_hub_api.contracts import AgentRun as AgentRunResponse
 from agent_hub_api.contracts import ScratchFilePreview
 from agent_hub_api.modules.agent_execution import AgentRun, ScratchFileNotFound
+from agent_hub_api.modules.identity import (
+    IdentityEvidence,
+    IdentityModule,
+    IdentityUnavailable,
+    RequestContext,
+)
 from agent_hub_api.modules.agent_transport._application import (
     AgentThreadAccess,
     AgentThreadNotFound,
@@ -19,11 +25,10 @@ from agent_hub_api.modules.agent_transport._application import (
     DuplicateAgentTransportRun,
     InvalidAgentTransportResume,
 )
-from agent_hub_api.modules.identity import (
-    IdentityEvidence,
-    IdentityModule,
-    IdentityUnavailable,
-    RequestContext,
+from agent_hub_api.modules.project_files import (
+    InvalidProjectFilePath,
+    ProjectFileAlreadyExists,
+    ProjectFileLimitExceeded,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +37,16 @@ logger = logging.getLogger(__name__)
 class ThreadHistoryResponse(BaseModel):
     messages: list[dict[str, object]]
     interrupts: list[dict[str, object]]
+
+
+class SaveScratchFileRequest(BaseModel):
+    source_path: str = Field(alias="sourcePath", min_length=10, max_length=1032)
+    destination_path: str = Field(alias="destinationPath", min_length=10, max_length=1032)
+
+
+class SavedProjectFileResponse(BaseModel):
+    path: str
+    version: int
 
 
 def _run_response(run: AgentRun) -> AgentRunResponse:
@@ -128,6 +143,46 @@ def create_agent_transport_router(
                 detail="Scratch file not found",
             ) from error
         return ScratchFilePreview(path=file.path, content=file.content)
+
+    @router.post("/scratch/save", response_model=SavedProjectFileResponse)
+    async def save_scratch_file(
+        project_id: str,
+        thread_id: str,
+        input_data: SaveScratchFileRequest,
+        context: Context,
+    ) -> SavedProjectFileResponse:
+        if not input_data.source_path.startswith("/scratch/"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Scratch saves require a /scratch/ source path",
+            )
+        if not input_data.destination_path.startswith("/project/"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Project file saves require a /project/ destination path",
+            )
+        try:
+            saved = await agent_transport.save_scratch_to_project(
+                access(project_id, thread_id, context),
+                input_data.source_path,
+                input_data.destination_path.removeprefix("/project"),
+            )
+        except (AgentThreadNotFound, ScratchFileNotFound) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scratch file not found",
+            ) from error
+        except ProjectFileAlreadyExists as error:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A Project file already exists at this path",
+            ) from error
+        except (InvalidProjectFilePath, ProjectFileLimitExceeded) as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(error),
+            ) from error
+        return SavedProjectFileResponse(path=f"/project{saved.path}", version=saved.version)
 
     @router.post("/agent")
     async def stream_agent(
