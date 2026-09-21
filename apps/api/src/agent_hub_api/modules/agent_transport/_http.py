@@ -11,12 +11,6 @@ from pydantic import BaseModel, Field
 from agent_hub_api.contracts import AgentRun as AgentRunResponse
 from agent_hub_api.contracts import ScratchFilePreview
 from agent_hub_api.modules.agent_execution import AgentRun, ScratchFileNotFound
-from agent_hub_api.modules.identity import (
-    IdentityEvidence,
-    IdentityModule,
-    IdentityUnavailable,
-    RequestContext,
-)
 from agent_hub_api.modules.agent_transport._application import (
     AgentThreadAccess,
     AgentThreadNotFound,
@@ -24,6 +18,12 @@ from agent_hub_api.modules.agent_transport._application import (
     AgentTransportRunAlreadyActive,
     DuplicateAgentTransportRun,
     InvalidAgentTransportResume,
+)
+from agent_hub_api.modules.identity import (
+    IdentityEvidence,
+    IdentityModule,
+    IdentityUnavailable,
+    RequestContext,
 )
 from agent_hub_api.modules.project_files import (
     InvalidProjectFilePath,

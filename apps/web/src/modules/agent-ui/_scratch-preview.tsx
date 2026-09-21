@@ -64,7 +64,7 @@ export function ScratchFilePreview({
   async function saveToProject() {
     const destinationPath = window.prompt(
       "Save scratch file to Project",
-      `/project${path.removeprefix("/scratch")}`,
+      `/project${path.replace(/^\/scratch/, "")}`,
     );
     if (destinationPath === null) return;
     setIsSaving(true);
