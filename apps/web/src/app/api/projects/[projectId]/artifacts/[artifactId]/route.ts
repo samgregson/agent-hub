@@ -4,7 +4,26 @@ interface RouteContext {
   params: Promise<{ artifactId: string; projectId: string }>;
 }
 
-export async function GET(request: Request, context: RouteContext): Promise<Response> {
+export async function GET(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
   const { artifactId, projectId } = await context.params;
-  return forwardArtifactRequest(request, projectId, `/${encodeURIComponent(artifactId)}`);
+  return forwardArtifactRequest(
+    request,
+    projectId,
+    `/${encodeURIComponent(artifactId)}`,
+  );
+}
+
+export async function DELETE(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
+  const { artifactId, projectId } = await context.params;
+  return forwardArtifactRequest(
+    request,
+    projectId,
+    `/${encodeURIComponent(artifactId)}`,
+  );
 }

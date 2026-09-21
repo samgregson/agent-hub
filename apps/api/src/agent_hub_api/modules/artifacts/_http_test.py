@@ -105,6 +105,45 @@ async def test_authorized_project_can_discover_compact_artifacts_and_load_one() 
 
 
 @pytest.mark.asyncio
+async def test_user_can_delete_an_artifact_only_from_their_authorized_project() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
+    artifacts = create_memory_artifact_module(projects)
+    created = await artifacts.create(
+        ArtifactUserActionAccess(subject="sam", user_action_id="create-action"),
+        project.id,
+        ArtifactDraft(
+            type="agent-hub.fixture.status",
+            title="Foundation status",
+            plugin_id="foundation-fixture",
+            plugin_version="0.1.0",
+            schema_id="agent-hub.fixture.status",
+            schema_version="1.0",
+            payload={"status": "available"},
+        ),
+    )
+    app = FastAPI()
+    app.include_router(
+        create_artifact_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            artifacts,
+        ),
+        prefix="/api",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        deleted = await client.delete(
+            f"/api/projects/{project.id}/artifacts/{created.artifact.id.root}"
+        )
+        missing = await client.get(
+            f"/api/projects/{project.id}/artifacts/{created.artifact.id.root}"
+        )
+
+    assert deleted.status_code == 204
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_artifact_app_has_a_sandbox_safe_resource_and_a_reviewed_action_route() -> None:
     projects = create_memory_project_module()
     project = await projects.create(ProjectAccess(subject="sam"), "Bridge")

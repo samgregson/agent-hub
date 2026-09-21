@@ -86,6 +86,15 @@ def create_artifact_router(identity: IdentityModule, artifacts: ArtifactModule) 
                 status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found"
             ) from error
 
+    @router.delete("/{artifact_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete(project_id: str, artifact_id: str, context: Context) -> None:
+        try:
+            await artifacts.delete(artifact_access(context), project_id, artifact_id)
+        except ArtifactNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found"
+            ) from error
+
     @router.get("/{artifact_id}/app")
     async def app_resource(project_id: str, artifact_id: str, context: Context) -> Response:
         try:

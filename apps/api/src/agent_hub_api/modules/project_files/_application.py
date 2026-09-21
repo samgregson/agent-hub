@@ -116,6 +116,8 @@ class ProjectFileStore(Protocol):
         replace_all: bool,
     ) -> tuple[ProjectFile, int]: ...
 
+    async def delete(self, project_id: str, path: str) -> bool: ...
+
 
 def _normalize_path(path: str) -> str:
     if not path.startswith("/") or "\x00" in path or len(path) > 1024:
@@ -231,6 +233,19 @@ class ProjectFilesModule:
         return await self._store.create(
             project_id, normalized, content, max_files=self._max_files
         )
+
+    async def delete_visible(
+        self, access: ProjectFileAccess, project_id: str, path: str
+    ) -> None:
+        """Delete one ordinary Project File after user authorization."""
+        try:
+            await self._projects.load(ProjectAccess(subject=access.subject), project_id)
+        except ProjectNotFound as error:
+            raise ProjectFileNotFound from error
+        normalized = _normalize_file_path(path)
+        _require_mutable(normalized)
+        if not await self._store.delete(project_id, normalized):
+            raise ProjectFileNotFound
 
     async def edit(
         self,
@@ -395,6 +410,9 @@ class MemoryProjectFileStore:
         self._files[(project_id, path)] = saved
         return saved, occurrences
 
+    async def delete(self, project_id: str, path: str) -> bool:
+        return self._files.pop((project_id, path), None) is not None
+
 
 class PostgresProjectFileStore:
     def __init__(self, settings: Settings) -> None:
@@ -435,6 +453,15 @@ class PostgresProjectFileStore:
             )
             row = await cursor.fetchone()
             return None if row is None else self._file(row)
+
+    async def delete(self, project_id: str, path: str) -> bool:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                "DELETE FROM project_files WHERE project_id = %s AND path = %s",
+                (project_id, path),
+            )
+            return cursor.rowcount == 1
 
     async def write(
         self, project_id: str, path: str, content: str, *, max_files: int

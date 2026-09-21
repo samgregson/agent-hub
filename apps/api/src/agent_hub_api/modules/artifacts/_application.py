@@ -120,6 +120,8 @@ class ArtifactStore(Protocol):
         self, project_id: str, artifact_id: str, document: ArtifactDocument
     ) -> ArtifactRecord | None: ...
 
+    async def delete(self, project_id: str, artifact_id: str) -> bool: ...
+
 
 class ArtifactModule:
     """Own portable Artifact documents and restore host authority before persistence."""
@@ -292,6 +294,11 @@ class ArtifactModule:
         await self._authorize(access, project_id)
         return tuple(record.document for record in await self._store.list(project_id))
 
+    async def delete(self, access: ArtifactAccess, project_id: str, artifact_id: str) -> None:
+        await self._authorize(access, project_id)
+        if not await self._store.delete(project_id, artifact_id):
+            raise ArtifactNotFound
+
     async def replace(
         self,
         access: ArtifactWriteAccess,
@@ -448,6 +455,9 @@ class MemoryArtifactStore:
         self._records[key] = record
         return record
 
+    async def delete(self, project_id: str, artifact_id: str) -> bool:
+        return self._records.pop((project_id, artifact_id), None) is not None
+
 
 class PostgresArtifactStore:
     """Keep one canonical Artifact document in the reserved Project VFS namespace.
@@ -516,6 +526,28 @@ class PostgresArtifactStore:
                 ),
             )
         return record
+
+    async def delete(self, project_id: str, artifact_id: str) -> bool:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                DELETE FROM artifact_catalog
+                WHERE project_id = %s AND artifact_id = %s
+                RETURNING path
+                """,
+                (project_id, artifact_id),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return False
+            path = row["path"]
+            assert isinstance(path, str)
+            await connection.execute(
+                "DELETE FROM project_files WHERE project_id = %s AND path = %s",
+                (project_id, path),
+            )
+            return True
 
     async def load(self, project_id: str, artifact_id: str) -> ArtifactRecord | None:
         connection = await self._connect()

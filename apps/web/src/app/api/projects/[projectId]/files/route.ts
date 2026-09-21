@@ -11,3 +11,11 @@ export async function GET(
   const { projectId } = await context.params;
   return forwardProjectFileRequest(request, projectId);
 }
+
+export async function DELETE(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
+  const { projectId } = await context.params;
+  return forwardProjectFileRequest(request, projectId);
+}

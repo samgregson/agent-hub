@@ -48,6 +48,26 @@ test("Plugin selections can be updated through the browser-facing Project API", 
   expect(disabledResponse.status()).toBe(204);
 });
 
+test("the browser-facing Project API forwards work item deletion", async ({
+  request,
+}) => {
+  const projectResponse = await request.post("/api/projects", {
+    data: { name: "Work deletion proxy verification" },
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as { id: string };
+
+  const fileResponse = await request.delete(
+    `/api/projects/${project.id}/files?path=/project/missing.txt`,
+  );
+  expect(fileResponse.status()).toBe(404);
+
+  const artifactResponse = await request.delete(
+    `/api/projects/${project.id}/artifacts/missing-artifact`,
+  );
+  expect(artifactResponse.status()).toBe(404);
+});
+
 test("user can create a Project", async ({ page }) => {
   const project = {
     createdAt: "2026-09-15T00:00:00.000Z",
@@ -140,7 +160,7 @@ test("Work navigation combines Artifacts and Project files into one list", async
   await page.getByRole("button", { name: "Work" }).click();
 
   await expect(
-    page.getByRole("button", { name: "Foundation status" }),
+    page.getByRole("button", { exact: true, name: "Foundation status" }),
   ).toBeVisible();
   await expect(page.getByLabel("Work items")).toContainText(
     "Foundation status",
@@ -158,6 +178,63 @@ test("Work navigation combines Artifacts and Project files into one list", async
       "Shared working files. Opening one does not create an Artifact.",
     ),
   ).toHaveCount(0);
+});
+
+test("a Project file is deleted from its Work item action menu after confirmation", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-21T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-21T00:00:00.000Z",
+  };
+  const path = "/project/test.txt";
+  let deleted = false;
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({ json: { artifacts: [] } });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          files: deleted
+            ? []
+            : [{ path, updatedAt: "2026-09-21T00:00:00.000Z", version: 1 }],
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/files?path=${encodeURIComponent(path)}`,
+    async (route) => {
+      expect(route.request().method()).toBe("DELETE");
+      deleted = true;
+      await route.fulfill({ status: 204 });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: `${path} actions` }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Confirm deletion" });
+  await expect(dialog).toContainText(path);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText(path)).toBeVisible();
+
+  await page.getByRole("button", { name: `${path} actions` }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await dialog.getByRole("button", { name: "Delete" }).click();
+
+  await expect(page.getByText(path)).toBeHidden();
 });
 
 test("an Artifact changed by another Thread stays open until the user reloads it", async ({
@@ -207,9 +284,12 @@ test("an Artifact changed by another Thread stays open until the user reloads it
       },
     });
   });
-  await page.route(`**/api/projects/${project.id}/files/index`, async (route) => {
-    await route.fulfill({ json: { files: [] } });
-  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
   await page.route(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
     async (route) => {
@@ -231,7 +311,9 @@ test("an Artifact changed by another Thread stays open until the user reloads it
 
   await page.goto("/");
   await page.getByRole("button", { name: "Work" }).click();
-  await page.getByRole("button", { name: "Foundation status" }).click();
+  await page
+    .getByRole("button", { exact: true, name: "Foundation status" })
+    .click();
   const artifactPreview = page.locator("aside").last();
   await expect(artifactPreview.getByText("Version 1")).toBeVisible();
 

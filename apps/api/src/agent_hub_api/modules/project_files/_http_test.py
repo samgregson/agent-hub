@@ -66,3 +66,29 @@ async def test_preview_does_not_reveal_another_subjects_project() -> None:
         )
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_user_can_delete_an_ordinary_project_file_but_not_an_artifact_path() -> None:
+    settings = Settings(environment="test", fixed_identity_subject="alice")
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="alice"), "Bridge")
+    files = create_memory_project_files(projects)
+    await files.write(project.id, "/notes/check.md", "draft")
+    app = FastAPI()
+    app.include_router(
+        create_project_files_router(create_identity_module(settings), files),
+        prefix="/api",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        deleted = await client.delete(
+            f"/api/projects/{project.id}/files", params={"path": "/project/notes/check.md"}
+        )
+        artifact_path = await client.delete(
+            f"/api/projects/{project.id}/files", params={"path": "/project/.artifacts/a.json"}
+        )
+
+    assert deleted.status_code == 204
+    assert artifact_path.status_code == 422
+    assert await files.list(project.id) == ()
