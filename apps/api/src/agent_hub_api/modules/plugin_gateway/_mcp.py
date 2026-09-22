@@ -48,6 +48,7 @@ class McpPluginClient:
                 name=tool.name,
                 description=tool.description or "",
                 read_only=bool(tool.annotations and tool.annotations.read_only_hint),
+                input_schema=dict(tool.input_schema),
             )
             for tool in result.tools
         )

@@ -162,6 +162,33 @@ class ArtifactModule:
         )
         return (await self._store.create(ArtifactRecord(project_id, document))).document
 
+    async def create_tool_result_snapshot(
+        self,
+        access: ArtifactMutationAccess,
+        project_id: str,
+        *,
+        plugin_id: str,
+        plugin_version: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+        structured_content: Mapping[str, object],
+    ) -> ArtifactDocument:
+        """Persist one successful ordinary MCP invocation as a Tool Result Snapshot."""
+        return await self.create(
+            access,
+            project_id,
+            ArtifactDraft(
+                type=f"{plugin_id}.{tool_name}",
+                title=f"{plugin_id}: {tool_name}",
+                plugin_id=plugin_id,
+                plugin_version=plugin_version,
+                schema_id="agent-hub.tool-result-snapshot",
+                schema_version="1.0",
+                payload={"input": dict(arguments), "output": dict(structured_content)},
+                summary="Successful MCP tool result snapshot.",
+            ),
+        )
+
     async def create_from_plugin(
         self,
         access: ArtifactWriteAccess,

@@ -29,6 +29,7 @@ class FixtureClient:
                 name="foundation_status",
                 description="Return fixture status.",
                 read_only=True,
+                input_schema={"type": "object", "properties": {}},
             ),
             PluginDiscoveredTool(
                 name="unreviewed_tool", description="Must not be exposed.", read_only=True

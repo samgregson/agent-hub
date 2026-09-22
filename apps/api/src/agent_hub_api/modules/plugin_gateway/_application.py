@@ -2,11 +2,12 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from langchain_core.tools import BaseTool, StructuredTool
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
+from pydantic import create_model
 
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule
 from agent_hub_api.settings import Settings
@@ -60,6 +61,7 @@ class PluginDiscoveredTool:
     name: str
     description: str
     read_only: bool
+    input_schema: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -358,13 +360,13 @@ def _agent_tool(
     plugin_tool: PluginTool,
     discovered: PluginDiscoveredTool,
 ) -> BaseTool:
-    async def invoke() -> str:
+    async def invoke(**arguments: object) -> str:
         try:
             result = await gateway._call_enabled(
                 project_id,
                 manifest.id,
                 plugin_tool.name,
-                {},
+                arguments,
             )
         except Exception as error:
             return f"Plugin tool failed: {error}"
@@ -378,4 +380,24 @@ def _agent_tool(
         description=discovered.description
         or plugin_tool.description
         or f"Run {plugin_tool.name} from {manifest.name}.",
+        args_schema=_input_model(manifest, plugin_tool, discovered),
     )
+
+
+def _input_model(
+    manifest: PluginManifest, plugin_tool: PluginTool, discovered: PluginDiscoveredTool
+) -> type[Any]:
+    schema = discovered.input_schema or {}
+    declared_required = schema.get("required", [])
+    required = set(declared_required) if isinstance(declared_required, list) else set()
+    properties = schema.get("properties", {})
+    fields: dict[str, tuple[type[object], object]] = {}
+    if isinstance(properties, Mapping):
+        for name, definition in properties.items():
+            if not isinstance(name, str) or not isinstance(definition, Mapping):
+                continue
+            value_type = {"number": float, "integer": int, "boolean": bool}.get(
+                definition.get("type"), str
+            )
+            fields[name] = (value_type, ... if name in required else None)
+    return create_model(f"{manifest.id}_{plugin_tool.name}_Input", **fields)

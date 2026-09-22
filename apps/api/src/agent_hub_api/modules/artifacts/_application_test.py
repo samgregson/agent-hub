@@ -207,6 +207,29 @@ async def test_enabled_plugin_draft_is_saved_with_host_assigned_artifact_fields(
 
 
 @pytest.mark.asyncio
+async def test_successful_plugin_tool_result_is_saved_as_a_snapshot() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
+    artifacts = create_memory_artifact_module(projects)
+
+    created = await artifacts.create_tool_result_snapshot(
+        ArtifactMutationAccess(subject="sam", thread_id="thread-a", run_id="run-a"),
+        project.id,
+        plugin_id="reference-calculation",
+        plugin_version="0.1.0",
+        tool_name="calculate_cantilever_tip_load",
+        arguments={"length_m": 4, "tip_load_kn": 12.5},
+        structured_content={"validation": {"status": "valid", "warnings": []}},
+    )
+
+    assert created.artifact.type == "reference-calculation.calculate_cantilever_tip_load"
+    assert created.payload == {
+        "input": {"length_m": 4, "tip_load_kn": 12.5},
+        "output": {"validation": {"status": "valid", "warnings": []}},
+    }
+
+
+@pytest.mark.asyncio
 async def test_enabled_plugin_replacement_is_applied_through_the_artifact_authority() -> None:
     projects = create_memory_project_module()
     project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
