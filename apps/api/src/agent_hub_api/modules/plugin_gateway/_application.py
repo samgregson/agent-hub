@@ -318,11 +318,20 @@ def create_postgres_plugin_gateway(
         app_resource_uri="ui://agent-hub-foundation/status.html",
         app_tool_names=(),
     )
+    reference_calculation = PluginManifest(
+        id="reference-calculation",
+        name="Reference calculation",
+        version="0.1.0",
+        endpoint="http://reference-calculation:8000/mcp",
+        tools=(PluginTool(name="calculate_cantilever_tip_load", read_only=False),),
+        app_resource_uri="ui://agent-hub-reference-calculation/cantilever.html",
+        app_tool_names=(),
+    )
     from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
 
     return PluginGatewayModule(
         projects,
-        catalog=(fixture,),
+        catalog=(fixture, reference_calculation),
         enablements=PostgresPluginEnablementStore(settings),
         clients={
             fixture.id: McpPluginClient(
@@ -330,7 +339,13 @@ def create_postgres_plugin_gateway(
                 timeout_seconds=settings.plugin_tool_timeout_seconds,
                 max_result_bytes=settings.plugin_result_max_bytes,
                 allow_private_network=True,
-            )
+            ),
+            reference_calculation.id: McpPluginClient(
+                endpoint=reference_calculation.endpoint,
+                timeout_seconds=settings.plugin_tool_timeout_seconds,
+                max_result_bytes=settings.plugin_result_max_bytes,
+                allow_private_network=True,
+            ),
         },
         discovery_cache_seconds=settings.plugin_discovery_cache_seconds,
     )

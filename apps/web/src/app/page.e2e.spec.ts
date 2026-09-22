@@ -22,6 +22,13 @@ test("Plugins are available through the browser-facing Project API", async ({
       tools: [{ name: "foundation_status", readOnly: true }],
       version: "0.1.0",
     },
+    {
+      enabled: false,
+      id: "reference-calculation",
+      name: "Reference calculation",
+      tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
+      version: "0.1.0",
+    },
   ]);
 });
 

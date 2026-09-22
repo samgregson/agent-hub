@@ -52,6 +52,13 @@ services:
       # server on a distinct host port for generic MCP-client testing.
       - "8001:8000"
 
+  reference-calculation:
+    build:
+      context: ./plugins/reference-calculation
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8000"
+
   web:
     build:
       context: .
