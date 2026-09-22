@@ -31,7 +31,7 @@ from agent_hub_api.modules.agent_execution._execution import (
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
-from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule
+from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.settings import Settings
@@ -143,7 +143,12 @@ class PostgresDeepAgentRunner:
         assert self._model is not None
         tools = [foundation_protected_action] if self._settings.enable_foundation_test_tool else []
         if self._plugin_gateway is not None:
-            tools.extend(await self._plugin_gateway.agent_tools(project_id))
+            tools.extend(
+                await self._plugin_gateway.agent_tools(
+                    project_id,
+                    on_success=self._snapshot_recorder(project_id, thread_id, run_id, subject),
+                )
+            )
         artifacts = getattr(self, "_artifacts", None)
         has_artifact_context = artifacts is not None and subject is not None
         if has_artifact_context:
@@ -154,10 +159,10 @@ class PostgresDeepAgentRunner:
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
                 {
-                "foundation_protected_action": {
-                    "allowed_decisions": ["approve", "reject"],
-                    "description": "Run the harmless foundation approval test action?",
-                }
+                    "foundation_protected_action": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Run the harmless foundation approval test action?",
+                    }
                 }
             )
         graph = create_deep_agent(
@@ -183,10 +188,29 @@ class PostgresDeepAgentRunner:
         )
         return agent
 
+    def _snapshot_recorder(
+        self, project_id: str, thread_id: str | None, run_id: str | None, subject: str | None
+    ):
+        if self._artifacts is None or thread_id is None or run_id is None or subject is None:
+            return None
+
+        async def record(manifest, tool, arguments, result) -> None:
+            if result.structured_content is None:
+                return
+            await self._artifacts.create_tool_result_snapshot(
+                ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id),
+                project_id,
+                plugin_id=manifest.id,
+                plugin_version=manifest.version,
+                tool_name=tool.name,
+                arguments=arguments,
+                structured_content=result.structured_content,
+            )
+
+        return record
+
     @staticmethod
-    def _artifact_tools(
-        artifacts: ArtifactModule, project_id: str, subject: str
-    ) -> list[BaseTool]:
+    def _artifact_tools(artifacts: ArtifactModule, project_id: str, subject: str) -> list[BaseTool]:
         @tool
         async def discover_project_artifacts() -> str:
             """List compact summaries of Artifacts in this Project on demand."""

@@ -40,6 +40,7 @@ class ArtifactUserActionAccess(ArtifactAccess):
 
 ArtifactWriteAccess = ArtifactMutationAccess | ArtifactUserActionAccess
 
+
 @dataclass(frozen=True, slots=True)
 class ArtifactDraft:
     type: str
@@ -467,9 +468,7 @@ class MemoryArtifactStore:
 
     async def list(self, project_id: str) -> Sequence[ArtifactRecord]:
         return tuple(
-            record
-            for (owner, _), record in sorted(self._records.items())
-            if owner == project_id
+            record for (owner, _), record in sorted(self._records.items()) if owner == project_id
         )
 
     async def replace(

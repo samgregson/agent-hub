@@ -1,6 +1,6 @@
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -98,6 +98,11 @@ class PluginClient(Protocol):
     ) -> PluginToolResult: ...
 
     async def read_ui_resource(self, resource_uri: str) -> PluginUiResource: ...
+
+
+PluginResultRecorder = Callable[
+    [PluginManifest, PluginTool, Mapping[str, object], PluginToolResult], Awaitable[None]
+]
 
 
 class PluginGatewayModule:
@@ -204,7 +209,9 @@ class PluginGatewayModule:
             raise PluginNotAvailable
         return await client.call_tool(tool_name, arguments)
 
-    async def agent_tools(self, project_id: str) -> tuple[BaseTool, ...]:
+    async def agent_tools(
+        self, project_id: str, *, on_success: PluginResultRecorder | None = None
+    ) -> tuple[BaseTool, ...]:
         """Return only currently enabled capabilities for an authorized Run.
 
         Agent Transport authorizes the Project before it starts a Run. This
@@ -217,7 +224,14 @@ class PluginGatewayModule:
                 continue
             discovered = {tool.name: tool for tool in await self._discover(manifest)}
             tools.extend(
-                _agent_tool(self, project_id, manifest, plugin_tool, discovered[plugin_tool.name])
+                _agent_tool(
+                    self,
+                    project_id,
+                    manifest,
+                    plugin_tool,
+                    discovered[plugin_tool.name],
+                    on_success,
+                )
                 for plugin_tool in manifest.tools
                 if plugin_tool.agent_visible and plugin_tool.name in discovered
             )
@@ -359,6 +373,7 @@ def _agent_tool(
     manifest: PluginManifest,
     plugin_tool: PluginTool,
     discovered: PluginDiscoveredTool,
+    on_success: PluginResultRecorder | None,
 ) -> BaseTool:
     async def invoke(**arguments: object) -> str:
         try:
@@ -370,6 +385,8 @@ def _agent_tool(
             )
         except Exception as error:
             return f"Plugin tool failed: {error}"
+        if result.structured_content is not None and on_success is not None:
+            await on_success(manifest, plugin_tool, arguments, result)
         if result.content:
             return "\n".join(result.content)
         return json.dumps(result.structured_content, sort_keys=True)
