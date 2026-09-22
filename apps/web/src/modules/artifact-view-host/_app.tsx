@@ -1,7 +1,12 @@
 "use client";
 
-import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
+import {
+  AppBridge,
+  PostMessageTransport,
+} from "@modelcontextprotocol/ext-apps/app-bridge";
 import { useEffect, useRef, useState } from "react";
+
+import type { ArtifactDocument } from "@/contracts";
 
 import styles from "./artifact-view-host.module.css";
 
@@ -17,9 +22,11 @@ interface AppState {
 
 export function ArtifactApp({
   artifactId,
+  document,
   projectId,
 }: {
   artifactId: string;
+  document: ArtifactDocument;
   projectId: string;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
@@ -29,7 +36,8 @@ export function ArtifactApp({
     key: "",
   });
   const appUrl = `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/app`;
-  const availability = appState.key === appUrl ? appState.availability : "loading";
+  const availability =
+    appState.key === appUrl ? appState.availability : "loading";
   const error = appState.key === appUrl ? appState.error : null;
 
   useEffect(() => {
@@ -43,7 +51,11 @@ export function ArtifactApp({
       })
       .catch(() => {
         if (active) {
-          setAppState({ availability: "unavailable", error: null, key: appUrl });
+          setAppState({
+            availability: "unavailable",
+            error: null,
+            key: appUrl,
+          });
         }
       });
     return () => {
@@ -67,7 +79,10 @@ export function ArtifactApp({
       toolError("This App does not expose any host-approved tools.");
     bridge.oninitialized = () => {
       void bridge
-        .sendToolResult({ content: [] })
+        .sendToolInput({ arguments: { document } })
+        .then(() =>
+          bridge.sendToolResult({ content: [], structuredContent: document }),
+        )
         .catch(() => {
           if (!disposed) {
             setAppState({
@@ -80,7 +95,9 @@ export function ArtifactApp({
     };
 
     void bridge
-      .connect(new PostMessageTransport(iframe.contentWindow, iframe.contentWindow))
+      .connect(
+        new PostMessageTransport(iframe.contentWindow, iframe.contentWindow),
+      )
       .then(() => {
         if (!disposed) iframe.src = appUrl;
       })
@@ -98,14 +115,19 @@ export function ArtifactApp({
       void bridge.teardownResource({}).catch(() => {});
       void bridge.close();
     };
-  }, [appUrl, availability]);
+  }, [appUrl, availability, document]);
 
   return (
     <section aria-label="Artifact App" className={styles.app}>
       {error ? <p className={styles.error}>{error}</p> : null}
-      {availability === "loading" ? <p>Loading compatible Artifact App…</p> : null}
+      {availability === "loading" ? (
+        <p>Loading compatible Artifact App…</p>
+      ) : null}
       {availability === "unavailable" ? (
-        <p>A compatible Artifact App is unavailable. The generic safe view is shown below.</p>
+        <p>
+          A compatible Artifact App is unavailable. The generic safe view is
+          shown below.
+        </p>
       ) : null}
       {availability === "available" ? (
         <iframe
@@ -113,6 +135,7 @@ export function ArtifactApp({
           ref={frame}
           referrerPolicy="no-referrer"
           sandbox="allow-scripts"
+          src={appUrl}
           title="Artifact App"
         />
       ) : null}

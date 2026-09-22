@@ -86,13 +86,18 @@
   background: white;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  min-height: 16rem;
+  min-height: min(34rem, 58vh);
   width: 100%;
 }
 
-.fallback summary {
+.fallback summary,
+.details summary {
   color: var(--muted);
   cursor: pointer;
+}
+
+.details dl {
+  margin-top: 0.75rem;
 }
 
 .error {

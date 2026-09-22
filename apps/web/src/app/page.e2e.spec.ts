@@ -341,6 +341,101 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   ).toBeHidden();
 });
 
+test("an Artifact App receives its saved tool result through the MCP App bridge", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-22T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-22T00:00:00.000Z",
+  };
+  const artifactId = "artifact-123";
+  const artifact = {
+    artifact: {
+      documentVersion: 1,
+      id: artifactId,
+      plugin: { id: "reference-calculation", version: "0.1.0" },
+      provenance: {
+        createdBy: { kind: "agentRun", runId: "run-a", threadId: "thread-a" },
+        lastChangedBy: {
+          kind: "agentRun",
+          runId: "run-a",
+          threadId: "thread-a",
+        },
+      },
+      relations: [],
+      schema: { id: "agent-hub.plugin.tool-result", version: "1" },
+      title: "Cantilever moment",
+      type: "agent-hub.reference-calculation.calculate-cantilever-tip-load",
+    },
+    payload: {
+      input: { length_m: 6.5, tip_load_kn: 12.5 },
+      output: {
+        calculation: { maximumMoment: { unit: "kN·m", value: 81.25 } },
+      },
+    },
+  };
+  const app = `<!doctype html><body>Waiting<script>
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message?.method === "ui/notifications/tool-result") {
+        document.body.textContent = String(message.params.structuredContent.payload.input.length_m);
+      }
+    });
+    window.parent.postMessage({jsonrpc:"2.0",id:"initialize",method:"ui/initialize",params:{appInfo:{name:"Test App",version:"0.1.0"},appCapabilities:{},protocolVersion:"2026-01-26"}}, "*");
+    window.parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}}, "*");
+  </script>`;
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({
+      json: {
+        artifacts: [
+          {
+            documentVersion: 1,
+            id: artifactId,
+            pluginId: "reference-calculation",
+            pluginVersion: "0.1.0",
+            title: artifact.artifact.title,
+            type: artifact.artifact.type,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+    async (route) => {
+      await route.fulfill({ json: artifact });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}/app`,
+    async (route) => {
+      await route.fulfill({ body: app, contentType: "text/html" });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Work" }).click();
+  await page
+    .getByRole("button", { exact: true, name: artifact.artifact.title })
+    .click();
+
+  await expect(
+    page.frameLocator('iframe[title="Artifact App"]').locator("body"),
+  ).toHaveText("6.5");
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 

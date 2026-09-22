@@ -71,7 +71,10 @@ export function ArtifactDocumentPreview({
       if (!document) return;
       void load()
         .then((loaded) => {
-          if (loaded.artifact.documentVersion !== document.artifact.documentVersion) {
+          if (
+            loaded.artifact.documentVersion !==
+            document.artifact.documentVersion
+          ) {
             setStaleKey(key);
           }
         })
@@ -92,38 +95,52 @@ export function ArtifactDocumentPreview({
             <code>{document.artifact.id}</code>
             <span>Version {document.artifact.documentVersion}</span>
           </header>
-          {document.artifact.summary ? <p>{document.artifact.summary}</p> : null}
+          {document.artifact.summary ? (
+            <p>{document.artifact.summary}</p>
+          ) : null}
           {isStale ? (
             <p className={styles.error}>
-              This Artifact changed in another Thread. <button onClick={() => void reload()} type="button">Reload</button>
+              This Artifact changed in another Thread.{" "}
+              <button onClick={() => void reload()} type="button">
+                Reload
+              </button>
             </p>
           ) : null}
-          <dl>
-            <div>
-              <dt>Type</dt>
-              <dd>{document.artifact.type}</dd>
-            </div>
-            <div>
-              <dt>Plugin</dt>
-              <dd>
-                {document.artifact.plugin.id} {document.artifact.plugin.version}
-              </dd>
-            </div>
-            <div>
-              <dt>Created by</dt>
-              <dd>{provenanceLabel(document.artifact.provenance.createdBy)}</dd>
-            </div>
-            <div>
-              <dt>Last changed by</dt>
-              <dd>{provenanceLabel(document.artifact.provenance.lastChangedBy)}</dd>
-            </div>
-          </dl>
           <ArtifactApp
             artifactId={artifactId}
+            document={document}
             projectId={projectId}
           />
+          <details className={styles.details}>
+            <summary>Artifact details</summary>
+            <dl>
+              <div>
+                <dt>Type</dt>
+                <dd>{document.artifact.type}</dd>
+              </div>
+              <div>
+                <dt>Plugin</dt>
+                <dd>
+                  {document.artifact.plugin.id}{" "}
+                  {document.artifact.plugin.version}
+                </dd>
+              </div>
+              <div>
+                <dt>Created by</dt>
+                <dd>
+                  {provenanceLabel(document.artifact.provenance.createdBy)}
+                </dd>
+              </div>
+              <div>
+                <dt>Last changed by</dt>
+                <dd>
+                  {provenanceLabel(document.artifact.provenance.lastChangedBy)}
+                </dd>
+              </div>
+            </dl>
+          </details>
           <details className={styles.fallback}>
-            <summary>Generic safe view</summary>
+            <summary>Raw snapshot</summary>
             <pre>{JSON.stringify(document.payload, null, 2)}</pre>
           </details>
         </>
@@ -132,7 +149,9 @@ export function ArtifactDocumentPreview({
   );
 }
 
-function provenanceLabel(actor: ArtifactDocument["artifact"]["provenance"]["createdBy"]) {
+function provenanceLabel(
+  actor: ArtifactDocument["artifact"]["provenance"]["createdBy"],
+) {
   return actor.kind === "agentRun"
     ? `Thread ${actor.threadId} · Run ${actor.runId}`
     : `User action ${actor.userActionId}`;
