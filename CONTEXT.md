@@ -44,6 +44,18 @@ _Avoid_: Row, artifact, file
 A durable Project-owned mapping from values in one Dataset Record to the ordinary JSON arguments of one catalogue-approved MCP tool. It is reusable configuration, not a Batch Run or a Plugin protocol.
 _Avoid_: Workflow, pipeline, plugin port
 
+**Batch Run**:
+One bounded execution of a Batch Definition over a captured Dataset selection. It owns progress, policy, initiator provenance, idempotency, and the immutable input snapshot independently of a browser or agent connection.
+_Avoid_: Agent Run, workflow, plugin job
+
+**Result Set**:
+The durable, queryable collection of outcomes produced by one Batch Run. It may be incomplete when one or more invocations fail.
+_Avoid_: Artifact, Dataset, tool transcript
+
+**Result Record**:
+One Result Set entry, retaining normalized input and complete structured output or failure for the captured Dataset Record.
+_Avoid_: Dataset Record, log line
+
 **Virtual Filesystem**:
 The project-shared hierarchical working state available to agents without providing access to the user's computer filesystem.
 _Avoid_: Local filesystem, user filesystem, thread filesystem
