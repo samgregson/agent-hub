@@ -135,7 +135,6 @@ export function ArtifactApp({
           ref={frame}
           referrerPolicy="no-referrer"
           sandbox="allow-scripts"
-          src={appUrl}
           title="Artifact App"
         />
       ) : null}

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { expect, test } from "@playwright/test";
 
 test("Plugins are available through the browser-facing Project API", async ({
@@ -376,16 +378,10 @@ test("an Artifact App receives its saved tool result through the MCP App bridge"
       },
     },
   };
-  const app = `<!doctype html><body>Waiting<script>
-    window.addEventListener("message", (event) => {
-      const message = event.data;
-      if (message?.method === "ui/notifications/tool-result") {
-        document.body.textContent = String(message.params.structuredContent.payload.input.length_m);
-      }
-    });
-    window.parent.postMessage({jsonrpc:"2.0",id:"initialize",method:"ui/initialize",params:{appInfo:{name:"Test App",version:"0.1.0"},appCapabilities:{},protocolVersion:"2026-01-26"}}, "*");
-    window.parent.postMessage({jsonrpc:"2.0",method:"ui/notifications/initialized",params:{}}, "*");
-  </script>`;
+  const app = readFileSync(
+    "../../plugins/reference-calculation/app/cantilever-view.html",
+    "utf8",
+  );
 
   await page.route("**/api/projects", async (route) => {
     await route.fulfill({ json: [project] });
@@ -431,9 +427,10 @@ test("an Artifact App receives its saved tool result through the MCP App bridge"
     .getByRole("button", { exact: true, name: artifact.artifact.title })
     .click();
 
-  await expect(
-    page.frameLocator('iframe[title="Artifact App"]').locator("body"),
-  ).toHaveText("6.5");
+  const preview = page.frameLocator('iframe[title="Artifact App"]');
+  await expect(preview.locator("#length")).toHaveValue("6.5");
+  await expect(preview.locator("#load")).toHaveValue("12.5");
+  await expect(preview.locator("#result")).toHaveText("81.3 kN·m");
 });
 
 test.describe("at phone width", () => {

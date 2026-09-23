@@ -59,17 +59,9 @@
         curve.setAttribute("d", `M58 185 Q210 185 365 ${valid ? Math.max(142, 185 - moment) : 185}`);
       }
 
-      function initialize(request) {
-        window.parent.postMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            protocolVersion: "2026-01-26",
-            hostCapabilities: {},
-            hostContext: {},
-            hostInfo: { name: "Reference calculation", version: "0.1.0" },
-          },
-        }, "*");
+      const initializationId = "reference-calculation-initialize";
+
+      function initialized() {
         window.parent.postMessage({
           jsonrpc: "2.0",
           method: "ui/notifications/initialized",
@@ -79,7 +71,7 @@
 
       window.addEventListener("message", (event) => {
         const message = event.data;
-        if (message?.method === "ui/initialize") initialize(message);
+        if (message?.id === initializationId && message.result) initialized();
         const snapshot = message?.method === "ui/notifications/tool-result"
           ? message.params?.structuredContent?.payload
           : null;
@@ -98,7 +90,7 @@
       length.oninput = load.oninput = draw;
       window.parent.postMessage({
         jsonrpc: "2.0",
-        id: "reference-calculation-initialize",
+        id: initializationId,
         method: "ui/initialize",
         params: {
           appInfo: { name: "Reference calculation", version: "0.1.0" },
