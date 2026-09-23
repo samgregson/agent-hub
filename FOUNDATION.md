@@ -16,6 +16,7 @@ The long-term experience should feel closer to a coding environment than a conve
 6. **Structured data crosses boundaries.** Apps should exchange validated, versioned data contracts rather than scraping one another's rendered UI or passing ambiguous prose.
 7. **Human control is explicit.** Sensitive actions, consequential calculations, and cross-app transfers must be inspectable and capable of requiring approval.
 8. **Engineering results remain auditable.** Future calculations must record inputs, units, assumptions, methods, references, warnings, outputs, and software/version provenance.
+9. **Agent–user parity is the aim.** The agent may initiate the same Project actions available to a user; approval affects authorization for consequential actions, not the capability itself.
 
 ## Initial scope
 
@@ -156,6 +157,9 @@ For engineering artifacts, numerical values should never be represented as untyp
 - **Plugin selection:** a catalogued MCP Plugin enabled for a Project with its configuration and policy.
 - **Artifact:** a stable logical work product represented by one current portable Artifact Document.
 - **Artifact relation:** typed lineage or reference between Artifacts.
+- **Dataset:** a first-class Project record containing structured working inputs.
+- **Batch Definition:** a reusable Project record mapping Dataset values to one Plugin tool's ordinary MCP arguments.
+- **Batch Run / Result Set:** one host-orchestrated execution and its durable, queryable outcomes; neither is automatically an Artifact.
 
 These are application concepts. Their ownership, persistence, and Module Interfaces are defined in `docs/architecture/system-architecture.md`.
 

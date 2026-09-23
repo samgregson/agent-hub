@@ -12,6 +12,30 @@ _Avoid_: Local project, project folder
 A durable, self-describing, serializable work product owned by a project. It carries provenance to either the thread and agent run that produced it or a direct user action, and may be inspected or reused by other threads in the project. A project file becomes an artifact only through an explicit, reviewable elevation action.
 _Avoid_: Attachment, thread output, working file
 
+**Dataset**:
+A durable project-owned collection of structured input values that an agent or user explicitly saves for later inspection or execution. It is not a generated Artifact merely because it is used in a calculation.
+_Avoid_: Chat attachment, temporary tool arguments, result set
+
+**Dataset Record**:
+One ordered JSON-object entry in a Dataset, identified by a stable host-issued ID and optionally carrying a user-provided source key.
+_Avoid_: Tool call, result record, table row without identity
+
+**Result Set**:
+A durable, queryable collection of machine-scale outcomes produced by one Batch Run. It is available to agents and users for inspection and may inform an Artifact, but is not itself automatically a curated Artifact.
+_Avoid_: Artifact, chat transcript, plugin-owned database
+
+**Batch Run**:
+One bounded host-orchestrated execution of a Plugin tool over a Dataset or explicitly supplied collection of inputs. Agent-proposed execution requires approval; a directly authorized user action does not. It records its completion state and Result Set.
+_Avoid_: Plugin, Artifact, retry button
+
+**Batch Definition**:
+A durable project-owned execution setup that maps Dataset values to the JSON arguments of one Plugin tool. It may be reused to start Batch Runs, but a Batch Run captures the definition it actually used.
+_Avoid_: Plugin protocol, run result, Artifact
+
+**Binding**:
+A durable host-owned Project rule that maps an explicitly selected structured value to a declared argument of a target operation. Its mapping and execution policy are inspectable; it is not Plugin-owned code or an iframe-to-iframe connection.
+_Avoid_: Plugin protocol extension, arbitrary parser, direct app communication
+
 **Project File**:
 A durable file in the project's virtual filesystem used as agent working material. It may be linked from chat and previewed without becoming an artifact. Elevation to an artifact is explicit: an agent-initiated elevation requires human approval, while a user-initiated plugin save is direct authorization.
 _Avoid_: Artifact, source, local file

@@ -67,6 +67,8 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Approval                   | Agent Hub policy plus LangGraph interrupt       | Application record and checkpointed interrupt state                                  |
 | Project Virtual Filesystem | Agent Hub                                       | Project-scoped PostgreSQL records exposed through a Deep Agents backend              |
 | Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
+| Dataset / Batch Definition | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
+| Batch Run / Result Set     | Agent Hub                                       | PostgreSQL execution and result records                                               |
 | Plugin definition          | Deployment-controlled catalog                   | Version-controlled manifest                                                          |
 | Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
 | Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
@@ -139,6 +141,21 @@ apply(context, artifact_id | new, semantic_operation, expected_version?) -> save
 
 `apply` resolves the responsible Plugin, sends the complete portable document and semantic operation, rejects malformed or invalid replacements, restores host-controlled envelope fields, and commits the updated current document atomically. `documentVersion` is an internal concurrency token; it does not imply retained revisions or a user-facing version browser.
 
+### Batch Execution Module — API
+
+Owns Dataset and Batch Definition persistence, immutable Batch Run snapshots, bounded dispatch, Result Set persistence, progress, and result queries. Its Interface stays host-oriented and compact:
+
+```text
+save_dataset(context, draft) -> Dataset
+save_definition(context, draft) -> Batch Definition
+start(context, definition, selection, initiator, idempotency_key) -> Batch Run
+inspect(context, batch_run_id, query?) -> Batch Run summary / Result page
+```
+
+`start` captures the selected Dataset records, Batch Definition, Plugin/tool identity, schemas, policy, and initiator before execution. The executor invokes one real selected record first; a failure or schema-invalid response stops fan-out, while later failures produce an explicitly partial Result Set. It accepts only catalogued repeat-safe tools, uses host-configured bounded concurrency, and does not provide cancellation or retry in the first pass. A Result Set retains normalized inputs and complete structured outputs within explicit limits, but is not an Artifact unless a user or approved agent explicitly saves a curated conclusion.
+
+Agent-proposed Dataset saves, definition changes, and `start` calls pause at the existing LangGraph approval interrupt. Resumption invokes the same idempotent command a directly authorized user action uses. The Agent Run may await a short bounded completion window; otherwise it receives a Batch Run reference and ends normally. The executor outlives the AG-UI stream, and later runs inspect persisted results through host tools.
+
 ### Plugin Gateway Module — API
 
 Hides MCP transport, catalog resolution, discovery caching, OAuth/secret lookup, tool policy, approvals, timeouts, result validation, UI resource loading, and telemetry. Its Interface is deliberately small:
@@ -185,6 +202,14 @@ The application does not claim a cross-library transaction spanning a Run and ev
 5. The current VFS document, index projection, provenance, concurrency token, and compact Project change record commit atomically.
 6. The open Artifact view refreshes after the in-Thread result or on focus/reopen. Other Threads receive only a compact later-run change notice.
 
+### Dataset batch execution
+
+1. A user directly starts a saved Batch Definition, or an agent proposes the same action and pauses for approval.
+2. Batch Execution captures Dataset-record IDs and values, the Batch Definition, Plugin tool/schema identity, initiator provenance, and an idempotency key in a new Batch Run.
+3. The executor makes the first real MCP invocation and validates its structured output before bounded fan-out.
+4. It persists Result Records and compact progress independently of the initiating browser or Agent Run.
+5. The workspace and later agent tools inspect native summaries or paginated/filterable results; an explicit save may create a curated Artifact.
+
 ### Calculation-to-diagram later
 
 The agent discovers a calculation Artifact summary, loads it on demand, and passes the complete document or a validated projection to a compatible diagram tool. The resulting diagram is a separate Artifact with a typed relation to the calculation. Iframes never call one another directly.
@@ -213,22 +238,23 @@ The agent discovers a calculation Artifact summary, loads it on demand, and pass
 - Keep OAuth and provider credentials server-side, encrypted, audience-bound, and out of logs/model context.
 - Validate tool arguments, structured results, schema bindings, resource URIs, MIME types, origins, and sizes.
 - Intersect app-declared CSP and capabilities with catalog policy.
-- Require policy/approval for consequential actions; the model cannot grant authority.
+- Require policy/approval for consequential actions; the model cannot grant authority. Agent and user actions share capabilities, while approval changes authorization for consequential agent actions.
+- Permit batch dispatch only for catalogued repeat-safe tools and validate ordinary MCP input/output schemas at the Batch Execution Module Interface.
 - Redact payloads by default and record identities, correlation IDs, policy decisions, timing, outcome, and provenance.
 - Do not add arbitrary code execution or host filesystem access to the foundation.
 
 ## Observability
 
-Use structured logs, metrics, and OpenTelemetry-compatible traces with the same correlation fields: request, user subject hash, Project, Thread, Agent Run, Plugin, tool call, Artifact, and approval IDs where applicable. Record state transitions and durations, not secret values or full Artifact/tool payloads by default.
+Use structured logs, metrics, and OpenTelemetry-compatible traces with the same correlation fields: request, user subject hash, Project, Thread, Agent Run, Batch Run, Plugin, tool call, Artifact, and approval IDs where applicable. Record state transitions and durations, not secret values or full Artifact/tool payloads by default.
 
 Minimum operational signals are Run counts/duration/outcome, active and interrupted Runs, stream disconnects, checkpoint and reconciliation failures, MCP latency/errors/timeouts, approval latency, Artifact validation/conflicts, iframe/resource failures, and database latency/errors. Health checks distinguish process liveness from readiness of PostgreSQL and required configuration; remote Plugin failure does not make the core API unready.
 
 ## Verification strategy
 
 - Schema/contract tests generate Python and TypeScript consumers from the same language-neutral sources.
-- Module tests use deterministic model, checkpointer, persistence, and MCP adapters through the same Interfaces as production.
+- Module tests use deterministic model, checkpointer, persistence, batch-executor, and MCP adapters through the same Interfaces as production.
 - AG-UI compatibility tests pin streaming, tool, error, cancellation, state, and interrupt/resume mappings.
-- PostgreSQL integration tests cover project scoping, checkpoint recovery, VFS sharing, Artifact atomicity, and stale writes.
+- PostgreSQL integration tests cover project scoping, checkpoint recovery, VFS sharing, Artifact atomicity, stale writes, Batch Run snapshots, and Result Set queries.
 - Plugin conformance tests run the fixture in MCP-only, standard MCP Apps, and Agent Hub-enhanced modes.
 - Browser tests cover workspace navigation, reload, approval, iframe isolation/fallback, and cross-Thread Artifact discovery.
 - Security tests cover forged identity/project scope, SSRF redirects/DNS results, hostile resource metadata, bridge capability denial, malformed results, and secret redaction.
@@ -239,6 +265,7 @@ Minimum operational signals are Run counts/duration/outcome, active and interrup
 - Team/multi-user Project collaboration and Agent Hub sign-in.
 - Arbitrary user-supplied MCP servers.
 - Artifact revision browsing, merging, and live cross-Thread synchronization.
+- Batch cancellation, automatic retry, bulk-to-bulk bindings, and automatic agent wake-up after Batch completion.
 - User-level VFS layers, object storage, and large binary Artifacts.
 - Multiple simultaneous Artifact panes and finalized small-screen interaction.
 - A workflow/event engine for unattended cross-Plugin pipelines.
