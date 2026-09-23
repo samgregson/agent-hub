@@ -120,6 +120,53 @@ test("project creation is unavailable before the workspace hydrates", async ({
   await context.close();
 });
 
+test("Datasets are created and deleted through the Project workspace", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-24T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+  };
+  const created = {
+    id: "dataset-123",
+    name: "Load cases",
+    records: [{ id: "record-123", position: 0, sourceKey: "LC-1", value: { load: 12.5 } }],
+  };
+  let deleted = false;
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/batch-definitions`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ json: created, status: 201 });
+      return;
+    }
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/datasets/${created.id}`, async (route) => {
+    deleted = route.request().method() === "DELETE";
+    await route.fulfill({ status: 204 });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Datasets" }).click();
+  await page.getByRole("button", { name: "+ New Dataset" }).click();
+  await page.getByLabel("Name").fill(created.name);
+  await page.getByLabel("Records (JSON array)").fill(
+    '[{"sourceKey":"LC-1","value":{"load":12.5}}]',
+  );
+  await page.getByRole("button", { name: "Save Dataset" }).click();
+  await expect(page.getByText("Load cases")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect.poll(() => deleted).toBe(true);
+});
+
 test("Work navigation combines Artifacts and Project files into one list", async ({
   page,
 }) => {

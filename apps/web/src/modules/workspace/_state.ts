@@ -1,6 +1,8 @@
 export const activityViews = [
   "chats",
   "artifacts",
+  "datasets",
+  "batchDefinitions",
   "sources",
   "plugins",
 ] as const;

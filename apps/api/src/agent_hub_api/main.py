@@ -19,6 +19,7 @@ from agent_hub_api.modules.artifacts import (
     create_artifact_router,
     create_postgres_artifact_module,
 )
+from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
@@ -60,6 +61,9 @@ def create_app(
         resolved_projects,
         resolved_plugin_gateway,
     )
+    resolved_datasets = create_postgres_dataset_module(
+        resolved_settings, resolved_projects, resolved_plugin_gateway
+    )
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
@@ -67,6 +71,7 @@ def create_app(
             resolved_project_files,
             resolved_plugin_gateway,
             resolved_artifacts,
+            resolved_datasets,
         )
         resolved_agent_execution = create_postgres_agent_execution(
             resolved_settings, deep_agent_runner
@@ -99,6 +104,9 @@ def create_app(
     )
     application.include_router(
         create_artifact_router(resolved_identity, resolved_artifacts), prefix="/api"
+    )
+    application.include_router(
+        create_dataset_router(resolved_identity, resolved_datasets), prefix="/api"
     )
     application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),

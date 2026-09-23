@@ -11,6 +11,7 @@ import {
 
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
 import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
+import { DatasetCatalog } from "@/modules/datasets";
 import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
 import { Menu, MenuItem } from "@/shared/ui";
@@ -41,7 +42,9 @@ import { WorkCatalog } from "./_work-catalog";
 
 const activityLabels = {
   artifacts: "Work",
+  batchDefinitions: "Batch Definitions",
   chats: "Chats",
+  datasets: "Datasets",
   plugins: "Plugins",
   sources: "Sources",
 } as const;
@@ -631,6 +634,11 @@ function ProjectNavigator({
         <WorkCatalog
           onOpenArtifact={onOpenArtifact}
           onOpenProjectFile={onOpenProjectFile}
+          projectId={project.id}
+        />
+      ) : (selectedActivity === "datasets" || selectedActivity === "batchDefinitions") && project ? (
+        <DatasetCatalog
+          mode={selectedActivity === "datasets" ? "datasets" : "definitions"}
           projectId={project.id}
         />
       ) : selectedActivity === "plugins" && project ? (

@@ -32,6 +32,18 @@ _Avoid_: Envelope, host metadata
 The canonical, serializable inputs and structured output from one successful MCP tool invocation, saved as an Artifact Payload. It excludes transient MCP App UI state and unsuccessful tool calls.
 _Avoid_: MCP server state, tool transcript
 
+**Dataset**:
+A durable Project-owned ordered collection of JSON-object Dataset Records. A Dataset is an operational input, not an Artifact or generic Project File.
+_Avoid_: Spreadsheet, artifact, file
+
+**Dataset Record**:
+One host-identified JSON-object entry in a Dataset. A source key may be retained for user traceability but does not replace the host-issued ID.
+_Avoid_: Row, artifact, file
+
+**Batch Definition**:
+A durable Project-owned mapping from values in one Dataset Record to the ordinary JSON arguments of one catalogue-approved MCP tool. It is reusable configuration, not a Batch Run or a Plugin protocol.
+_Avoid_: Workflow, pipeline, plugin port
+
 **Virtual Filesystem**:
 The project-shared hierarchical working state available to agents without providing access to the user's computer filesystem.
 _Avoid_: Local filesystem, user filesystem, thread filesystem

@@ -169,6 +169,28 @@ class PluginGatewayModule:
         await self._projects.load(access, project_id)
         return await self._call_enabled(project_id, plugin_id, tool_name, arguments)
 
+    async def input_schema(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+    ) -> Mapping[str, object]:
+        """Return an enabled, catalogued tool's discovered ordinary MCP input schema."""
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
+            raise PluginNotEnabled
+        if tool_name not in {tool.name for tool in manifest.tools}:
+            raise PluginToolNotAllowed
+        discovered = {tool.name: tool for tool in await self._discover(manifest)}
+        tool = discovered.get(tool_name)
+        if tool is None or tool.input_schema is None:
+            raise PluginToolNotAllowed
+        return tool.input_schema
+
     async def read_ui_resource(
         self,
         access: ProjectAccess,
