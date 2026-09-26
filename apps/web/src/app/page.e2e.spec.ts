@@ -49,9 +49,11 @@ test("Plugin selections can be updated through the browser-facing Project API", 
   const enabledPlugins = await request.get(
     `/api/projects/${project.id}/plugins`,
   );
-  await expect(enabledPlugins.json()).resolves.toMatchObject([
-    { enabled: true, id: "foundation-fixture" },
-  ]);
+  await expect(enabledPlugins.json()).resolves.toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ enabled: true, id: "foundation-fixture" }),
+    ]),
+  );
 
   const disabledResponse = await request.delete(selectionUrl);
   expect(disabledResponse.status()).toBe(204);
@@ -132,15 +134,25 @@ test("Datasets are created and deleted through the Project workspace", async ({
   const created = {
     id: "dataset-123",
     name: "Load cases",
-    records: [{ id: "record-123", position: 0, sourceKey: "LC-1", value: { load: 12.5 } }],
+    records: [
+      {
+        id: "record-123",
+        position: 0,
+        sourceKey: "LC-1",
+        value: { load: 12.5 },
+      },
+    ],
   };
   let deleted = false;
   await page.route("**/api/projects", async (route) => {
     await route.fulfill({ json: [project] });
   });
-  await page.route(`**/api/projects/${project.id}/batch-definitions`, async (route) => {
-    await route.fulfill({ json: [] });
-  });
+  await page.route(
+    `**/api/projects/${project.id}/batch-definitions`,
+    async (route) => {
+      await route.fulfill({ json: [] });
+    },
+  );
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({ json: created, status: 201 });
@@ -148,23 +160,99 @@ test("Datasets are created and deleted through the Project workspace", async ({
     }
     await route.fulfill({ json: [] });
   });
-  await page.route(`**/api/projects/${project.id}/datasets/${created.id}`, async (route) => {
-    deleted = route.request().method() === "DELETE";
-    await route.fulfill({ status: 204 });
-  });
+  await page.route(
+    `**/api/projects/${project.id}/datasets/${created.id}`,
+    async (route) => {
+      deleted = route.request().method() === "DELETE";
+      await route.fulfill({ status: 204 });
+    },
+  );
 
   await page.goto("/");
   await page.getByRole("button", { name: "Datasets" }).click();
   await page.getByRole("button", { name: "+ New Dataset" }).click();
   await page.getByLabel("Name").fill(created.name);
-  await page.getByLabel("Records (JSON array)").fill(
-    '[{"sourceKey":"LC-1","value":{"load":12.5}}]',
-  );
+  await page
+    .getByLabel("Records (JSON array)")
+    .fill('[{"sourceKey":"LC-1","value":{"load":12.5}}]');
   await page.getByRole("button", { name: "Save Dataset" }).click();
   await expect(page.getByText("Load cases")).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Delete" }).click();
   await expect.poll(() => deleted).toBe(true);
+});
+
+test("navigator catalogs share collection typography at desktop and phone widths", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-24T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "dataset-123",
+          name: "Load cases",
+          records: [],
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          enabled: false,
+          id: "reference-calculation",
+          name: "Reference calculation",
+          tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
+          version: "0.1.0",
+        },
+      ],
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Datasets" }).click();
+  const datasetTitle = page.getByText("Load cases");
+  await expect(datasetTitle).toBeVisible();
+  const desktopDatasetStyle = await datasetTitle.evaluate((element) => ({
+    color: getComputedStyle(element).color,
+    fontSize: getComputedStyle(element).fontSize,
+  }));
+
+  await page.getByRole("button", { name: "Plugins" }).click();
+  const pluginTitle = page.getByText("Reference calculation");
+  await expect(pluginTitle).toBeVisible();
+  await expect(pluginTitle).toHaveCSS(
+    "font-size",
+    desktopDatasetStyle.fontSize,
+  );
+  await expect(pluginTitle).toHaveCSS("color", desktopDatasetStyle.color);
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  const drawer = page.getByRole("dialog", { name: "Project navigation" });
+  await drawer.getByRole("button", { name: "Datasets" }).click();
+  const mobileDatasetTitle = drawer.getByText("Load cases");
+  await expect(mobileDatasetTitle).toHaveCSS(
+    "font-size",
+    desktopDatasetStyle.fontSize,
+  );
+  await expect(mobileDatasetTitle).toHaveCSS(
+    "color",
+    desktopDatasetStyle.color,
+  );
 });
 
 test("Work navigation combines Artifacts and Project files into one list", async ({
@@ -528,6 +616,12 @@ test.describe("at phone width", () => {
       await route.fulfill({ json: [] });
     });
     await page.route(
+      `**/api/projects/${project.id}/artifacts`,
+      async (route) => {
+        await route.fulfill({ json: { artifacts: [] } });
+      },
+    );
+    await page.route(
       `**/api/projects/${project.id}/files/index`,
       async (route) => {
         await route.fulfill({
@@ -569,10 +663,73 @@ test.describe("at phone width", () => {
 
     await drawer.getByRole("button", { name: "Work" }).click();
     await drawer
-      .getByRole("button", { name: /\/project\/notes\/check\.md/ })
+      .getByRole("button", {
+        exact: true,
+        name: "/project/notes/check.md",
+      })
       .click();
     await expect(drawer).toBeHidden();
     await expect(page.getByText("# Preview")).toBeVisible();
+  });
+
+  test("Dataset and Batch Definition controls retain their dark, touch-ready treatment", async ({
+    page,
+  }) => {
+    const project = {
+      createdAt: "2026-09-16T00:00:00.000Z",
+      id: "project-123",
+      name: "Design review",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    };
+    const dataset = {
+      id: "dataset-123",
+      name: "Load cases",
+      records: [{ id: "record-123", sourceKey: "LC-1" }],
+    };
+    const definition = {
+      datasetAvailable: true,
+      datasetId: dataset.id,
+      id: "definition-123",
+      name: "Cantilever check",
+      pluginId: "reference-calculation",
+      toolName: "calculate_cantilever_tip_load",
+    };
+
+    await page.route("**/api/projects", async (route) => {
+      await route.fulfill({ json: [project] });
+    });
+    await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+      await route.fulfill({ json: [] });
+    });
+    await page.route(
+      `**/api/projects/${project.id}/datasets`,
+      async (route) => {
+        await route.fulfill({ json: [dataset] });
+      },
+    );
+    await page.route(
+      `**/api/projects/${project.id}/batch-definitions`,
+      async (route) => {
+        await route.fulfill({ json: [definition] });
+      },
+    );
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open Project navigation" }).click();
+    const drawer = page.getByRole("dialog", { name: "Project navigation" });
+
+    await drawer.getByRole("button", { name: "Datasets" }).click();
+    await expect(drawer.getByText("Load cases")).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Delete" })).toBeVisible();
+
+    await drawer.getByRole("button", { name: "Batch Definitions" }).click();
+    const recordSelector = drawer.getByLabel("Cantilever check Dataset Record");
+    await expect(recordSelector).toBeVisible();
+    await expect(recordSelector).toHaveCSS(
+      "background-color",
+      "rgb(34, 34, 30)",
+    );
+    await expect(recordSelector).toHaveCSS("color", "rgb(240, 238, 232)");
   });
 });
 

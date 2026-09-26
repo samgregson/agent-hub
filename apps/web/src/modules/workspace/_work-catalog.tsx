@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import type { ArtifactCatalog, ProjectFileCatalog } from "@/contracts";
-import { Menu, MenuItem } from "@/shared/ui";
+import { Collection, CollectionItem, Menu, MenuItem } from "@/shared/ui";
 
 import styles from "./workspace.module.css";
 
@@ -129,40 +129,37 @@ export function WorkCatalog({
   }, [projectId]);
 
   return (
-    <section aria-label="Work items" className={styles.workCatalog}>
+    <section aria-label="Work items">
       {error ? <p className={styles.error}>{error}</p> : null}
       {!items && !error ? <p>Loading work…</p> : null}
-      {items?.map((item) => (
-        <div
-          className={styles.workItem}
-          key={item.kind === "artifact" ? item.id : item.path}
-        >
-          <button
-            aria-label={item.label}
-            className={styles.workItemOpen}
-            onClick={() =>
+      <Collection>
+        {items?.map((item) => (
+          <CollectionItem
+            actions={
+              <Menu label={`${item.label} actions`}>
+                <MenuItem
+                  destructive
+                  onSelect={() => {
+                    setDeleteError(null);
+                    setPendingDeletion(item);
+                  }}
+                >
+                  Delete
+                </MenuItem>
+              </Menu>
+            }
+            details={`Version ${item.version}`}
+            key={item.kind === "artifact" ? item.id : item.path}
+            openLabel={item.label}
+            onOpen={() =>
               item.kind === "artifact"
                 ? onOpenArtifact(item.id)
                 : onOpenProjectFile(item.path)
             }
-            type="button"
-          >
-            <span>{item.label}</span>
-            <small>Version {item.version}</small>
-          </button>
-          <Menu label={`${item.label} actions`}>
-            <MenuItem
-              destructive
-              onSelect={() => {
-                setDeleteError(null);
-                setPendingDeletion(item);
-              }}
-            >
-              Delete
-            </MenuItem>
-          </Menu>
-        </div>
-      ))}
+            title={item.label}
+          />
+        ))}
+      </Collection>
       {items?.length === 0 ? <p>No work items yet.</p> : null}
       {pendingDeletion ? (
         <dialog

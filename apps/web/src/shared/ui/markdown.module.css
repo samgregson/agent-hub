@@ -30,7 +30,7 @@
   border-radius: var(--radius-control);
   background: var(--background);
   color: var(--text);
-  font-size: 0.8125rem;
+  font-size: var(--font-size-body);
   line-height: 1.55;
 }
 
@@ -39,7 +39,7 @@
   border-radius: 0.2rem;
   background: var(--surface-raised);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9em;
+  font-size: var(--font-size-body);
 }
 
 .markdown pre code {

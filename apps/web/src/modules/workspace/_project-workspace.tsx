@@ -111,6 +111,12 @@ export function ProjectWorkspace() {
     ? workspace.projects[workspace.selectedProjectId]
     : undefined;
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
+  const isExplorerActivity = [
+    "batchDefinitions",
+    "datasets",
+    "plugins",
+    "sources",
+  ].includes(selectedActivity);
   const selectedThreads = workspace.selectedProjectId
     ? (threadsByProject[workspace.selectedProjectId] ?? [])
     : [];
@@ -281,7 +287,7 @@ export function ProjectWorkspace() {
 
   return (
     <main
-      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""}`}
+      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""}`}
     >
       <header className={styles.titlebar}>
         <span aria-hidden="true" className={styles.mark}>
@@ -308,7 +314,7 @@ export function ProjectWorkspace() {
               <option value="">No Project selected</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
-                  {project.name}
+                  {project.name} · {project.id.slice(0, 8)}
                 </option>
               ))}
               <option value="new-project">New Project…</option>
@@ -400,7 +406,7 @@ export function ProjectWorkspace() {
             title={activityLabels[view]}
             type="button"
           >
-            {activityLabels[view].slice(0, 1)}
+            {activityLabels[view]}
           </button>
         ))}
       </nav>
@@ -618,14 +624,19 @@ function ProjectNavigator({
                 >
                   {thread.title}
                 </button>
-                <Menu label={`${thread.title} actions`}>
-                  <MenuItem onSelect={() => onRenameThread(thread)}>
-                    Rename
-                  </MenuItem>
-                  <MenuItem destructive onSelect={() => onDeleteThread(thread)}>
-                    Delete
-                  </MenuItem>
-                </Menu>
+                <div className={styles.itemActions}>
+                  <Menu label={`${thread.title} actions`}>
+                    <MenuItem onSelect={() => onRenameThread(thread)}>
+                      Rename
+                    </MenuItem>
+                    <MenuItem
+                      destructive
+                      onSelect={() => onDeleteThread(thread)}
+                    >
+                      Delete
+                    </MenuItem>
+                  </Menu>
+                </div>
               </div>
             ))}
           </div>
@@ -636,7 +647,9 @@ function ProjectNavigator({
           onOpenProjectFile={onOpenProjectFile}
           projectId={project.id}
         />
-      ) : (selectedActivity === "datasets" || selectedActivity === "batchDefinitions") && project ? (
+      ) : (selectedActivity === "datasets" ||
+          selectedActivity === "batchDefinitions") &&
+        project ? (
         <DatasetCatalog
           mode={selectedActivity === "datasets" ? "datasets" : "definitions"}
           projectId={project.id}

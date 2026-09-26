@@ -17,6 +17,7 @@ from agent_hub_api.settings import Settings
 class PluginTool:
     name: str
     read_only: bool
+    repeat_safe: bool = False
     description: str = ""
     agent_visible: bool = True
 
@@ -191,6 +192,23 @@ class PluginGatewayModule:
             raise PluginToolNotAllowed
         return tool.input_schema
 
+    async def batch_call(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> PluginToolResult:
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        tool = next((item for item in manifest.tools if item.name == tool_name), None)
+        if tool is None or not tool.repeat_safe:
+            raise PluginToolNotAllowed("The tool is not approved for batch execution.")
+        return await self._call_enabled(project_id, plugin_id, tool_name, arguments)
+
     async def read_ui_resource(
         self,
         access: ProjectAccess,
@@ -361,7 +379,9 @@ def create_postgres_plugin_gateway(
         name="Reference calculation",
         version="0.1.0",
         endpoint="http://reference-calculation:8000/mcp",
-        tools=(PluginTool(name="calculate_cantilever_tip_load", read_only=False),),
+        tools=(
+            PluginTool(name="calculate_cantilever_tip_load", read_only=False, repeat_safe=True),
+        ),
         app_resource_uri="ui://agent-hub-reference-calculation/cantilever.html",
         app_tool_names=(),
     )

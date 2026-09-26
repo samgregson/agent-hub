@@ -19,6 +19,10 @@ from agent_hub_api.modules.artifacts import (
     create_artifact_router,
     create_postgres_artifact_module,
 )
+from agent_hub_api.modules.batch_execution import (
+    create_batch_execution_router,
+    create_postgres_batch_execution_module,
+)
 from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.plugin_gateway import (
@@ -64,6 +68,9 @@ def create_app(
     resolved_datasets = create_postgres_dataset_module(
         resolved_settings, resolved_projects, resolved_plugin_gateway
     )
+    resolved_batches = create_postgres_batch_execution_module(
+        resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway
+    )
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
@@ -82,6 +89,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await resolved_agent_execution.reconcile_non_terminal()
+        await resolved_batches.reconcile_non_terminal()
         yield
         if deep_agent_runner is not None:
             await deep_agent_runner.close()
@@ -107,6 +115,9 @@ def create_app(
     )
     application.include_router(
         create_dataset_router(resolved_identity, resolved_datasets), prefix="/api"
+    )
+    application.include_router(
+        create_batch_execution_router(resolved_identity, resolved_batches), prefix="/api"
     )
     application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),

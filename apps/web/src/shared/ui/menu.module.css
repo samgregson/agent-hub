@@ -42,7 +42,7 @@
   border-radius: calc(var(--radius-control) - 0.1rem);
   background: transparent;
   cursor: pointer;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-body);
   text-align: left;
 }
 

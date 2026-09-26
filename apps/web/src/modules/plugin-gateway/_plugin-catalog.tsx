@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import styles from "./plugin-gateway.module.css";
+import { Button, Collection, CollectionItem } from "@/shared/ui";
 import {
   listPluginSelections,
   setPluginEnabled,
@@ -52,34 +52,32 @@ export function PluginCatalog({ projectId }: PluginCatalogProps) {
     }
   }
 
-  if (error) return <p className={styles.error}>{error}</p>;
-  if (!selections.length)
-    return <p className={styles.empty}>No reviewed Plugins are available.</p>;
+  if (error) return <p role="alert">Plugins are temporarily unavailable.</p>;
+  if (!selections.length) return <p>No reviewed Plugins are available.</p>;
 
   return (
-    <div className={styles.catalog}>
+    <Collection>
       {selections.map((selection) => (
-        <article className={styles.plugin} key={selection.id}>
-          <div>
-            <strong>{selection.name}</strong>
-            <p>Version {selection.version}</p>
-            <p>{selection.tools.map((tool) => tool.name).join(", ")}</p>
-          </div>
-          <button
-            aria-pressed={selection.enabled}
-            className={styles.toggle}
-            disabled={changingPluginId === selection.id}
-            onClick={() => void toggleSelection(selection)}
-            type="button"
-          >
-            {changingPluginId === selection.id
-              ? "Updating…"
-              : selection.enabled
-                ? "Enabled"
-                : "Enable"}
-          </button>
-        </article>
+        <CollectionItem
+          actions={
+            <Button
+              aria-pressed={selection.enabled}
+              disabled={changingPluginId === selection.id}
+              onClick={() => void toggleSelection(selection)}
+              variant={selection.enabled ? "primary" : "secondary"}
+            >
+              {changingPluginId === selection.id
+                ? "Updating…"
+                : selection.enabled
+                  ? "Enabled"
+                  : "Enable"}
+            </Button>
+          }
+          details={`Version ${selection.version} · ${selection.tools.map((tool) => tool.name).join(", ")}`}
+          key={selection.id}
+          title={selection.name}
+        />
       ))}
-    </div>
+    </Collection>
   );
 }

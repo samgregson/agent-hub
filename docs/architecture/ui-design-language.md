@@ -18,6 +18,11 @@ focus treatment, and semantic states such as selected, pending, destructive,
 and error. Module CSS consumes those tokens rather than defining competing
 values for the same role.
 
+The repository enforces this as a ratchet for shared presentation and current
+Project-navigator Modules: `pnpm ui:check` rejects literal colours and literal
+font sizes there. New navigator work must use the shared presentation Module;
+the remaining older Module CSS is migrated when its owning surface changes.
+
 The initial visual hierarchy is:
 
 1. Project context and navigation are quiet but continuously visible.
@@ -38,8 +43,12 @@ repeated:
 - `Menu`: accessible trigger, focus management, and dismiss behaviour for
   compact overflow actions;
 - `Markdown`: safe rendering policy for model and user-visible rich text.
+- `Collection` and `CollectionItem`: consistent collection-card hierarchy,
+  metadata, responsive action placement, and touch/hover treatment;
+- `Button` and `Field`: host-control and form-field treatment using the global
+  visual tokens.
 
-`Button`, `IconButton`, `Panel`, and `EmptyState` are candidates, not implied
+`IconButton`, `Panel`, and `EmptyState` are candidates, not implied
 requirements. They should be extracted only after the corresponding local
 patterns have stabilised in more than one product module.
 
