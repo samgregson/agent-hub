@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -35,6 +36,7 @@ from agent_hub_api.modules.project_files import (
     create_project_files_router,
 )
 from agent_hub_api.modules.projects import (
+    ProjectAccess,
     ProjectModule,
     create_postgres_project_module,
     create_project_router,
@@ -71,6 +73,12 @@ def create_app(
     resolved_batches = create_postgres_batch_execution_module(
         resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway
     )
+    batch_tasks: set[asyncio.Task[object]] = set()
+
+    def dispatch_batch(access: ProjectAccess, project_id: str, run_id: str) -> None:
+        task = asyncio.create_task(resolved_batches.execute(access, project_id, run_id))
+        batch_tasks.add(task)
+        task.add_done_callback(batch_tasks.discard)
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
@@ -117,7 +125,10 @@ def create_app(
         create_dataset_router(resolved_identity, resolved_datasets), prefix="/api"
     )
     application.include_router(
-        create_batch_execution_router(resolved_identity, resolved_batches), prefix="/api"
+        create_batch_execution_router(
+            resolved_identity, resolved_batches, dispatch_batch
+        ),
+        prefix="/api",
     )
     application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),

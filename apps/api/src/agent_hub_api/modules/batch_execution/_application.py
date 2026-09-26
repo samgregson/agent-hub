@@ -107,6 +107,17 @@ class BatchExecutionModule:
         record_id: str,
         idempotency_key: str | None = None,
     ) -> BatchRun:
+        run = await self.submit_one(access, project_id, definition_id, record_id, idempotency_key)
+        return await self.execute(access, project_id, run.id)
+
+    async def submit_one(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        record_id: str,
+        idempotency_key: str | None = None,
+    ) -> BatchRun:
         await self._authorize(access, project_id)
         definition = await self._datasets.load_definition(access, project_id, definition_id)
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
@@ -131,32 +142,19 @@ class BatchExecutionModule:
             access.subject,
         )
         run, created = await self._store.create_or_load(run)
-        if not created:
-            return run
-        running = replace(run, status=BatchRunStatus.running, updated_at=datetime.now(UTC))
-        await self._store.replace(running)
-        try:
-            result = await self._gateway.batch_call(
-                access, project_id, definition.plugin_id, definition.tool_name, arguments
-            )
-            if result.structured_content is None:
-                raise ValueError("The tool returned no structured output.")
-            completed = replace(
-                running,
-                status=BatchRunStatus.succeeded,
-                records=(ResultRecord(record.id, arguments, result.structured_content),),
-                updated_at=datetime.now(UTC),
-            )
-        except Exception as error:
-            completed = replace(
-                running,
-                status=BatchRunStatus.failed,
-                records=(ResultRecord(record.id, arguments, error=str(error)),),
-                updated_at=datetime.now(UTC),
-            )
-        return await self._store.replace(completed) or completed
+        return run
 
     async def start_all(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        idempotency_key: str | None = None,
+    ) -> BatchRun:
+        run = await self.submit_all(access, project_id, definition_id, idempotency_key)
+        return await self.execute(access, project_id, run.id)
+
+    async def submit_all(
         self,
         access: ProjectAccess,
         project_id: str,
@@ -190,12 +188,15 @@ class BatchExecutionModule:
             access.subject,
         )
         run, created = await self._store.create_or_load(run)
-        if not created:
+        return run
+
+    async def execute(self, access: ProjectAccess, project_id: str, run_id: str) -> BatchRun:
+        run = await self.load(access, project_id, run_id)
+        if run.status not in {BatchRunStatus.queued, BatchRunStatus.running}:
             return run
         running = replace(run, status=BatchRunStatus.running, updated_at=datetime.now(UTC))
         await self._store.replace(running)
-        first_id, first_arguments = captured[0]
-        first = await self._execute(access, project_id, definition, first_id, first_arguments)
+        first = await self._execute_snapshot(access, project_id, running, running.records[0])
         progress = replace(
             running,
             records=(first, *running.records[1:]),
@@ -207,16 +208,12 @@ class BatchExecutionModule:
             return await self._store.replace(failed) or failed
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
-        async def execute_bounded(
-            record_id: str, arguments: Mapping[str, object]
-        ) -> ResultRecord:
+        async def execute_bounded(record: ResultRecord) -> ResultRecord:
             async with semaphore:
-                return await self._execute(
-                    access, project_id, definition, record_id, arguments
-                )
+                return await self._execute_snapshot(access, project_id, running, record)
 
         remaining = await asyncio.gather(
-            *(execute_bounded(record_id, arguments) for record_id, arguments in captured[1:])
+            *(execute_bounded(record) for record in running.records[1:])
         )
         completed = replace(
             progress,
@@ -229,6 +226,23 @@ class BatchExecutionModule:
             updated_at=datetime.now(UTC),
         )
         return await self._store.replace(completed) or completed
+
+    async def _execute_snapshot(
+        self, access: ProjectAccess, project_id: str, run: BatchRun, record: ResultRecord
+    ) -> ResultRecord:
+        try:
+            result = await self._gateway.batch_call(
+                access,
+                project_id,
+                str(run.definition_snapshot["pluginId"]),
+                str(run.definition_snapshot["toolName"]),
+                record.input,
+            )
+            if result.structured_content is None:
+                raise ValueError("The tool returned no structured output.")
+            return ResultRecord(record.dataset_record_id, record.input, result.structured_content)
+        except Exception as error:
+            return ResultRecord(record.dataset_record_id, record.input, error=str(error))
 
     async def _execute(
         self,

@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -71,7 +72,9 @@ def _response(run: BatchRun) -> BatchRunResponse:
 
 
 def create_batch_execution_router(
-    identity: IdentityModule, batches: BatchExecutionModule
+    identity: IdentityModule,
+    batches: BatchExecutionModule,
+    dispatch: Callable[[ProjectAccess, str, str], None] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}/batch-runs", tags=["batch-runs"])
 
@@ -118,15 +121,17 @@ def create_batch_execution_router(
         project_id: str, body: StartRequest, request_context: Context
     ) -> BatchRunResponse:
         try:
-            return _response(
-                await batches.start_one(
-                    ProjectAccess(subject=request_context.subject),
-                    project_id,
-                    body.definition_id,
-                    body.record_id or "",
-                    body.idempotency_key,
-                )
+            request_access = ProjectAccess(subject=request_context.subject)
+            run = await batches.submit_one(
+                request_access,
+                project_id,
+                body.definition_id,
+                body.record_id or "",
+                body.idempotency_key,
             )
+            if dispatch is not None:
+                dispatch(request_access, project_id, run.id)
+            return _response(run)
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
 
@@ -155,14 +160,13 @@ def create_batch_execution_router(
         project_id: str, body: StartRequest, request_context: Context
     ) -> BatchRunResponse:
         try:
-            return _response(
-                await batches.start_all(
-                    ProjectAccess(subject=request_context.subject),
-                    project_id,
-                    body.definition_id,
-                    body.idempotency_key,
-                )
+            request_access = ProjectAccess(subject=request_context.subject)
+            run = await batches.submit_all(
+                request_access, project_id, body.definition_id, body.idempotency_key
             )
+            if dispatch is not None:
+                dispatch(request_access, project_id, run.id)
+            return _response(run)
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
 

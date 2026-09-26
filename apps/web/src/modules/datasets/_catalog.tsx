@@ -142,6 +142,23 @@ export function DatasetCatalog({
     };
   }, [mode, projectId, runDefinition, runOrder, runStatus]);
 
+  useEffect(() => {
+    if (!selectedRun || !["queued", "running"].includes(selectedRun.status)) return;
+    const interval = window.setInterval(() => {
+      void fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRun.id)}`,
+        { cache: "no-store" },
+      )
+        .then((response) => response.ok ? response.json() as Promise<BatchRun> : null)
+        .then((run) => {
+          if (!run) return;
+          setSelectedRun(run);
+          setRuns((current) => current?.map((item) => item.id === run.id ? run : item) ?? []);
+        });
+    }, 750);
+    return () => window.clearInterval(interval);
+  }, [projectId, selectedRun]);
+
   async function createDataset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
