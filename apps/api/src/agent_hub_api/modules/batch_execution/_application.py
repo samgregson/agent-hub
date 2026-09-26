@@ -48,6 +48,7 @@ class BatchRun:
     created_at: datetime
     updated_at: datetime
     idempotency_key: str | None = None
+    initiator_subject: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,10 +124,11 @@ class BatchExecutionModule:
             definition.id,
             BatchRunStatus.queued,
             _snapshot(definition),
-            (),
+            (ResultRecord(record.id, arguments),),
             now,
             now,
             idempotency_key,
+            access.subject,
         )
         run, created = await self._store.create_or_load(run)
         if not created:
@@ -181,10 +183,11 @@ class BatchExecutionModule:
                 "maxConcurrency": self._max_concurrency,
                 "recordIds": [record_id for record_id, _ in captured],
             },
-            (),
+            tuple(ResultRecord(record_id, arguments) for record_id, arguments in captured),
             now,
             now,
             idempotency_key,
+            access.subject,
         )
         run, created = await self._store.create_or_load(run)
         if not created:
@@ -193,7 +196,11 @@ class BatchExecutionModule:
         await self._store.replace(running)
         first_id, first_arguments = captured[0]
         first = await self._execute(access, project_id, definition, first_id, first_arguments)
-        progress = replace(running, records=(first,), updated_at=datetime.now(UTC))
+        progress = replace(
+            running,
+            records=(first, *running.records[1:]),
+            updated_at=datetime.now(UTC),
+        )
         await self._store.replace(progress)
         if first.error:
             failed = replace(progress, status=BatchRunStatus.failed, updated_at=datetime.now(UTC))
@@ -363,8 +370,8 @@ class PostgresBatchRunStore:
         async with connection:
             cursor = await connection.execute(
                 """INSERT INTO batch_runs
-                (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (project_id,idempotency_key)
                 WHERE idempotency_key IS NOT NULL DO NOTHING
                 RETURNING batch_run_id""",
@@ -377,6 +384,7 @@ class PostgresBatchRunStore:
                     run.created_at,
                     run.updated_at,
                     run.idempotency_key,
+                    run.initiator_subject,
                 ),
             )
             if await cursor.fetchone() is not None:
@@ -485,8 +493,8 @@ async def _save(
     else:
         await connection.execute(
             """INSERT INTO batch_runs
-            (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (
                 run.project_id,
                 run.id,
@@ -496,6 +504,7 @@ async def _save(
                 run.created_at,
                 run.updated_at,
                 run.idempotency_key,
+                run.initiator_subject,
             ),
         )
     for record in run.records:
@@ -546,6 +555,7 @@ async def _load(
         row["created_at"],
         row["updated_at"],
         str(row["idempotency_key"]) if row["idempotency_key"] is not None else None,
+        str(row["initiator_subject"]) if row["initiator_subject"] is not None else None,
     )
 
 
