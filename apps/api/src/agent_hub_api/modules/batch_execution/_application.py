@@ -76,6 +76,7 @@ class BatchRunStore(Protocol):
     ) -> BatchRunPage: ...
     async def replace(self, run: BatchRun) -> BatchRun | None: ...
     async def reconcile_non_terminal(self, now: datetime) -> int: ...
+    async def non_terminal(self) -> tuple[BatchRun, ...]: ...
 
 
 class BatchExecutionModule:
@@ -196,7 +197,9 @@ class BatchExecutionModule:
             return run
         running = replace(run, status=BatchRunStatus.running, updated_at=datetime.now(UTC))
         await self._store.replace(running)
-        first = await self._execute_snapshot(access, project_id, running, running.records[0])
+        first = running.records[0]
+        if first.structured_output is None and first.error is None:
+            first = await self._execute_snapshot(access, project_id, running, first)
         progress = replace(
             running,
             records=(first, *running.records[1:]),
@@ -212,8 +215,16 @@ class BatchExecutionModule:
             async with semaphore:
                 return await self._execute_snapshot(access, project_id, running, record)
 
-        remaining = await asyncio.gather(
-            *(execute_bounded(record) for record in running.records[1:])
+        pending = tuple(
+            record
+            for record in running.records[1:]
+            if record.structured_output is None and record.error is None
+        )
+        executed = await asyncio.gather(*(execute_bounded(record) for record in pending))
+        completed_records = {record.dataset_record_id: record for record in executed}
+        remaining = tuple(
+            completed_records.get(record.dataset_record_id, record)
+            for record in running.records[1:]
         )
         completed = replace(
             progress,
@@ -293,6 +304,12 @@ class BatchExecutionModule:
         """Make interrupted in-process work visible and safely retryable."""
         return await self._store.reconcile_non_terminal(datetime.now(UTC))
 
+    async def recoverable(self) -> tuple[BatchRun, ...]:
+        """Return durable work that a new process can safely reclaim."""
+        return tuple(
+            run for run in await self._store.non_terminal() if run.initiator_subject is not None
+        )
+
     async def _authorize(self, access: ProjectAccess, project_id: str) -> None:
         try:
             await self._projects.load(access, project_id)
@@ -366,6 +383,13 @@ class MemoryBatchRunStore:
                 )
                 reconciled += 1
         return reconciled
+
+    async def non_terminal(self) -> tuple[BatchRun, ...]:
+        return tuple(
+            run
+            for run in self._runs.values()
+            if run.status in {BatchRunStatus.queued, BatchRunStatus.running}
+        )
 
 
 class PostgresBatchRunStore:
@@ -483,6 +507,20 @@ class PostgresBatchRunStore:
                 (now,),
             )
             return cursor.rowcount
+
+    async def non_terminal(self) -> tuple[BatchRun, ...]:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """SELECT project_id, batch_run_id FROM batch_runs
+                WHERE status IN ('queued', 'running')"""
+            )
+            runs: list[BatchRun] = []
+            for row in await cursor.fetchall():
+                run = await _load(connection, str(row["project_id"]), str(row["batch_run_id"]))
+                if run is not None:
+                    runs.append(run)
+            return tuple(runs)
 
 
 async def _save(

@@ -97,7 +97,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await resolved_agent_execution.reconcile_non_terminal()
-        await resolved_batches.reconcile_non_terminal()
+        for run in await resolved_batches.recoverable():
+            assert run.initiator_subject is not None
+            dispatch_batch(ProjectAccess(subject=run.initiator_subject), run.project_id, run.id)
         yield
         if deep_agent_runner is not None:
             await deep_agent_runner.close()

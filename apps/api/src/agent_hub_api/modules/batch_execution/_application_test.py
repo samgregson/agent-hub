@@ -175,3 +175,24 @@ async def test_restart_reconciliation_fails_non_terminal_batch_runs() -> None:
 
     assert await batches.reconcile_non_terminal() == 1
     assert (await batches.load(access, project_id, "queued-run")).status is BatchRunStatus.failed
+
+
+@pytest.mark.asyncio
+async def test_captured_run_can_be_reclaimed_and_completed_after_restart() -> None:
+    gateway = Gateway()
+    access, project_id, batches, definition_id = await create_module(gateway)
+    queued = await batches.submit_all(access, project_id, definition_id)
+
+    recovered = await batches.recoverable()
+    completed = await batches.execute(access, project_id, recovered[0].id)
+
+    assert recovered == (queued,)
+    assert queued.initiator_subject == "sam"
+    assert [record.input for record in queued.records] == [
+        {"load": 1},
+        {"load": 2},
+        {"load": 3},
+        {"load": 4},
+        {"load": 5},
+    ]
+    assert completed.status is BatchRunStatus.succeeded
