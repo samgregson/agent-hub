@@ -152,14 +152,24 @@ async def test_repeated_idempotency_key_returns_the_original_run_without_reexecu
 
 
 @pytest.mark.asyncio
-async def test_a_project_can_delete_an_individual_batch_run() -> None:
+async def test_a_user_can_archive_a_completed_batch_run_without_losing_its_result_set() -> None:
     gateway = Gateway()
     access, project_id, batches, definition_id = await create_module(gateway)
     run = await batches.start_all(access, project_id, definition_id)
 
-    await batches.delete(access, project_id, run.id)
+    assert run.archived_at is None
+    archived = await batches.archive(access, project_id, run.id)
 
     assert (await batches.list(access, project_id)).items == ()
+    assert archived.archived_at is not None
+    assert (await batches.load(access, project_id, run.id)) == archived
+    assert [record.structured_output for record in archived.records] == [
+        {"result": 2},
+        {"result": 4},
+        {"result": 6},
+        {"result": 8},
+        {"result": 10},
+    ]
 
 
 @pytest.mark.asyncio

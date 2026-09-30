@@ -49,6 +49,7 @@ class BatchRun:
     updated_at: datetime
     idempotency_key: str | None = None
     initiator_subject: str | None = None
+    archived_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,10 +62,13 @@ class BatchRunNotFound(Exception):
     pass
 
 
+class BatchRunNotArchivable(Exception):
+    """A non-terminal Batch Run cannot be archived."""
+
+
 class BatchRunStore(Protocol):
     async def create_or_load(self, run: BatchRun) -> tuple[BatchRun, bool]: ...
     async def load(self, project_id: str, run_id: str) -> BatchRun | None: ...
-    async def delete(self, project_id: str, run_id: str) -> bool: ...
     async def list(
         self,
         project_id: str,
@@ -73,6 +77,7 @@ class BatchRunStore(Protocol):
         order: BatchRunOrder = BatchRunOrder.newest,
         limit: int = 10,
         offset: int = 0,
+        include_archived: bool = False,
     ) -> BatchRunPage: ...
     async def replace(self, run: BatchRun) -> BatchRun | None: ...
     async def reconcile_non_terminal(self, now: datetime) -> int: ...
@@ -280,10 +285,15 @@ class BatchExecutionModule:
             raise BatchRunNotFound
         return run
 
-    async def delete(self, access: ProjectAccess, project_id: str, run_id: str) -> None:
-        await self._authorize(access, project_id)
-        if not await self._store.delete(project_id, run_id):
-            raise BatchRunNotFound
+    async def archive(self, access: ProjectAccess, project_id: str, run_id: str) -> BatchRun:
+        """Hide one completed Batch Run without erasing its Result Set."""
+        run = await self.load(access, project_id, run_id)
+        if run.status in {BatchRunStatus.queued, BatchRunStatus.running}:
+            raise BatchRunNotArchivable
+        if run.archived_at is not None:
+            return run
+        archived = replace(run, archived_at=datetime.now(UTC))
+        return await self._store.replace(archived) or archived
 
     async def list(
         self,
@@ -294,10 +304,11 @@ class BatchExecutionModule:
         order: BatchRunOrder = BatchRunOrder.newest,
         limit: int = 10,
         offset: int = 0,
+        include_archived: bool = False,
     ) -> BatchRunPage:
         await self._authorize(access, project_id)
         return await self._store.list(
-            project_id, definition_id, status, order, limit, offset
+            project_id, definition_id, status, order, limit, offset, include_archived
         )
 
     async def reconcile_non_terminal(self) -> int:
@@ -335,14 +346,6 @@ class MemoryBatchRunStore:
     async def load(self, project_id: str, run_id: str) -> BatchRun | None:
         return self._runs.get((project_id, run_id))
 
-    async def delete(self, project_id: str, run_id: str) -> bool:
-        run = self._runs.pop((project_id, run_id), None)
-        if run is None:
-            return False
-        if run.idempotency_key is not None:
-            self._idempotency_keys.pop((project_id, run.idempotency_key), None)
-        return True
-
     async def list(
         self,
         project_id: str,
@@ -351,6 +354,7 @@ class MemoryBatchRunStore:
         order: BatchRunOrder = BatchRunOrder.newest,
         limit: int = 10,
         offset: int = 0,
+        include_archived: bool = False,
     ) -> BatchRunPage:
         runs = sorted(
             (
@@ -359,6 +363,7 @@ class MemoryBatchRunStore:
                 if stored_project_id == project_id
                 and (definition_id is None or run.definition_id == definition_id)
                 and (status is None or run.status is status)
+                and (include_archived or run.archived_at is None)
             ),
             key=lambda run: run.updated_at,
             reverse=order is BatchRunOrder.newest,
@@ -445,16 +450,6 @@ class PostgresBatchRunStore:
         async with connection:
             return await _load(connection, project_id, run_id)
 
-    async def delete(self, project_id: str, run_id: str) -> bool:
-        connection = await self._connect()
-        async with connection:
-            cursor = await connection.execute(
-                """DELETE FROM batch_runs WHERE project_id=%s AND batch_run_id=%s
-                RETURNING batch_run_id""",
-                (project_id, run_id),
-            )
-            return await cursor.fetchone() is not None
-
     async def list(
         self,
         project_id: str,
@@ -463,6 +458,7 @@ class PostgresBatchRunStore:
         order: BatchRunOrder = BatchRunOrder.newest,
         limit: int = 10,
         offset: int = 0,
+        include_archived: bool = False,
     ) -> BatchRunPage:
         connection = await self._connect()
         async with connection:
@@ -474,6 +470,8 @@ class PostgresBatchRunStore:
             if status is not None:
                 clauses.append("status=%s")
                 parameters.append(status.value)
+            if not include_archived:
+                clauses.append("archived_at IS NULL")
             direction = "DESC" if order is BatchRunOrder.newest else "ASC"
             cursor = await connection.execute(
                 f"""SELECT batch_run_id FROM batch_runs WHERE {' AND '.join(clauses)}
@@ -528,12 +526,14 @@ async def _save(
 ) -> None:
     if replace_run:
         await connection.execute(
-            """UPDATE batch_runs SET status=%s, definition_snapshot=%s, updated_at=%s
+            """UPDATE batch_runs
+            SET status=%s, definition_snapshot=%s, updated_at=%s, archived_at=%s
             WHERE project_id=%s AND batch_run_id=%s""",
             (
                 run.status.value,
                 json.dumps(run.definition_snapshot),
                 run.updated_at,
+                run.archived_at,
                 run.project_id,
                 run.id,
             ),
@@ -545,8 +545,8 @@ async def _save(
     else:
         await connection.execute(
             """INSERT INTO batch_runs
-            (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject,archived_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (
                 run.project_id,
                 run.id,
@@ -557,6 +557,7 @@ async def _save(
                 run.updated_at,
                 run.idempotency_key,
                 run.initiator_subject,
+                run.archived_at,
             ),
         )
     for record in run.records:
@@ -608,6 +609,7 @@ async def _load(
         row["updated_at"],
         str(row["idempotency_key"]) if row["idempotency_key"] is not None else None,
         str(row["initiator_subject"]) if row["initiator_subject"] is not None else None,
+        row["archived_at"],  # type: ignore[arg-type]
     )
 
 

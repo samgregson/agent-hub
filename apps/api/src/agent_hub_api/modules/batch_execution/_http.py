@@ -8,6 +8,7 @@ from pydantic.alias_generators import to_camel
 from agent_hub_api.modules.batch_execution._application import (
     BatchExecutionModule,
     BatchRun,
+    BatchRunNotArchivable,
     BatchRunNotFound,
     BatchRunOrder,
     BatchRunStatus,
@@ -39,6 +40,7 @@ class ResultResponse(_Model):
 
 
 class BatchRunResponse(_Model):
+    archived_at: str | None
     created_at: str
     id: str
     definition_id: str
@@ -54,6 +56,7 @@ class BatchRunPageResponse(_Model):
 
 def _response(run: BatchRun) -> BatchRunResponse:
     return BatchRunResponse(
+        archived_at=run.archived_at.isoformat() if run.archived_at else None,
         created_at=run.created_at.isoformat(),
         id=run.id,
         definition_id=run.definition_id,
@@ -98,6 +101,7 @@ def create_batch_execution_router(
         order: BatchRunOrder = BatchRunOrder.newest,
         limit: int = 10,
         offset: int = 0,
+        include_archived: bool = False,
     ) -> BatchRunPageResponse:
         try:
             page = await batches.list(
@@ -108,6 +112,7 @@ def create_batch_execution_router(
                 order,
                 limit,
                 offset,
+                include_archived,
             )
             return BatchRunPageResponse(
                 items=[_response(run) for run in page.items],
@@ -146,14 +151,18 @@ def create_batch_execution_router(
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run not found") from error
 
-    @router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
-    async def delete(project_id: str, run_id: str, request_context: Context) -> None:
+    @router.post("/{run_id}/archive", response_model=BatchRunResponse)
+    async def archive(
+        project_id: str, run_id: str, request_context: Context
+    ) -> BatchRunResponse:
         try:
-            await batches.delete(
+            return _response(await batches.archive(
                 ProjectAccess(subject=request_context.subject), project_id, run_id
-            )
+            ))
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run not found") from error
+        except BatchRunNotArchivable as error:
+            raise HTTPException(status_code=409, detail="Batch Run is still active") from error
 
     @router.post("/all", response_model=BatchRunResponse, status_code=status.HTTP_201_CREATED)
     async def start_all(

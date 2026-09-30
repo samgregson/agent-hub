@@ -13,14 +13,14 @@ export async function GET(request: Request, context: RouteContext): Promise<Resp
   );
 }
 
-export async function DELETE(
+export async function POST(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
   const { projectId, runId } = await context.params;
   return forwardBackendRequest(
     request,
-    `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(runId)}`,
+    `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(runId)}/archive`,
     "application/json",
   );
 }

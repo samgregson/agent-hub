@@ -1,6 +1,7 @@
 from agent_hub_api.modules.batch_execution._application import (
     BatchExecutionModule,
     BatchRun,
+    BatchRunNotArchivable,
     BatchRunNotFound,
     BatchRunOrder,
     BatchRunPage,
@@ -14,6 +15,7 @@ from agent_hub_api.modules.batch_execution._http import create_batch_execution_r
 __all__ = [
     "BatchExecutionModule",
     "BatchRun",
+    "BatchRunNotArchivable",
     "BatchRunNotFound",
     "BatchRunOrder",
     "BatchRunPage",

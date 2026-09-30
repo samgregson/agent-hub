@@ -28,6 +28,7 @@ interface BatchDefinition {
 }
 
 interface BatchRun {
+  archivedAt: string | null;
   createdAt: string;
   definitionId: string;
   id: string;
@@ -246,7 +247,7 @@ export function DatasetCatalog({
   async function deleteDefinition(definition: BatchDefinition) {
     if (
       !window.confirm(
-        `Delete ${definition.name} and its saved Batch Runs? This cannot be undone.`,
+        `Delete ${definition.name}? Its saved Batch Runs remain available as immutable history.`,
       )
     )
       return;
@@ -261,27 +262,22 @@ export function DatasetCatalog({
     setDefinitions(
       (current) => current?.filter((item) => item.id !== definition.id) ?? [],
     );
-    setRuns(
-      (current) =>
-        current?.filter((run) => run.definitionId !== definition.id) ?? [],
-    );
-    if (selectedRun?.definitionId === definition.id) setSelectedRun(null);
   }
 
-  async function deleteRun(run: BatchRun) {
+  async function archiveRun(run: BatchRun) {
     if (
       !window.confirm(
-        "Delete this Batch Run and its results? This cannot be undone.",
+        "Archive this completed Batch Run? Its results and provenance will be retained.",
       )
     )
       return;
     const response = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(run.id)}`,
-      { method: "DELETE" },
+      { method: "POST" },
     );
     if (!response.ok) {
       setError(
-        await responseMessage(response, "Batch Run could not be deleted."),
+        await responseMessage(response, "Batch Run could not be archived."),
       );
       return;
     }
@@ -585,10 +581,9 @@ export function DatasetCatalog({
                   <CollectionItem
                     actions={
                       <Button
-                        onClick={() => void deleteRun(run)}
-                        variant="danger"
+                        onClick={() => void archiveRun(run)}
                       >
-                        Delete run
+                        Archive run
                       </Button>
                     }
                     details={runSummary(run)}
