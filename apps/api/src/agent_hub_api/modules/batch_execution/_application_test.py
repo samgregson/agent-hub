@@ -164,6 +164,21 @@ async def test_run_inspection_pages_filters_and_orders_persisted_runs() -> None:
 
 
 @pytest.mark.asyncio
+async def test_result_set_inspection_pages_records_without_losing_the_run_snapshot() -> None:
+    gateway = Gateway()
+    access, project_id, batches, definition_id = await create_module(gateway)
+    run = await batches.start_all(access, project_id, definition_id)
+
+    first_page = await batches.inspect_results(access, project_id, run.id, limit=2)
+    second_page = await batches.inspect_results(access, project_id, run.id, limit=2, offset=2)
+
+    assert [record.input for record in first_page.items] == [{"load": 1}, {"load": 2}]
+    assert first_page.next_offset == 2
+    assert [record.input for record in second_page.items] == [{"load": 3}, {"load": 4}]
+    assert second_page.next_offset == 4
+
+
+@pytest.mark.asyncio
 async def test_repeated_idempotency_key_returns_the_original_run_without_reexecution() -> None:
     gateway = Gateway()
     access, project_id, batches, definition_id = await create_module(gateway)

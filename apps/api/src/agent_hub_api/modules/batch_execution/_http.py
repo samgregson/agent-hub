@@ -53,6 +53,11 @@ class BatchRunPageResponse(_Model):
     next_offset: int | None
 
 
+class ResultRecordPageResponse(_Model):
+    items: list[ResultResponse]
+    next_offset: int | None
+
+
 def _response(run: BatchRun) -> BatchRunResponse:
     return BatchRunResponse(
         archived_at=run.archived_at.isoformat() if run.archived_at else None,
@@ -147,6 +152,41 @@ def create_batch_execution_router(
             )
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run not found") from error
+
+    @router.get("/{run_id}/results", response_model=ResultRecordPageResponse)
+    async def inspect_results(
+        project_id: str,
+        run_id: str,
+        request_context: Context,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> ResultRecordPageResponse:
+        try:
+            page = await batches.inspect_results(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                run_id,
+                limit=limit,
+                offset=offset,
+            )
+        except BatchRunNotFound as error:
+            raise HTTPException(status_code=404, detail="Batch Run not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return ResultRecordPageResponse(
+            items=[
+                ResultResponse(
+                    dataset_record_id=item.dataset_record_id,
+                    input=dict(item.input),
+                    structured_output=(
+                        dict(item.structured_output) if item.structured_output else None
+                    ),
+                    error=item.error,
+                )
+                for item in page.items
+            ],
+            next_offset=page.next_offset,
+        )
 
     @router.post("/{run_id}/archive", response_model=BatchRunResponse)
     async def archive(

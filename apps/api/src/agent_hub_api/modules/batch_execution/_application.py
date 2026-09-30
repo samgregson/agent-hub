@@ -59,6 +59,12 @@ class BatchRunPage:
     next_offset: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class ResultRecordPage:
+    items: tuple[ResultRecord, ...]
+    next_offset: int | None
+
+
 class BatchRunNotFound(Exception):
     pass
 
@@ -320,6 +326,25 @@ class BatchExecutionModule:
             return run
         archived = replace(run, archived_at=datetime.now(UTC))
         return await self._store.replace(archived) or archived
+
+    async def inspect_results(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        run_id: str,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> ResultRecordPage:
+        """Read one bounded page from a durable Result Set."""
+        if not 1 <= limit <= 100 or offset < 0:
+            raise ValueError(
+                "Result Set pagination requires a limit from 1 to 100 and an offset >= 0."
+            )
+        run = await self.load(access, project_id, run_id)
+        items = run.records[offset : offset + limit]
+        next_offset = offset + len(items) if offset + len(items) < len(run.records) else None
+        return ResultRecordPage(items, next_offset)
 
     async def list(
         self,

@@ -8,6 +8,7 @@ from agent_hub_api.modules.batch_execution._application import (
     BatchRunStatus,
     MemoryBatchRunStore,
     ResultRecord,
+    ResultRecordPage,
     create_postgres_batch_execution_module,
 )
 from agent_hub_api.modules.batch_execution._http import create_batch_execution_router
@@ -22,6 +23,7 @@ __all__ = [
     "BatchRunStatus",
     "MemoryBatchRunStore",
     "ResultRecord",
+    "ResultRecordPage",
     "create_batch_execution_router",
     "create_postgres_batch_execution_module",
 ]
