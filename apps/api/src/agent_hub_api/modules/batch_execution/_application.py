@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Protocol
 from uuid import uuid4
 
+from jsonschema import Draft202012Validator
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
@@ -127,6 +128,9 @@ class BatchExecutionModule:
     ) -> BatchRun:
         await self._authorize(access, project_id)
         definition = await self._datasets.load_definition(access, project_id, definition_id)
+        output_schema = await self._gateway.output_schema(
+            access, project_id, definition.plugin_id, definition.tool_name
+        )
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         record = next((item for item in dataset.records if item.id == record_id), None)
         if record is None:
@@ -141,7 +145,7 @@ class BatchExecutionModule:
             project_id,
             definition.id,
             BatchRunStatus.queued,
-            _snapshot(definition),
+            _snapshot(definition, output_schema),
             (ResultRecord(record.id, arguments),),
             now,
             now,
@@ -171,6 +175,9 @@ class BatchExecutionModule:
         """Execute a captured Dataset after its first record succeeds."""
         await self._authorize(access, project_id)
         definition = await self._datasets.load_definition(access, project_id, definition_id)
+        output_schema = await self._gateway.output_schema(
+            access, project_id, definition.plugin_id, definition.tool_name
+        )
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         if not dataset.records:
             raise BatchRunNotFound
@@ -184,7 +191,7 @@ class BatchExecutionModule:
             definition.id,
             BatchRunStatus.queued,
             {
-                **_snapshot(definition),
+                **_snapshot(definition, output_schema),
                 "maxConcurrency": self._max_concurrency,
                 "recordIds": [record_id for record_id, _ in captured],
             },
@@ -271,6 +278,10 @@ class BatchExecutionModule:
             )
             if result.structured_content is None:
                 raise ValueError("The tool returned no structured output.")
+            output_schema = run.definition_snapshot.get("outputSchema")
+            if not isinstance(output_schema, Mapping):
+                raise ValueError("The Batch Run has no declared MCP output schema.")
+            Draft202012Validator(output_schema).validate(result.structured_content)
             return ResultRecord(record.dataset_record_id, record.input, result.structured_content)
         except Exception as error:
             return ResultRecord(record.dataset_record_id, record.input, error=str(error))
@@ -657,13 +668,16 @@ def _arguments(value: Mapping[str, object], definition: BatchDefinition) -> Mapp
     return {name: _select(value, pointer) for name, pointer in definition.argument_mappings.items()}
 
 
-def _snapshot(definition: BatchDefinition) -> Mapping[str, object]:
+def _snapshot(
+    definition: BatchDefinition, output_schema: Mapping[str, object]
+) -> Mapping[str, object]:
     return {
         "datasetId": definition.dataset_id,
         "pluginId": definition.plugin_id,
         "toolName": definition.tool_name,
         "argumentMappings": definition.argument_mappings,
         "inputSchema": definition.input_schema,
+        "outputSchema": dict(output_schema),
     }
 
 

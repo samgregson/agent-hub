@@ -63,6 +63,7 @@ class PluginDiscoveredTool:
     description: str
     read_only: bool
     input_schema: Mapping[str, object] | None = None
+    output_schema: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +192,29 @@ class PluginGatewayModule:
         if tool is None or tool.input_schema is None:
             raise PluginToolNotAllowed
         return tool.input_schema
+
+    async def output_schema(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+    ) -> Mapping[str, object]:
+        """Return an enabled batch tool's declared ordinary MCP output schema."""
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
+            raise PluginNotEnabled
+        tool = next((item for item in manifest.tools if item.name == tool_name), None)
+        if tool is None or not tool.repeat_safe:
+            raise PluginToolNotAllowed
+        discovered = {item.name: item for item in await self._discover(manifest)}
+        output_schema = discovered.get(tool_name)
+        if output_schema is None or output_schema.output_schema is None:
+            raise PluginToolNotAllowed("The batch tool has no declared MCP output schema.")
+        return output_schema.output_schema
 
     async def batch_call(
         self,

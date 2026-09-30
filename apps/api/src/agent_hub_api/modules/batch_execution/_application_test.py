@@ -30,9 +30,12 @@ class ToolSchemas:
 
 
 class Gateway:
-    def __init__(self, fail_loads: set[int] | None = None) -> None:
+    def __init__(
+        self, fail_loads: set[int] | None = None, invalid_loads: set[int] | None = None
+    ) -> None:
         self.calls: list[int] = []
         self.fail_loads = fail_loads or set()
+        self.invalid_loads = invalid_loads or set()
         self.active = 0
         self.maximum_active = 0
 
@@ -48,7 +51,16 @@ class Gateway:
         self.active -= 1
         if load in self.fail_loads:
             raise RuntimeError(f"load {load} failed")
+        if load in self.invalid_loads:
+            return PluginToolResult((), {"unexpected": load})
         return PluginToolResult((), {"result": load * 2})
+
+    async def output_schema(self, *_: object) -> Mapping[str, object]:
+        return {
+            "type": "object",
+            "required": ["result"],
+            "properties": {"result": {"type": "number"}},
+        }
 
 
 async def create_module(
@@ -93,6 +105,18 @@ async def test_first_failed_record_stops_the_batch_before_fanout() -> None:
     assert run.status is BatchRunStatus.failed
     assert gateway.calls == [1]
     assert run.records[0].error == "load 1 failed"
+
+
+@pytest.mark.asyncio
+async def test_first_schema_invalid_result_stops_the_batch_before_fanout() -> None:
+    gateway = Gateway(invalid_loads={1})
+    access, project_id, batches, definition_id = await create_module(gateway)
+
+    run = await batches.start_all(access, project_id, definition_id)
+
+    assert run.status is BatchRunStatus.failed
+    assert gateway.calls == [1]
+    assert run.records[0].error is not None
 
 
 @pytest.mark.asyncio
