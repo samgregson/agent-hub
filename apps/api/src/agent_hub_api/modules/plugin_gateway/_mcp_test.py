@@ -14,6 +14,8 @@ from agent_hub_api.modules.plugin_gateway import (
 @dataclass
 class FakeContent:
     text: str
+    uri: str = "ui://agent-hub-foundation/status.html"
+    mime_type: str | None = "text/html;profile=mcp-app"
 
 
 @dataclass
@@ -49,6 +51,20 @@ class FakeClient:
     ) -> FakeResponse:
         self.calls.append((name, arguments, read_timeout_seconds))
         return self.response
+
+    async def list_resources(self) -> object:
+        resource = type(
+            "Resource",
+            (),
+            {
+                "uri": "ui://agent-hub-foundation/status.html",
+                "mime_type": "text/html;profile=mcp-app",
+            },
+        )()
+        return type("Resources", (), {"resources": [resource]})()
+
+    async def read_resource(self, _: str) -> object:
+        return type("ResourceResult", (), {"contents": [FakeContent("<main>Fixture</main>")]})()
 
 
 @pytest.mark.asyncio
@@ -123,3 +139,20 @@ def test_internal_fixture_endpoint_requires_an_explicit_catalog_exception(
     )
 
     client._validate_endpoint()
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_reads_only_a_declared_bounded_app_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_mcp, "Client", FakeClient)
+    client = McpPluginClient(
+        endpoint="http://foundation-fixture:8000/mcp",
+        timeout_seconds=12,
+        max_result_bytes=1_024,
+        allow_private_network=True,
+    )
+
+    resource = await client.read_ui_resource("ui://agent-hub-foundation/status.html")
+
+    assert resource.html == "<main>Fixture</main>"

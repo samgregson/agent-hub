@@ -4,12 +4,15 @@ from unittest.mock import AsyncMock
 
 import pytest
 from deepagents.middleware._fs_interrupt import _build_interrupt_on_from_permissions
+from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain.tools.tool_node import ToolCallRequest
+from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 import agent_hub_api.modules.agent_execution._deep_agent as deep_agent
 from agent_hub_api.modules.agent_execution._deep_agent import (
     _AGENT_SYSTEM_PROMPT,
     PostgresDeepAgentRunner,
+    _project_change_notice_middleware,
     _project_file_permissions,
 )
 
@@ -47,6 +50,33 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
     assert "The approval card is shown automatically after the tool call." in _AGENT_SYSTEM_PROMPT
 
 
+def test_datasets_are_not_project_files_in_the_agent_instructions() -> None:
+    assert "Datasets and Batch Definitions are durable Project records" in _AGENT_SYSTEM_PROMPT
+    assert "Do not write a Dataset as a JSON file under /project." in _AGENT_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_project_change_notice_is_transient_and_identifies_its_origin() -> None:
+    original: list[AnyMessage] = [HumanMessage(content="Please review the project.")]
+    request = ModelRequest(model=cast(Any, object()), messages=original)
+    received: list[AnyMessage] = []
+
+    async def handler(overridden: ModelRequest) -> ModelResponse:
+        received.extend(overridden.messages)
+        return ModelResponse(result=[AIMessage(content="I will review it.")])
+
+    response = await _project_change_notice_middleware(
+        "Bridge design (artifact-1, v2)"
+    ).awrap_model_call(request, handler)
+
+    assert isinstance(response, ModelResponse)
+    assert response.result == [AIMessage(content="I will review it.")]
+    assert request.messages == original
+    assert received[-1] == HumanMessage(
+        content="[System Notification]: Bridge design (artifact-1, v2)"
+    )
+
+
 @pytest.mark.asyncio
 async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_events(
     monkeypatch: pytest.MonkeyPatch,
@@ -56,10 +86,13 @@ async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_ev
     runner._model = cast(Any, object())
     runner._project_files = cast(Any, object())
     runner._plugin_gateway = None
-    runner._settings = cast(Any, SimpleNamespace(
-        agent_recursion_limit=10,
-        enable_foundation_test_tool=False,
-    ))
+    runner._settings = cast(
+        Any,
+        SimpleNamespace(
+            agent_recursion_limit=10,
+            enable_foundation_test_tool=False,
+        ),
+    )
 
     monkeypatch.setattr(
         deep_agent,
@@ -75,15 +108,19 @@ async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_ev
 
 
 @pytest.mark.asyncio
-async def test_agent_artifact_mutations_are_bound_to_a_run_and_require_approval(
+async def test_agent_can_discover_and_load_project_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class ArtifactContext:
+        async def discover(self, *_: object) -> tuple[object, ...]:
+            return ()
+
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
     runner._model = cast(Any, object())
     runner._project_files = cast(Any, object())
     runner._plugin_gateway = None
-    runner._artifacts = cast(Any, object())
+    runner._artifacts = cast(Any, ArtifactContext())
     runner._settings = cast(
         Any,
         SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
@@ -96,24 +133,42 @@ async def test_agent_artifact_mutations_are_bound_to_a_run_and_require_approval(
 
     monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
 
-    await runner._agent_for(
-        "project-1", thread_id="thread-1", run_id="run-1", subject="sam"
-    )
+    await runner._agent_for("project-1", thread_id="thread-1", run_id="run-1", subject="sam")
 
     names = {registered.name for registered in captured["tools"]}
-    assert {
-        "create_foundation_status_artifact",
-        "set_foundation_status_artifact_status",
-    } <= names
-    interrupt_on = captured["interrupt_on"]
-    assert interrupt_on["create_foundation_status_artifact"]["allowed_decisions"] == [
-        "approve",
-        "reject",
-    ]
-    assert interrupt_on["set_foundation_status_artifact_status"]["allowed_decisions"] == [
-        "approve",
-        "reject",
-    ]
+    assert {"discover_project_artifacts", "load_project_artifact"} <= names
+    assert "create_foundation_status_artifact" not in names
+    assert "set_foundation_status_artifact_status" not in names
+
+
+@pytest.mark.asyncio
+async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = object.__new__(PostgresDeepAgentRunner)
+    runner._checkpointer = cast(Any, object())
+    runner._model = cast(Any, object())
+    runner._project_files = cast(Any, object())
+    runner._plugin_gateway = None
+    runner._datasets = cast(Any, object())
+    runner._settings = cast(
+        Any,
+        SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
+    )
+    captured: dict[str, Any] = {}
+
+    def create_agent(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(nodes={})
+
+    monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
+
+    await runner._agent_for("project-1", subject="sam")
+
+    names = {registered.name for registered in captured["tools"]}
+    assert {"discover_project_datasets", "load_project_dataset"} <= names
+    assert "create_project_dataset" in captured["interrupt_on"]
+    assert "create_project_batch_definition" in captured["interrupt_on"]
 
 
 @pytest.mark.asyncio

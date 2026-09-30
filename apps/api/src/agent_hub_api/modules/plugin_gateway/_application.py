@@ -1,12 +1,13 @@
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from langchain_core.tools import BaseTool, StructuredTool
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
+from pydantic import create_model
 
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule
 from agent_hub_api.settings import Settings
@@ -16,6 +17,7 @@ from agent_hub_api.settings import Settings
 class PluginTool:
     name: str
     read_only: bool
+    repeat_safe: bool = False
     description: str = ""
     agent_visible: bool = True
 
@@ -27,6 +29,8 @@ class PluginManifest:
     version: str
     endpoint: str
     tools: tuple[PluginTool, ...]
+    app_resource_uri: str | None = None
+    app_tool_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +50,19 @@ class PluginToolResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PluginUiResource:
+    """A reviewed MCP App HTML resource, ready for a sandboxed host."""
+
+    uri: str
+    html: str
+
+
+@dataclass(frozen=True, slots=True)
 class PluginDiscoveredTool:
     name: str
     description: str
     read_only: bool
+    input_schema: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +97,13 @@ class PluginClient(Protocol):
     async def call_tool(
         self, tool_name: str, arguments: Mapping[str, object]
     ) -> PluginToolResult: ...
+
+    async def read_ui_resource(self, resource_uri: str) -> PluginUiResource: ...
+
+
+PluginResultRecorder = Callable[
+    [PluginManifest, PluginTool, Mapping[str, object], PluginToolResult], Awaitable[None]
+]
 
 
 class PluginGatewayModule:
@@ -150,6 +170,66 @@ class PluginGatewayModule:
         await self._projects.load(access, project_id)
         return await self._call_enabled(project_id, plugin_id, tool_name, arguments)
 
+    async def input_schema(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+    ) -> Mapping[str, object]:
+        """Return an enabled, catalogued tool's discovered ordinary MCP input schema."""
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
+            raise PluginNotEnabled
+        if tool_name not in {tool.name for tool in manifest.tools}:
+            raise PluginToolNotAllowed
+        discovered = {tool.name: tool for tool in await self._discover(manifest)}
+        tool = discovered.get(tool_name)
+        if tool is None or tool.input_schema is None:
+            raise PluginToolNotAllowed
+        return tool.input_schema
+
+    async def batch_call(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> PluginToolResult:
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        tool = next((item for item in manifest.tools if item.name == tool_name), None)
+        if tool is None or not tool.repeat_safe:
+            raise PluginToolNotAllowed("The tool is not approved for batch execution.")
+        return await self._call_enabled(project_id, plugin_id, tool_name, arguments)
+
+    async def read_ui_resource(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        resource_uri: str,
+    ) -> PluginUiResource:
+        """Load only the reviewed App resource of an enabled Plugin."""
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
+            raise PluginNotEnabled
+        if manifest.app_resource_uri != resource_uri:
+            raise PluginToolNotAllowed
+        client = self._clients.get(plugin_id)
+        if client is None:
+            raise PluginNotAvailable
+        return await client.read_ui_resource(resource_uri)
+
     async def _call_enabled(
         self,
         project_id: str,
@@ -169,7 +249,9 @@ class PluginGatewayModule:
             raise PluginNotAvailable
         return await client.call_tool(tool_name, arguments)
 
-    async def agent_tools(self, project_id: str) -> tuple[BaseTool, ...]:
+    async def agent_tools(
+        self, project_id: str, *, on_success: PluginResultRecorder | None = None
+    ) -> tuple[BaseTool, ...]:
         """Return only currently enabled capabilities for an authorized Run.
 
         Agent Transport authorizes the Project before it starts a Run. This
@@ -182,7 +264,14 @@ class PluginGatewayModule:
                 continue
             discovered = {tool.name: tool for tool in await self._discover(manifest)}
             tools.extend(
-                _agent_tool(self, project_id, manifest, plugin_tool, discovered[plugin_tool.name])
+                _agent_tool(
+                    self,
+                    project_id,
+                    manifest,
+                    plugin_tool,
+                    discovered[plugin_tool.name],
+                    on_success,
+                )
                 for plugin_tool in manifest.tools
                 if plugin_tool.agent_visible and plugin_tool.name in discovered
             )
@@ -197,9 +286,7 @@ class PluginGatewayModule:
         if client is None:
             raise PluginNotAvailable
         allowed = {tool.name: tool for tool in manifest.tools}
-        discovered = tuple(
-            tool for tool in await client.discover_tools() if tool.name in allowed
-        )
+        discovered = tuple(tool for tool in await client.discover_tools() if tool.name in allowed)
         self._discoveries[manifest.id] = (now, discovered)
         return discovered
 
@@ -283,30 +370,26 @@ def create_postgres_plugin_gateway(
         name="Foundation fixture",
         version="0.1.0",
         endpoint="http://foundation-fixture:8000/mcp",
+        tools=(PluginTool(name="foundation_status", read_only=True),),
+        app_resource_uri="ui://agent-hub-foundation/status.html",
+        app_tool_names=(),
+    )
+    reference_calculation = PluginManifest(
+        id="reference-calculation",
+        name="Reference calculation",
+        version="0.1.0",
+        endpoint="http://reference-calculation:8000/mcp",
         tools=(
-            PluginTool(name="foundation_status", read_only=True),
-            PluginTool(
-                name="create_status_artifact",
-                read_only=False,
-                agent_visible=False,
-            ),
-            PluginTool(
-                name="validate_status_artifact",
-                read_only=True,
-                agent_visible=False,
-            ),
-            PluginTool(
-                name="set_status_artifact_status",
-                read_only=False,
-                agent_visible=False,
-            ),
+            PluginTool(name="calculate_cantilever_tip_load", read_only=False, repeat_safe=True),
         ),
+        app_resource_uri="ui://agent-hub-reference-calculation/cantilever.html",
+        app_tool_names=(),
     )
     from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
 
     return PluginGatewayModule(
         projects,
-        catalog=(fixture,),
+        catalog=(fixture, reference_calculation),
         enablements=PostgresPluginEnablementStore(settings),
         clients={
             fixture.id: McpPluginClient(
@@ -314,7 +397,13 @@ def create_postgres_plugin_gateway(
                 timeout_seconds=settings.plugin_tool_timeout_seconds,
                 max_result_bytes=settings.plugin_result_max_bytes,
                 allow_private_network=True,
-            )
+            ),
+            reference_calculation.id: McpPluginClient(
+                endpoint=reference_calculation.endpoint,
+                timeout_seconds=settings.plugin_tool_timeout_seconds,
+                max_result_bytes=settings.plugin_result_max_bytes,
+                allow_private_network=True,
+            ),
         },
         discovery_cache_seconds=settings.plugin_discovery_cache_seconds,
     )
@@ -326,17 +415,20 @@ def _agent_tool(
     manifest: PluginManifest,
     plugin_tool: PluginTool,
     discovered: PluginDiscoveredTool,
+    on_success: PluginResultRecorder | None,
 ) -> BaseTool:
-    async def invoke() -> str:
+    async def invoke(**arguments: object) -> str:
         try:
             result = await gateway._call_enabled(
                 project_id,
                 manifest.id,
                 plugin_tool.name,
-                {},
+                arguments,
             )
         except Exception as error:
             return f"Plugin tool failed: {error}"
+        if result.structured_content is not None and on_success is not None:
+            await on_success(manifest, plugin_tool, arguments, result)
         if result.content:
             return "\n".join(result.content)
         return json.dumps(result.structured_content, sort_keys=True)
@@ -347,4 +439,24 @@ def _agent_tool(
         description=discovered.description
         or plugin_tool.description
         or f"Run {plugin_tool.name} from {manifest.name}.",
+        args_schema=_input_model(manifest, plugin_tool, discovered),
     )
+
+
+def _input_model(
+    manifest: PluginManifest, plugin_tool: PluginTool, discovered: PluginDiscoveredTool
+) -> type[Any]:
+    schema = discovered.input_schema or {}
+    declared_required = schema.get("required", [])
+    required = set(declared_required) if isinstance(declared_required, list) else set()
+    properties = schema.get("properties", {})
+    fields: dict[str, tuple[type[object], object]] = {}
+    if isinstance(properties, Mapping):
+        for name, definition in properties.items():
+            if not isinstance(name, str) or not isinstance(definition, Mapping):
+                continue
+            value_type = {"number": float, "integer": int, "boolean": bool}.get(
+                definition.get("type"), str
+            )
+            fields[name] = (value_type, ... if name in required else None)
+    return create_model(f"{manifest.id}_{plugin_tool.name}_Input", **fields)

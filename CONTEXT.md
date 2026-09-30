@@ -60,6 +60,34 @@ _Avoid_: Payload, plugin state
 The domain-specific part of an artifact document whose schema and semantics are owned by its plugin.
 _Avoid_: Envelope, host metadata
 
+**Tool Result Snapshot**:
+The canonical, serializable inputs and structured output from one successful MCP tool invocation, saved as an Artifact Payload. It excludes transient MCP App UI state and unsuccessful tool calls.
+_Avoid_: MCP server state, tool transcript
+
+**Dataset**:
+A durable Project-owned ordered collection of JSON-object Dataset Records. A Dataset is an operational input, not an Artifact or generic Project File.
+_Avoid_: Spreadsheet, artifact, file
+
+**Dataset Record**:
+One host-identified JSON-object entry in a Dataset. A source key may be retained for user traceability but does not replace the host-issued ID.
+_Avoid_: Row, artifact, file
+
+**Batch Definition**:
+A durable Project-owned mapping from values in one Dataset Record to the ordinary JSON arguments of one catalogue-approved MCP tool. It is reusable configuration, not a Batch Run or a Plugin protocol.
+_Avoid_: Workflow, pipeline, plugin port
+
+**Batch Run**:
+One bounded execution of a Batch Definition over a captured Dataset selection. It owns progress, policy, initiator provenance, idempotency, and the immutable input snapshot independently of a browser or agent connection.
+_Avoid_: Agent Run, workflow, plugin job
+
+**Result Set**:
+The durable, queryable collection of outcomes produced by one Batch Run. It may be incomplete when one or more invocations fail.
+_Avoid_: Artifact, Dataset, tool transcript
+
+**Result Record**:
+One Result Set entry, retaining normalized input and complete structured output or failure for the captured Dataset Record.
+_Avoid_: Dataset Record, log line
+
 **Virtual Filesystem**:
 The project-shared hierarchical working state available to agents without providing access to the user's computer filesystem.
 _Avoid_: Local filesystem, user filesystem, thread filesystem

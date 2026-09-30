@@ -10,6 +10,7 @@ from agent_hub_api.modules.plugin_gateway._application import (
     PluginTool,
     PluginToolNotAllowed,
     PluginToolResult,
+    PluginUiResource,
     PostgresPluginEnablementStore,
     create_postgres_plugin_gateway,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "PluginTool",
     "PluginToolNotAllowed",
     "PluginToolResult",
+    "PluginUiResource",
     "PluginTransportError",
     "create_postgres_plugin_gateway",
     "create_plugin_gateway_router",

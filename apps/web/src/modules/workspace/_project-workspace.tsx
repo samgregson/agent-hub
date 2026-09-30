@@ -10,14 +10,9 @@ import {
 } from "react";
 
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
-import {
-  ArtifactCatalog,
-  ArtifactDocumentPreview,
-} from "@/modules/artifact-view-host";
-import {
-  ProjectFileCatalog,
-  ProjectFilePreview,
-} from "@/modules/project-files";
+import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
+import { DatasetCatalog } from "@/modules/datasets";
+import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
 import { Menu, MenuItem } from "@/shared/ui";
 
@@ -43,10 +38,13 @@ import {
   createWorkspaceState,
   workspaceReducer,
 } from "./_state";
+import { WorkCatalog } from "./_work-catalog";
 
 const activityLabels = {
-  artifacts: "Artifacts",
+  artifacts: "Work",
+  batchDefinitions: "Batch Definitions",
   chats: "Chats",
+  datasets: "Datasets",
   plugins: "Plugins",
   sources: "Sources",
 } as const;
@@ -113,6 +111,12 @@ export function ProjectWorkspace() {
     ? workspace.projects[workspace.selectedProjectId]
     : undefined;
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
+  const isExplorerActivity = [
+    "batchDefinitions",
+    "datasets",
+    "plugins",
+    "sources",
+  ].includes(selectedActivity);
   const selectedThreads = workspace.selectedProjectId
     ? (threadsByProject[workspace.selectedProjectId] ?? [])
     : [];
@@ -283,7 +287,7 @@ export function ProjectWorkspace() {
 
   return (
     <main
-      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""}`}
+      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""}`}
     >
       <header className={styles.titlebar}>
         <span aria-hidden="true" className={styles.mark}>
@@ -310,7 +314,7 @@ export function ProjectWorkspace() {
               <option value="">No Project selected</option>
               {projects.map((project) => (
                 <option key={project.id} value={project.id}>
-                  {project.name}
+                  {project.name} · {project.id.slice(0, 8)}
                 </option>
               ))}
               <option value="new-project">New Project…</option>
@@ -402,7 +406,7 @@ export function ProjectWorkspace() {
             title={activityLabels[view]}
             type="button"
           >
-            {activityLabels[view].slice(0, 1)}
+            {activityLabels[view]}
           </button>
         ))}
       </nav>
@@ -537,16 +541,18 @@ export function ProjectWorkspace() {
         >
           Back to chat
         </button>
-        {selectedProject &&
-        selectedWorkspace?.selectedArtifactId ? (
+        {selectedProject && selectedWorkspace?.selectedArtifactId ? (
           <ArtifactDocumentPreview
             artifactId={selectedWorkspace.selectedArtifactId}
             projectId={selectedProject.id}
           />
         ) : selectedProject &&
-        selectedWorkspace?.selectedFilePath &&
-        selectedWorkspace.selectedScratchThreadId ? (
+          selectedWorkspace?.selectedFilePath &&
+          selectedWorkspace.selectedScratchThreadId ? (
           <ScratchFilePreview
+            onSavedToProject={(path) =>
+              dispatch({ path, type: "openProjectFile" })
+            }
             path={selectedWorkspace.selectedFilePath}
             projectId={selectedProject.id}
             threadId={selectedWorkspace.selectedScratchThreadId}
@@ -558,10 +564,10 @@ export function ProjectWorkspace() {
           />
         ) : (
           <>
-            <strong>Artifact workspace</strong>
+            <strong>Work preview</strong>
             <p>
-              Project file previews open here. MCP App hosting arrives in Slice
-              7.
+              Open a Project file, an Artifact, or a Thread-local scratch file
+              to inspect it here.
             </p>
           </>
         )}
@@ -618,23 +624,36 @@ function ProjectNavigator({
                 >
                   {thread.title}
                 </button>
-                <Menu label={`${thread.title} actions`}>
-                  <MenuItem onSelect={() => onRenameThread(thread)}>
-                    Rename
-                  </MenuItem>
-                  <MenuItem destructive onSelect={() => onDeleteThread(thread)}>
-                    Delete
-                  </MenuItem>
-                </Menu>
+                <div className={styles.itemActions}>
+                  <Menu label={`${thread.title} actions`}>
+                    <MenuItem onSelect={() => onRenameThread(thread)}>
+                      Rename
+                    </MenuItem>
+                    <MenuItem
+                      destructive
+                      onSelect={() => onDeleteThread(thread)}
+                    >
+                      Delete
+                    </MenuItem>
+                  </Menu>
+                </div>
               </div>
             ))}
           </div>
         </>
       ) : selectedActivity === "artifacts" && project ? (
-        <>
-          <ArtifactCatalog onOpen={onOpenArtifact} projectId={project.id} />
-          <ProjectFileCatalog onOpen={onOpenProjectFile} projectId={project.id} />
-        </>
+        <WorkCatalog
+          onOpenArtifact={onOpenArtifact}
+          onOpenProjectFile={onOpenProjectFile}
+          projectId={project.id}
+        />
+      ) : (selectedActivity === "datasets" ||
+          selectedActivity === "batchDefinitions") &&
+        project ? (
+        <DatasetCatalog
+          mode={selectedActivity === "datasets" ? "datasets" : "definitions"}
+          projectId={project.id}
+        />
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />
       ) : (

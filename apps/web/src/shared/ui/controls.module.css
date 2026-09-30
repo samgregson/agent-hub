@@ -1,0 +1,49 @@
+.button {
+  min-height: var(--control-height);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  cursor: pointer;
+  font-size: var(--font-size-label);
+  padding: 0 var(--space-3);
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 800;
+}
+
+.danger {
+  border-color: var(--danger-border);
+  background: transparent;
+  color: var(--danger);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.field input,
+.field textarea,
+.field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font:
+    var(--font-size-label) ui-monospace,
+    monospace;
+  padding: var(--space-2);
+}

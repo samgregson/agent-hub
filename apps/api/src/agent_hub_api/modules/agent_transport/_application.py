@@ -12,6 +12,7 @@ from agent_hub_api.modules.agent_execution import (
     InvalidAgentRunResume,
     ScratchFile,
 )
+from agent_hub_api.modules.project_files import ProjectFile, ProjectFileAccess, ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ThreadNotFound
 
 
@@ -44,9 +45,15 @@ class InvalidAgentTransportResume(Exception):
 class AgentTransportModule:
     """Own project authorization and durable execution behind the AG-UI seam."""
 
-    def __init__(self, projects: ProjectModule, execution: AgentExecutionModule) -> None:
+    def __init__(
+        self,
+        projects: ProjectModule,
+        execution: AgentExecutionModule,
+        project_files: ProjectFilesModule,
+    ) -> None:
         self._projects = projects
         self._execution = execution
+        self._project_files = project_files
 
     async def list_runs(self, access: AgentThreadAccess) -> tuple[AgentRun, ...]:
         await self._authorize(access)
@@ -62,6 +69,18 @@ class AgentTransportModule:
         await self._authorize(access)
         return await self._execution.load_scratch_file(
             access.thread_id, project_id=access.project_id, path=path
+        )
+
+    async def save_scratch_to_project(
+        self, access: AgentThreadAccess, source_path: str, destination_path: str
+    ) -> ProjectFile:
+        """Copy one authorized Thread-local file into a new Project file."""
+        scratch = await self.load_scratch_file(access, source_path)
+        return await self._project_files.create_visible(
+            ProjectFileAccess(subject=access.subject),
+            access.project_id,
+            destination_path,
+            scratch.content,
         )
 
     async def start(

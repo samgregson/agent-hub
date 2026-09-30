@@ -3,12 +3,47 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Foundation status</title>
+    <title>Foundation fixture</title>
+    <style>
+      :root { color: #e9f0e7; background: #152018; font-family: system-ui, sans-serif; }
+      body { display: grid; margin: 0; min-height: 100vh; place-items: center; }
+      main { max-width: 30rem; padding: 2rem; }
+      p { color: #b8c8b7; line-height: 1.5; }
+      strong { color: #b9e982; }
+    </style>
   </head>
   <body>
     <main>
-      <h1>Foundation fixture available</h1>
-      <p>This portable MCP App is served by the FastMCP fixture.</p>
+      <strong>Foundation fixture</strong>
+      <h1>MCP App connection verified</h1>
+      <p>This deliberately small App verifies resource discovery and sandboxed rendering.</p>
     </main>
+    <script>
+      let nextId = 1;
+      const pending = new Map();
+      function request(method, params) {
+        const id = nextId++;
+        window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+        return new Promise((resolve) => pending.set(id, resolve));
+      }
+      window.addEventListener("message", (event) => {
+        const message = event.data;
+        if (event.source === window.parent && message?.id && pending.has(message.id)) {
+          pending.get(message.id)(message.result);
+          pending.delete(message.id);
+        }
+      });
+      (async () => {
+        await request("ui/initialize", {
+          appInfo: { name: "Foundation fixture", version: "0.1.0" },
+          appCapabilities: {},
+          protocolVersion: "2026-01-26",
+        });
+        window.parent.postMessage(
+          { jsonrpc: "2.0", method: "ui/notifications/initialized" },
+          "*",
+        );
+      })();
+    </script>
   </body>
 </html>

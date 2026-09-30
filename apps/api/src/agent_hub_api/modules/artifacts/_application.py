@@ -11,6 +11,7 @@ from agent_hub_api.contracts import ArtifactDocument, ArtifactProvenanceActor
 from agent_hub_api.modules.plugin_gateway import (
     PluginSelection,
     PluginToolResult,
+    PluginUiResource,
 )
 from agent_hub_api.modules.project_files import ARTIFACT_ROOT
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
@@ -38,6 +39,7 @@ class ArtifactUserActionAccess(ArtifactAccess):
 
 
 ArtifactWriteAccess = ArtifactMutationAccess | ArtifactUserActionAccess
+
 
 @dataclass(frozen=True, slots=True)
 class ArtifactDraft:
@@ -81,6 +83,10 @@ class ArtifactPluginReplacementInvalid(Exception):
     """The Plugin did not return a usable portable Artifact replacement."""
 
 
+class ArtifactAppUnavailable(Exception):
+    """The Artifact's reviewed MCP App cannot be safely rendered."""
+
+
 class ArtifactPluginGateway(Protocol):
     async def selections(
         self, access: ProjectAccess, project_id: str
@@ -95,6 +101,14 @@ class ArtifactPluginGateway(Protocol):
         arguments: Mapping[str, object],
     ) -> PluginToolResult: ...
 
+    async def read_ui_resource(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        resource_uri: str,
+    ) -> PluginUiResource: ...
+
 
 class ArtifactStore(Protocol):
     async def create(self, record: ArtifactRecord) -> ArtifactRecord: ...
@@ -106,6 +120,8 @@ class ArtifactStore(Protocol):
     async def replace(
         self, project_id: str, artifact_id: str, document: ArtifactDocument
     ) -> ArtifactRecord | None: ...
+
+    async def delete(self, project_id: str, artifact_id: str) -> bool: ...
 
 
 class ArtifactModule:
@@ -146,6 +162,33 @@ class ArtifactModule:
             }
         )
         return (await self._store.create(ArtifactRecord(project_id, document))).document
+
+    async def create_tool_result_snapshot(
+        self,
+        access: ArtifactMutationAccess,
+        project_id: str,
+        *,
+        plugin_id: str,
+        plugin_version: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+        structured_content: Mapping[str, object],
+    ) -> ArtifactDocument:
+        """Persist one successful ordinary MCP invocation as a Tool Result Snapshot."""
+        return await self.create(
+            access,
+            project_id,
+            ArtifactDraft(
+                type=f"{plugin_id}.{tool_name}",
+                title=f"{plugin_id}: {tool_name}",
+                plugin_id=plugin_id,
+                plugin_version=plugin_version,
+                schema_id="agent-hub.tool-result-snapshot",
+                schema_version="1.0",
+                payload={"input": dict(arguments), "output": dict(structured_content)},
+                summary="Successful MCP tool result snapshot.",
+            ),
+        )
 
     async def create_from_plugin(
         self,
@@ -218,6 +261,52 @@ class ArtifactModule:
             replacement,
         )
 
+    async def app_resource(
+        self, access: ArtifactAccess, project_id: str, artifact_id: str
+    ) -> PluginUiResource:
+        """Resolve the single reviewed App resource for an authorized Artifact."""
+        current = await self.load(access, project_id, artifact_id)
+        selection = await self._enabled_plugin(access, project_id, current.artifact.plugin.id)
+        if (
+            selection.manifest.version != current.artifact.plugin.version
+            or selection.manifest.app_resource_uri is None
+        ):
+            raise ArtifactAppUnavailable
+        assert self._plugin_gateway is not None
+        try:
+            return await self._plugin_gateway.read_ui_resource(
+                ProjectAccess(subject=access.subject),
+                project_id,
+                selection.manifest.id,
+                selection.manifest.app_resource_uri,
+            )
+        except Exception as error:
+            raise ArtifactAppUnavailable from error
+
+    async def apply_app_operation(
+        self,
+        access: ArtifactUserActionAccess,
+        project_id: str,
+        artifact_id: str,
+        *,
+        expected_version: int,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> ArtifactDocument:
+        """Apply the narrowly allowed semantic operation requested by a mounted App."""
+        current = await self.load(access, project_id, artifact_id)
+        selection = await self._enabled_plugin(access, project_id, current.artifact.plugin.id)
+        if tool_name not in selection.manifest.app_tool_names:
+            raise ArtifactAppUnavailable
+        return await self.apply_plugin_operation(
+            access,
+            project_id,
+            artifact_id,
+            expected_version=expected_version,
+            tool_name=tool_name,
+            arguments=arguments,
+        )
+
     async def load(
         self, access: ArtifactAccess, project_id: str, artifact_id: str
     ) -> ArtifactDocument:
@@ -232,6 +321,11 @@ class ArtifactModule:
     ) -> tuple[ArtifactDocument, ...]:
         await self._authorize(access, project_id)
         return tuple(record.document for record in await self._store.list(project_id))
+
+    async def delete(self, access: ArtifactAccess, project_id: str, artifact_id: str) -> None:
+        await self._authorize(access, project_id)
+        if not await self._store.delete(project_id, artifact_id):
+            raise ArtifactNotFound
 
     async def replace(
         self,
@@ -374,9 +468,7 @@ class MemoryArtifactStore:
 
     async def list(self, project_id: str) -> Sequence[ArtifactRecord]:
         return tuple(
-            record
-            for (owner, _), record in sorted(self._records.items())
-            if owner == project_id
+            record for (owner, _), record in sorted(self._records.items()) if owner == project_id
         )
 
     async def replace(
@@ -388,6 +480,9 @@ class MemoryArtifactStore:
         record = ArtifactRecord(project_id, document)
         self._records[key] = record
         return record
+
+    async def delete(self, project_id: str, artifact_id: str) -> bool:
+        return self._records.pop((project_id, artifact_id), None) is not None
 
 
 class PostgresArtifactStore:
@@ -457,6 +552,28 @@ class PostgresArtifactStore:
                 ),
             )
         return record
+
+    async def delete(self, project_id: str, artifact_id: str) -> bool:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """
+                DELETE FROM artifact_catalog
+                WHERE project_id = %s AND artifact_id = %s
+                RETURNING path
+                """,
+                (project_id, artifact_id),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return False
+            path = row["path"]
+            assert isinstance(path, str)
+            await connection.execute(
+                "DELETE FROM project_files WHERE project_id = %s AND path = %s",
+                (project_id, path),
+            )
+            return True
 
     async def load(self, project_id: str, artifact_id: str) -> ArtifactRecord | None:
         connection = await self._connect()

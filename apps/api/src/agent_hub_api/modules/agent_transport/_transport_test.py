@@ -25,6 +25,7 @@ from agent_hub_api.modules.agent_transport import (
     create_agent_transport_router,
 )
 from agent_hub_api.modules.identity import create_identity_module
+from agent_hub_api.modules.project_files import create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.settings import Settings
 
@@ -104,7 +105,11 @@ async def test_agent_stream_requires_owned_matching_thread() -> None:
     app.include_router(
         create_agent_transport_router(
             create_identity_module(settings),
-            AgentTransportModule(projects, create_memory_agent_execution(DeterministicRunner())),
+            AgentTransportModule(
+                projects,
+                create_memory_agent_execution(DeterministicRunner()),
+                create_memory_project_files(projects),
+            ),
         ),
         prefix="/api",
     )
@@ -127,7 +132,11 @@ async def test_agent_stream_requires_owned_matching_thread() -> None:
     bob_app.include_router(
         create_agent_transport_router(
             create_identity_module(bob_settings),
-            AgentTransportModule(projects, create_memory_agent_execution(DeterministicRunner())),
+            AgentTransportModule(
+                projects,
+                create_memory_agent_execution(DeterministicRunner()),
+                create_memory_project_files(projects),
+            ),
         ),
         prefix="/api",
     )
@@ -158,7 +167,9 @@ async def test_history_returns_pending_interrupts_for_approval_restoration() -> 
         create_agent_transport_router(
             create_identity_module(settings),
             AgentTransportModule(
-                projects, create_memory_agent_execution(InterruptedHistoryRunner())
+                projects,
+                create_memory_agent_execution(InterruptedHistoryRunner()),
+                create_memory_project_files(projects),
             ),
         ),
         prefix="/api",
@@ -190,7 +201,11 @@ async def test_scratch_preview_is_thread_scoped_and_never_uses_project_file_stor
     app.include_router(
         create_agent_transport_router(
             create_identity_module(settings),
-            AgentTransportModule(projects, create_memory_agent_execution(runner)),
+            AgentTransportModule(
+                projects,
+                create_memory_agent_execution(runner),
+                create_memory_project_files(projects),
+            ),
         ),
         prefix="/api",
     )
@@ -211,3 +226,47 @@ async def test_scratch_preview_is_thread_scoped_and_never_uses_project_file_stor
         "content": "# Working check\nNot durable",
     }
     assert wrong_scope.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_direct_user_can_save_scratch_to_a_new_project_file() -> None:
+    settings = Settings(environment="test", fixed_identity_subject="subject-a")
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="subject-a")
+    project = await projects.create(access, "First")
+    thread = await projects.create_thread(access, project.id, "Conversation")
+    files = create_memory_project_files(projects)
+    app = FastAPI()
+    app.include_router(
+        create_agent_transport_router(
+            create_identity_module(settings),
+            AgentTransportModule(
+                projects,
+                create_memory_agent_execution(ScratchPreviewRunner()),
+                files,
+            ),
+        ),
+        prefix="/api",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        saved = await client.post(
+            f"/api/projects/{project.id}/threads/{thread.id}/scratch/save",
+            json={
+                "destinationPath": "/project/checks/foundation.md",
+                "sourcePath": "/scratch/check.md",
+            },
+        )
+        duplicate = await client.post(
+            f"/api/projects/{project.id}/threads/{thread.id}/scratch/save",
+            json={
+                "destinationPath": "/project/checks/foundation.md",
+                "sourcePath": "/scratch/check.md",
+            },
+        )
+
+    assert saved.status_code == 200
+    assert saved.json() == {"path": "/project/checks/foundation.md", "version": 1}
+    saved_file = await files.load(project.id, "/checks/foundation.md")
+    assert saved_file.content == "# Working check\nNot durable"
+    assert duplicate.status_code == 409

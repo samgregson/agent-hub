@@ -1,4 +1,5 @@
-from collections.abc import AsyncIterator
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -6,7 +7,14 @@ from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
 from deepagents import create_deep_agent
 from deepagents.middleware.filesystem import FilesystemPermission
-from langchain.agents.middleware import InterruptOnConfig
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    InterruptOnConfig,
+    ModelRequest,
+    ModelResponse,
+    wrap_model_call,
+)
+from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -23,9 +31,11 @@ from agent_hub_api.modules.agent_execution._execution import (
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
-from agent_hub_api.modules.artifacts import ArtifactModule, ArtifactMutationAccess
+from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
+from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
+from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.settings import Settings
 
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
@@ -41,6 +51,10 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Creating or changing a Project Artifact also requires user approval. When the "
         "requested Artifact title or status is clear, call the Artifact tool without asking "
         "for approval in chat first; the approval card is shown automatically.",
+        "Datasets and Batch Definitions are durable Project records, not JSON Project files. "
+        "When a user asks to save, inspect, or change one, use the Project Dataset tools. "
+        "Do not write a Dataset as a JSON file under /project. Dataset and Batch Definition "
+        "mutations use the approval card automatically.",
         "Never claim access to the host filesystem. When referring to a virtual file in "
         "a response, link it as Markdown using its absolute /project or /scratch path.",
     )
@@ -58,6 +72,26 @@ def _project_file_permissions() -> list[FilesystemPermission]:
     return [FilesystemPermission(operations=["write"], paths=["/project/**"], mode="interrupt")]
 
 
+def _project_change_notice_middleware(change_notice: str) -> AgentMiddleware[Any, Any]:
+    """Add an out-of-band Project change notice to each model call only."""
+
+    @wrap_model_call
+    async def inject_project_change_notice(
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], Awaitable[ModelResponse]],
+    ) -> ModelResponse:
+        return await handler(
+            request.override(
+                messages=[
+                    *request.messages,
+                    HumanMessage(content=f"[System Notification]: {change_notice}"),
+                ]
+            )
+        )
+
+    return inject_project_change_notice
+
+
 class PostgresDeepAgentRunner:
     """Lazily owns the Deep Agent and its long-lived PostgreSQL checkpointer."""
 
@@ -67,11 +101,13 @@ class PostgresDeepAgentRunner:
         project_files: ProjectFilesModule,
         plugin_gateway: PluginGatewayModule | None = None,
         artifacts: ArtifactModule | None = None,
+        datasets: DatasetModule | None = None,
     ) -> None:
         self._settings = settings
         self._project_files = project_files
         self._plugin_gateway = plugin_gateway
         self._artifacts = artifacts
+        self._datasets = datasets
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
@@ -109,45 +145,63 @@ class PostgresDeepAgentRunner:
         thread_id: str | None = None,
         run_id: str | None = None,
         subject: str | None = None,
+        change_notice: str | None = None,
     ) -> AgentHubLangGraphAgent:
         assert self._checkpointer is not None
         assert self._model is not None
         tools = [foundation_protected_action] if self._settings.enable_foundation_test_tool else []
         if self._plugin_gateway is not None:
-            tools.extend(await self._plugin_gateway.agent_tools(project_id))
+            tools.extend(
+                await self._plugin_gateway.agent_tools(
+                    project_id,
+                    on_success=self._snapshot_recorder(project_id, thread_id, run_id, subject),
+                )
+            )
         artifacts = getattr(self, "_artifacts", None)
-        has_artifact_context = (
-            artifacts is not None
-            and thread_id is not None
-            and run_id is not None
-            and subject is not None
-        )
+        has_artifact_context = artifacts is not None and subject is not None
         if has_artifact_context:
             assert artifacts is not None
-            assert thread_id is not None
-            assert run_id is not None
             assert subject is not None
-            tools.extend(self._artifact_tools(artifacts, project_id, thread_id, run_id, subject))
+            tools.extend(self._artifact_tools(artifacts, project_id, subject))
+        datasets = getattr(self, "_datasets", None)
+        if datasets is not None and subject is not None:
+            tools.extend(self._dataset_tools(datasets, project_id, subject))
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
                 {
-                "foundation_protected_action": {
-                    "allowed_decisions": ["approve", "reject"],
-                    "description": "Run the harmless foundation approval test action?",
-                }
+                    "foundation_protected_action": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Run the harmless foundation approval test action?",
+                    }
                 }
             )
-        if has_artifact_context:
+        if datasets is not None and subject is not None:
             interrupt_on.update(
                 {
-                    "create_foundation_status_artifact": {
+                    "create_project_dataset": {
                         "allowed_decisions": ["approve", "reject"],
-                        "description": "Create this Project Artifact?",
+                        "description": "Create the proposed Project Dataset?",
                     },
-                    "set_foundation_status_artifact_status": {
+                    "delete_project_dataset": {
                         "allowed_decisions": ["approve", "reject"],
-                        "description": "Change this Project Artifact?",
+                        "description": "Delete the proposed Project Dataset?",
+                    },
+                    "update_project_dataset": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Update the proposed Project Dataset?",
+                    },
+                    "create_project_batch_definition": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Create the proposed Batch Definition?",
+                    },
+                    "delete_project_batch_definition": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Delete the proposed Batch Definition?",
+                    },
+                    "update_project_batch_definition": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Update the proposed Batch Definition?",
                     },
                 }
             )
@@ -159,6 +213,11 @@ class PostgresDeepAgentRunner:
             permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),
             checkpointer=self._checkpointer,
+            middleware=(
+                [_project_change_notice_middleware(change_notice)]
+                if change_notice is not None
+                else []
+            ),
         )
         agent = AgentHubLangGraphAgent(
             name="agent-hub",
@@ -169,48 +228,187 @@ class PostgresDeepAgentRunner:
         )
         return agent
 
+    def _snapshot_recorder(
+        self, project_id: str, thread_id: str | None, run_id: str | None, subject: str | None
+    ):
+        if self._artifacts is None or thread_id is None or run_id is None or subject is None:
+            return None
+
+        async def record(manifest, tool, arguments, result) -> None:
+            if result.structured_content is None:
+                return
+            await self._artifacts.create_tool_result_snapshot(
+                ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id),
+                project_id,
+                plugin_id=manifest.id,
+                plugin_version=manifest.version,
+                tool_name=tool.name,
+                arguments=arguments,
+                structured_content=result.structured_content,
+            )
+
+        return record
+
     @staticmethod
-    def _artifact_tools(
-        artifacts: ArtifactModule, project_id: str, thread_id: str, run_id: str, subject: str
-    ) -> list[BaseTool]:
-        access = ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id)
+    def _artifact_tools(artifacts: ArtifactModule, project_id: str, subject: str) -> list[BaseTool]:
+        @tool
+        async def discover_project_artifacts() -> str:
+            """List compact summaries of Artifacts in this Project on demand."""
+            documents = await artifacts.discover(ArtifactAccess(subject=subject), project_id)
+            return json.dumps(
+                [
+                    {
+                        "id": document.artifact.id.root,
+                        "title": document.artifact.title,
+                        "type": document.artifact.type,
+                        "version": document.artifact.document_version,
+                    }
+                    for document in documents
+                ]
+            )
 
         @tool
-        async def create_foundation_status_artifact(title: str) -> str:
-            """Create a Foundation status Artifact in the selected Project."""
-            document = await artifacts.create_from_plugin(
-                access,
-                project_id,
-                plugin_id="foundation-fixture",
-                tool_name="create_status_artifact",
-                arguments={"title": title},
+        async def load_project_artifact(artifact_id: str) -> str:
+            """Load one Project Artifact by ID when its complete document is needed."""
+            document = await artifacts.load(
+                ArtifactAccess(subject=subject), project_id, artifact_id
+            )
+            return document.model_dump_json(by_alias=True)
+
+        return [discover_project_artifacts, load_project_artifact]
+
+    @staticmethod
+    def _dataset_tools(datasets: DatasetModule, project_id: str, subject: str) -> list[BaseTool]:
+        access = ProjectAccess(subject=subject)
+
+        @tool
+        async def discover_project_datasets() -> str:
+            """List compact Dataset and Batch Definition summaries on demand."""
+            available = {dataset.id for dataset in await datasets.list_datasets(access, project_id)}
+            definitions = await datasets.list_definitions(access, project_id)
+            return json.dumps(
+                {
+                    "datasets": [
+                        {
+                            "id": dataset.id,
+                            "name": dataset.name,
+                            "recordCount": len(dataset.records),
+                        }
+                        for dataset in await datasets.list_datasets(access, project_id)
+                    ],
+                    "batchDefinitions": [
+                        {
+                            "id": definition.id,
+                            "name": definition.name,
+                            "datasetId": definition.dataset_id,
+                            "datasetAvailable": definition.dataset_id in available,
+                            "tool": f"{definition.plugin_id}.{definition.tool_name}",
+                        }
+                        for definition in definitions
+                    ],
+                }
+            )
+
+        @tool
+        async def load_project_dataset(dataset_id: str) -> str:
+            """Load one Dataset, including stable Record IDs, when details are needed."""
+            dataset = await datasets.load_dataset(access, project_id, dataset_id)
+            return json.dumps(
+                {
+                    "id": dataset.id,
+                    "name": dataset.name,
+                    "records": [
+                        {"id": record.id, "sourceKey": record.source_key, "value": record.value}
+                        for record in dataset.records
+                    ],
+                }
+            )
+
+        @tool
+        async def create_project_dataset(name: str, records_json: str) -> str:
+            """Create a Dataset from a JSON array of Records after user approval."""
+            dataset = await datasets.create_dataset(
+                access, project_id, name, _dataset_records(records_json)
             )
             return (
-                f"Created Project Artifact '{document.artifact.title}' "
-                f"({document.artifact.id.root})."
+                f"Created Dataset {dataset.name} ({dataset.id}) "
+                f"with {len(dataset.records)} Records."
             )
 
         @tool
-        async def set_foundation_status_artifact_status(
-            artifact_id: str,
-            expected_version: int,
-            status: str,
+        async def delete_project_dataset(dataset_id: str) -> str:
+            """Delete one Dataset after user approval; dependent Definitions become unavailable."""
+            await datasets.delete_dataset(access, project_id, dataset_id)
+            return f"Deleted Dataset {dataset_id}."
+
+        @tool
+        async def update_project_dataset(dataset_id: str, name: str, records_json: str) -> str:
+            """Update a Dataset's name and Records after user approval."""
+            dataset = await datasets.update_dataset(
+                access, project_id, dataset_id, name, _dataset_records(records_json)
+            )
+            return f"Updated Dataset {dataset.name} ({dataset.id})."
+
+        @tool
+        async def create_project_batch_definition(
+            dataset_id: str,
+            name: str,
+            plugin_id: str,
+            tool_name: str,
+            argument_mappings_json: str,
         ) -> str:
-            """Set a Foundation status Artifact to available or unavailable."""
-            document = await artifacts.apply_plugin_operation(
+            """Create a schema-validated Batch Definition after user approval."""
+            try:
+                mappings = json.loads(argument_mappings_json)
+            except json.JSONDecodeError as error:
+                raise ValueError("Argument mappings must be a JSON object.") from error
+            if not isinstance(mappings, dict) or not all(
+                isinstance(key, str) and isinstance(value, str) for key, value in mappings.items()
+            ):
+                raise ValueError("Argument mappings must map argument names to JSON Pointers.")
+            definition = await datasets.create_definition(
+                access, project_id, dataset_id, name, plugin_id, tool_name, mappings
+            )
+            return f"Created Batch Definition {definition.name} ({definition.id})."
+
+        @tool
+        async def delete_project_batch_definition(definition_id: str) -> str:
+            """Delete one Batch Definition after user approval."""
+            await datasets.delete_definition(access, project_id, definition_id)
+            return f"Deleted Batch Definition {definition_id}."
+
+        @tool
+        async def update_project_batch_definition(
+            definition_id: str,
+            dataset_id: str,
+            name: str,
+            plugin_id: str,
+            tool_name: str,
+            argument_mappings_json: str,
+        ) -> str:
+            """Update a schema-validated Batch Definition after user approval."""
+            definition = await datasets.update_definition(
                 access,
                 project_id,
-                artifact_id,
-                expected_version=expected_version,
-                tool_name="set_status_artifact_status",
-                arguments={"status": status},
+                definition_id,
+                dataset_id,
+                name,
+                plugin_id,
+                tool_name,
+                _argument_mappings(argument_mappings_json),
             )
-            return (
-                f"Updated Project Artifact '{document.artifact.title}' "
-                f"to version {document.artifact.document_version}."
-            )
+            return f"Updated Batch Definition {definition.name} ({definition.id})."
 
-        return [create_foundation_status_artifact, set_foundation_status_artifact_status]
+        return [
+            discover_project_datasets,
+            load_project_dataset,
+            create_project_dataset,
+            delete_project_dataset,
+            update_project_dataset,
+            create_project_batch_definition,
+            delete_project_batch_definition,
+            update_project_batch_definition,
+        ]
 
     async def close(self) -> None:
         if self._stack is not None:
@@ -223,16 +421,37 @@ class PostgresDeepAgentRunner:
         self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
     ) -> AsyncIterator[BaseEvent]:
         await self.open()
+        change_notice = await self._project_change_notice(input_data, project_id, subject)
         request_agent = (
             await self._agent_for(
                 project_id,
                 thread_id=input_data.thread_id,
                 run_id=input_data.run_id,
                 subject=subject,
+                change_notice=change_notice,
             )
         ).clone()
         async for event in request_agent.run(input_data):
             yield event
+
+    async def _project_change_notice(
+        self, input_data: RunAgentInput, project_id: str, subject: str | None
+    ) -> str | None:
+        if self._artifacts is None or subject is None:
+            return None
+        documents = await self._artifacts.discover(ArtifactAccess(subject=subject), project_id)
+        changed = [
+            document
+            for document in documents
+            if document.artifact.provenance.last_changed_by.thread_id != input_data.thread_id
+        ]
+        if not changed:
+            return None
+        return "; ".join(
+            f"{document.artifact.title} ({document.artifact.id.root}, "
+            f"v{document.artifact.document_version})"
+            for document in changed
+        )
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         await self.open()
@@ -280,3 +499,34 @@ def _is_scratch_file_path(path: str) -> bool:
 def _scratch_state_path(path: str) -> str:
     """Translate Agent Hub's public scratch path to StateBackend's state key."""
     return path.removeprefix("/scratch")
+
+
+def _dataset_records(value: str) -> list[DatasetRecordInput]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError("Dataset Records must be a JSON array.") from error
+    if not isinstance(parsed, list):
+        raise ValueError("Dataset Records must be a JSON array.")
+    records: list[DatasetRecordInput] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            raise ValueError("Every Dataset Record must be a JSON object.")
+        value = dict(item)
+        source_key = value.pop("sourceKey", None)
+        if source_key is not None and not isinstance(source_key, str):
+            raise ValueError("Dataset Record sourceKey values must be strings.")
+        records.append(DatasetRecordInput(value, source_key))
+    return records
+
+
+def _argument_mappings(value: str) -> dict[str, str]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError("Argument mappings must be a JSON object.") from error
+    if not isinstance(parsed, dict) or not all(
+        isinstance(key, str) and isinstance(item, str) for key, item in parsed.items()
+    ):
+        raise ValueError("Argument mappings must map argument names to JSON Pointers.")
+    return parsed

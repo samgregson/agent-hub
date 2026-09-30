@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { expect, test } from "@playwright/test";
 
 test("Plugins are available through the browser-facing Project API", async ({
@@ -22,6 +24,13 @@ test("Plugins are available through the browser-facing Project API", async ({
       tools: [{ name: "foundation_status", readOnly: true }],
       version: "0.1.0",
     },
+    {
+      enabled: false,
+      id: "reference-calculation",
+      name: "Reference calculation",
+      tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
+      version: "0.1.0",
+    },
   ]);
 });
 
@@ -40,12 +49,34 @@ test("Plugin selections can be updated through the browser-facing Project API", 
   const enabledPlugins = await request.get(
     `/api/projects/${project.id}/plugins`,
   );
-  await expect(enabledPlugins.json()).resolves.toMatchObject([
-    { enabled: true, id: "foundation-fixture" },
-  ]);
+  await expect(enabledPlugins.json()).resolves.toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ enabled: true, id: "foundation-fixture" }),
+    ]),
+  );
 
   const disabledResponse = await request.delete(selectionUrl);
   expect(disabledResponse.status()).toBe(204);
+});
+
+test("the browser-facing Project API forwards work item deletion", async ({
+  request,
+}) => {
+  const projectResponse = await request.post("/api/projects", {
+    data: { name: "Work deletion proxy verification" },
+  });
+  expect(projectResponse.status()).toBe(201);
+  const project = (await projectResponse.json()) as { id: string };
+
+  const fileResponse = await request.delete(
+    `/api/projects/${project.id}/files?path=/project/missing.txt`,
+  );
+  expect(fileResponse.status()).toBe(404);
+
+  const artifactResponse = await request.delete(
+    `/api/projects/${project.id}/artifacts/missing-artifact`,
+  );
+  expect(artifactResponse.status()).toBe(404);
 });
 
 test("user can create a Project", async ({ page }) => {
@@ -91,7 +122,140 @@ test("project creation is unavailable before the workspace hydrates", async ({
   await context.close();
 });
 
-test("Artifact navigation is a compact list rather than explanatory copy", async ({
+test("Datasets are created and deleted through the Project workspace", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-24T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+  };
+  const created = {
+    id: "dataset-123",
+    name: "Load cases",
+    records: [
+      {
+        id: "record-123",
+        position: 0,
+        sourceKey: "LC-1",
+        value: { load: 12.5 },
+      },
+    ],
+  };
+  let deleted = false;
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/batch-definitions`,
+    async (route) => {
+      await route.fulfill({ json: [] });
+    },
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({ json: created, status: 201 });
+      return;
+    }
+    await route.fulfill({ json: [] });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/datasets/${created.id}`,
+    async (route) => {
+      deleted = route.request().method() === "DELETE";
+      await route.fulfill({ status: 204 });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Datasets" }).click();
+  await page.getByRole("button", { name: "+ New Dataset" }).click();
+  await page.getByLabel("Name").fill(created.name);
+  await page
+    .getByLabel("Records (JSON array)")
+    .fill('[{"sourceKey":"LC-1","value":{"load":12.5}}]');
+  await page.getByRole("button", { name: "Save Dataset" }).click();
+  await expect(page.getByText("Load cases")).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect.poll(() => deleted).toBe(true);
+});
+
+test("navigator catalogs share collection typography at desktop and phone widths", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-24T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "dataset-123",
+          name: "Load cases",
+          records: [],
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          enabled: false,
+          id: "reference-calculation",
+          name: "Reference calculation",
+          tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
+          version: "0.1.0",
+        },
+      ],
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Datasets" }).click();
+  const datasetTitle = page.getByText("Load cases");
+  await expect(datasetTitle).toBeVisible();
+  const desktopDatasetStyle = await datasetTitle.evaluate((element) => ({
+    color: getComputedStyle(element).color,
+    fontSize: getComputedStyle(element).fontSize,
+  }));
+
+  await page.getByRole("button", { name: "Plugins" }).click();
+  const pluginTitle = page.getByText("Reference calculation");
+  await expect(pluginTitle).toBeVisible();
+  await expect(pluginTitle).toHaveCSS(
+    "font-size",
+    desktopDatasetStyle.fontSize,
+  );
+  await expect(pluginTitle).toHaveCSS("color", desktopDatasetStyle.color);
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  const drawer = page.getByRole("dialog", { name: "Project navigation" });
+  await drawer.getByRole("button", { name: "Datasets" }).click();
+  const mobileDatasetTitle = drawer.getByText("Load cases");
+  await expect(mobileDatasetTitle).toHaveCSS(
+    "font-size",
+    desktopDatasetStyle.fontSize,
+  );
+  await expect(mobileDatasetTitle).toHaveCSS(
+    "color",
+    desktopDatasetStyle.color,
+  );
+});
+
+test("Work navigation combines Artifacts and Project files into one list", async ({
   page,
 }) => {
   const project = {
@@ -122,20 +286,286 @@ test("Artifact navigation is a compact list rather than explanatory copy", async
   await page.route(
     `**/api/projects/${project.id}/files/index`,
     async (route) => {
-      await route.fulfill({ json: { files: [] } });
+      await route.fulfill({
+        json: {
+          files: [
+            {
+              path: "/project/foundation-notes.md",
+              updatedAt: "2026-09-18T00:00:00.000Z",
+              version: 1,
+            },
+          ],
+        },
+      });
     },
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Artifacts" }).click();
+  await page.getByRole("button", { name: "Work" }).click();
 
-  await expect(page.getByRole("button", { name: "Foundation status" })).toBeVisible();
   await expect(
-    page.getByText("Durable project work products. Project files appear below until elevated."),
+    page.getByRole("button", { exact: true, name: "Foundation status" }),
+  ).toBeVisible();
+  await expect(page.getByLabel("Work items")).toContainText(
+    "Foundation status",
+  );
+  await expect(page.getByLabel("Work items")).toContainText(
+    "/project/foundation-notes.md",
+  );
+  await expect(
+    page.getByText(
+      "Durable project work products. Project files appear below until elevated.",
+    ),
   ).toHaveCount(0);
   await expect(
-    page.getByText("Shared working files. Opening one does not create an Artifact."),
+    page.getByText(
+      "Shared working files. Opening one does not create an Artifact.",
+    ),
   ).toHaveCount(0);
+});
+
+test("a Project file is deleted from its Work item action menu after confirmation", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-21T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-21T00:00:00.000Z",
+  };
+  const path = "/project/test.txt";
+  let deleted = false;
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({ json: { artifacts: [] } });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          files: deleted
+            ? []
+            : [{ path, updatedAt: "2026-09-21T00:00:00.000Z", version: 1 }],
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/files?path=${encodeURIComponent(path)}`,
+    async (route) => {
+      expect(route.request().method()).toBe("DELETE");
+      deleted = true;
+      await route.fulfill({ status: 204 });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: `${path} actions` }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Confirm deletion" });
+  await expect(dialog).toContainText(path);
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText(path)).toBeVisible();
+
+  await page.getByRole("button", { name: `${path} actions` }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await dialog.getByRole("button", { name: "Delete" }).click();
+
+  await expect(page.getByText(path)).toBeHidden();
+});
+
+test("an Artifact changed by another Thread stays open until the user reloads it", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-21T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-21T00:00:00.000Z",
+  };
+  const artifactId = "artifact-123";
+  let documentRequests = 0;
+  const artifactDocument = (documentVersion: number, threadId: string) => ({
+    artifact: {
+      documentVersion,
+      id: artifactId,
+      plugin: { id: "foundation-fixture", version: "0.1.0" },
+      provenance: {
+        createdBy: { kind: "agentRun", runId: "run-a", threadId: "thread-a" },
+        lastChangedBy: { kind: "agentRun", runId: "run-b", threadId },
+      },
+      relations: [],
+      schema: { id: "agent-hub.fixture.status", version: "1" },
+      title: "Foundation status",
+      type: "agent-hub.fixture.status",
+    },
+    payload: { status: documentVersion === 1 ? "available" : "unavailable" },
+  });
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({
+      json: {
+        artifacts: [
+          {
+            documentVersion: 1,
+            id: artifactId,
+            pluginId: "foundation-fixture",
+            pluginVersion: "0.1.0",
+            title: "Foundation status",
+            type: "agent-hub.fixture.status",
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+    async (route) => {
+      documentRequests += 1;
+      await route.fulfill({
+        json:
+          documentRequests <= 2
+            ? artifactDocument(1, "thread-a")
+            : artifactDocument(2, "thread-b"),
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}/app`,
+    async (route) => {
+      await route.fulfill({ status: 404 });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Work" }).click();
+  await page
+    .getByRole("button", { exact: true, name: "Foundation status" })
+    .click();
+  const artifactPreview = page.locator("aside").last();
+  await expect(artifactPreview.getByText("Version 1")).toBeVisible();
+
+  const changedDocumentResponse = page.waitForResponse(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await changedDocumentResponse;
+
+  await expect(
+    page.getByText("This Artifact changed in another Thread."),
+  ).toBeVisible();
+  await expect(artifactPreview.getByText("Version 1")).toBeVisible();
+  await page.getByRole("button", { name: "Reload" }).click();
+  await expect(artifactPreview.getByText("Version 2")).toBeVisible();
+  await expect(
+    page.getByText("This Artifact changed in another Thread."),
+  ).toBeHidden();
+});
+
+test("an Artifact App receives its saved tool result through the MCP App bridge", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-22T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-22T00:00:00.000Z",
+  };
+  const artifactId = "artifact-123";
+  const artifact = {
+    artifact: {
+      documentVersion: 1,
+      id: artifactId,
+      plugin: { id: "reference-calculation", version: "0.1.0" },
+      provenance: {
+        createdBy: { kind: "agentRun", runId: "run-a", threadId: "thread-a" },
+        lastChangedBy: {
+          kind: "agentRun",
+          runId: "run-a",
+          threadId: "thread-a",
+        },
+      },
+      relations: [],
+      schema: { id: "agent-hub.plugin.tool-result", version: "1" },
+      title: "Cantilever moment",
+      type: "agent-hub.reference-calculation.calculate-cantilever-tip-load",
+    },
+    payload: {
+      input: { length_m: 6.5, tip_load_kn: 12.5 },
+      output: {
+        calculation: { maximumMoment: { unit: "kN·m", value: 81.25 } },
+      },
+    },
+  };
+  const app = readFileSync(
+    "../../plugins/reference-calculation/app/cantilever-view.html",
+    "utf8",
+  );
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({
+      json: {
+        artifacts: [
+          {
+            documentVersion: 1,
+            id: artifactId,
+            pluginId: "reference-calculation",
+            pluginVersion: "0.1.0",
+            title: artifact.artifact.title,
+            type: artifact.artifact.type,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+    async (route) => {
+      await route.fulfill({ json: artifact });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}/app`,
+    async (route) => {
+      await route.fulfill({ body: app, contentType: "text/html" });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Work" }).click();
+  await page
+    .getByRole("button", { exact: true, name: artifact.artifact.title })
+    .click();
+
+  const preview = page.frameLocator('iframe[title="Artifact App"]');
+  await expect(preview.locator("#length")).toHaveValue("6.5");
+  await expect(preview.locator("#load")).toHaveValue("12.5");
+  await expect(preview.locator("#result")).toHaveText("81.3 kN·m");
 });
 
 test.describe("at phone width", () => {
@@ -186,6 +616,12 @@ test.describe("at phone width", () => {
       await route.fulfill({ json: [] });
     });
     await page.route(
+      `**/api/projects/${project.id}/artifacts`,
+      async (route) => {
+        await route.fulfill({ json: { artifacts: [] } });
+      },
+    );
+    await page.route(
       `**/api/projects/${project.id}/files/index`,
       async (route) => {
         await route.fulfill({
@@ -225,13 +661,75 @@ test.describe("at phone width", () => {
       drawer.getByRole("button", { name: "New Thread 1", exact: true }),
     ).toBeVisible();
 
-    await drawer.getByRole("button", { name: "Artifacts" }).click();
-    await expect(drawer.getByText("Project files")).toBeVisible();
+    await drawer.getByRole("button", { name: "Work" }).click();
     await drawer
-      .getByRole("button", { name: /\/project\/notes\/check\.md/ })
+      .getByRole("button", {
+        exact: true,
+        name: "/project/notes/check.md",
+      })
       .click();
     await expect(drawer).toBeHidden();
     await expect(page.getByText("# Preview")).toBeVisible();
+  });
+
+  test("Dataset and Batch Definition controls retain their dark, touch-ready treatment", async ({
+    page,
+  }) => {
+    const project = {
+      createdAt: "2026-09-16T00:00:00.000Z",
+      id: "project-123",
+      name: "Design review",
+      updatedAt: "2026-09-16T00:00:00.000Z",
+    };
+    const dataset = {
+      id: "dataset-123",
+      name: "Load cases",
+      records: [{ id: "record-123", sourceKey: "LC-1" }],
+    };
+    const definition = {
+      datasetAvailable: true,
+      datasetId: dataset.id,
+      id: "definition-123",
+      name: "Cantilever check",
+      pluginId: "reference-calculation",
+      toolName: "calculate_cantilever_tip_load",
+    };
+
+    await page.route("**/api/projects", async (route) => {
+      await route.fulfill({ json: [project] });
+    });
+    await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+      await route.fulfill({ json: [] });
+    });
+    await page.route(
+      `**/api/projects/${project.id}/datasets`,
+      async (route) => {
+        await route.fulfill({ json: [dataset] });
+      },
+    );
+    await page.route(
+      `**/api/projects/${project.id}/batch-definitions`,
+      async (route) => {
+        await route.fulfill({ json: [definition] });
+      },
+    );
+
+    await page.goto("/");
+    await page.getByRole("button", { name: "Open Project navigation" }).click();
+    const drawer = page.getByRole("dialog", { name: "Project navigation" });
+
+    await drawer.getByRole("button", { name: "Datasets" }).click();
+    await expect(drawer.getByText("Load cases")).toBeVisible();
+    await expect(drawer.getByRole("button", { name: "Delete" })).toBeVisible();
+
+    await drawer.getByRole("button", { name: "Batch Definitions" }).click();
+    const recordSelector = drawer.getByLabel("Cantilever check Dataset Record");
+    await expect(recordSelector).toBeVisible();
+    await expect(recordSelector).toHaveCSS(
+      "background-color",
+      "rgb(34, 34, 30)",
+    );
+    await expect(recordSelector).toHaveCSS("color", "rgb(240, 238, 232)");
   });
 });
 

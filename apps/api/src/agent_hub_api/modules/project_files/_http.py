@@ -14,6 +14,7 @@ from agent_hub_api.modules.project_files._application import (
     ProjectFileAccess,
     ProjectFileNotFound,
     ProjectFilesModule,
+    ReservedProjectFilePath,
 )
 
 
@@ -81,5 +82,32 @@ def create_project_files_router(
         return ProjectFilePreview(
             path=f"/project{file.path}", content=file.content, version=file.version
         )
+
+    @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_file(
+        project_id: str,
+        context: Context,
+        path: Annotated[str, Query(min_length=10, max_length=1032)],
+    ) -> None:
+        if not path.startswith("/project/"):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Project file deletion requires a /project/ path",
+            )
+        try:
+            await project_files.delete_visible(
+                ProjectFileAccess(subject=context.subject),
+                project_id,
+                path.removeprefix("/project"),
+            )
+        except ReservedProjectFilePath as error:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Artifacts must be deleted through the Artifact interface",
+            ) from error
+        except (InvalidProjectFilePath, ProjectFileNotFound) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Project file not found"
+            ) from error
 
     return router

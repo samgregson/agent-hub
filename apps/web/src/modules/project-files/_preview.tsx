@@ -66,7 +66,8 @@ export function ProjectFilePreview({
       {!file && !error ? <p>Opening file…</p> : null}
       {file ? <pre>{file.content}</pre> : null}
       <footer>
-        Previewing a file does not add it to the Artifact catalog.
+        Shared working material for this Project. Publish an Artifact when the
+        result needs a type, provenance, and a dedicated view.
       </footer>
     </section>
   );

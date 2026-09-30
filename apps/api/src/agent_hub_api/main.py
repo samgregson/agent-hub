@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -19,6 +20,11 @@ from agent_hub_api.modules.artifacts import (
     create_artifact_router,
     create_postgres_artifact_module,
 )
+from agent_hub_api.modules.batch_execution import (
+    create_batch_execution_router,
+    create_postgres_batch_execution_module,
+)
+from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
@@ -30,6 +36,7 @@ from agent_hub_api.modules.project_files import (
     create_project_files_router,
 )
 from agent_hub_api.modules.projects import (
+    ProjectAccess,
     ProjectModule,
     create_postgres_project_module,
     create_project_router,
@@ -60,6 +67,18 @@ def create_app(
         resolved_projects,
         resolved_plugin_gateway,
     )
+    resolved_datasets = create_postgres_dataset_module(
+        resolved_settings, resolved_projects, resolved_plugin_gateway
+    )
+    resolved_batches = create_postgres_batch_execution_module(
+        resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway
+    )
+    batch_tasks: set[asyncio.Task[object]] = set()
+
+    def dispatch_batch(access: ProjectAccess, project_id: str, run_id: str) -> None:
+        task = asyncio.create_task(resolved_batches.execute(access, project_id, run_id))
+        batch_tasks.add(task)
+        task.add_done_callback(batch_tasks.discard)
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
@@ -67,6 +86,7 @@ def create_app(
             resolved_project_files,
             resolved_plugin_gateway,
             resolved_artifacts,
+            resolved_datasets,
         )
         resolved_agent_execution = create_postgres_agent_execution(
             resolved_settings, deep_agent_runner
@@ -77,6 +97,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await resolved_agent_execution.reconcile_non_terminal()
+        for run in await resolved_batches.recoverable():
+            assert run.initiator_subject is not None
+            dispatch_batch(ProjectAccess(subject=run.initiator_subject), run.project_id, run.id)
         yield
         if deep_agent_runner is not None:
             await deep_agent_runner.close()
@@ -101,13 +124,24 @@ def create_app(
         create_artifact_router(resolved_identity, resolved_artifacts), prefix="/api"
     )
     application.include_router(
+        create_dataset_router(resolved_identity, resolved_datasets), prefix="/api"
+    )
+    application.include_router(
+        create_batch_execution_router(
+            resolved_identity, resolved_batches, dispatch_batch
+        ),
+        prefix="/api",
+    )
+    application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),
         prefix="/api",
     )
     application.include_router(
         create_agent_transport_router(
             resolved_identity,
-            AgentTransportModule(resolved_projects, resolved_agent_execution),
+            AgentTransportModule(
+                resolved_projects, resolved_agent_execution, resolved_project_files
+            ),
         ),
         prefix="/api",
     )

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { ArtifactDocument } from "@/contracts";
 
+import { ArtifactApp } from "./_app";
 import styles from "./artifact-view-host.module.css";
 
 interface PreviewResult {
@@ -27,17 +28,27 @@ export function ArtifactDocumentPreview({
   });
   const document = result.key === key ? result.document : null;
   const error = result.key === key ? result.error : null;
+  const [staleKey, setStaleKey] = useState<string | null>(null);
+  const isStale = staleKey === key;
+
+  const load = useCallback(async () => {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) throw new Error(String(response.status));
+    return (await response.json()) as ArtifactDocument;
+  }, [artifactId, projectId]);
+
+  async function reload() {
+    const loaded = await load();
+    setResult({ document: loaded, error: null, key });
+    setStaleKey(null);
+  }
 
   useEffect(() => {
     let active = true;
-    fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}`,
-      { cache: "no-store" },
-    )
-      .then(async (response) => {
-        if (!response.ok) throw new Error(String(response.status));
-        return (await response.json()) as ArtifactDocument;
-      })
+    void load()
       .then((loaded) => {
         if (active) setResult({ document: loaded, error: null, key });
       })
@@ -53,7 +64,25 @@ export function ArtifactDocumentPreview({
     return () => {
       active = false;
     };
-  }, [artifactId, key, projectId]);
+  }, [key, load]);
+
+  useEffect(() => {
+    function checkOnFocus() {
+      if (!document) return;
+      void load()
+        .then((loaded) => {
+          if (
+            loaded.artifact.documentVersion !==
+            document.artifact.documentVersion
+          ) {
+            setStaleKey(key);
+          }
+        })
+        .catch(() => {});
+    }
+    window.addEventListener("focus", checkOnFocus);
+    return () => window.removeEventListener("focus", checkOnFocus);
+  }, [document, key, load]);
 
   return (
     <section className={styles.preview}>
@@ -66,23 +95,64 @@ export function ArtifactDocumentPreview({
             <code>{document.artifact.id}</code>
             <span>Version {document.artifact.documentVersion}</span>
           </header>
-          {document.artifact.summary ? <p>{document.artifact.summary}</p> : null}
-          <dl>
-            <div>
-              <dt>Type</dt>
-              <dd>{document.artifact.type}</dd>
-            </div>
-            <div>
-              <dt>Plugin</dt>
-              <dd>
-                {document.artifact.plugin.id} {document.artifact.plugin.version}
-              </dd>
-            </div>
-          </dl>
-          <pre>{JSON.stringify(document.payload, null, 2)}</pre>
-          <footer>Generic safe view. A compatible MCP App may replace this view later.</footer>
+          {document.artifact.summary ? (
+            <p>{document.artifact.summary}</p>
+          ) : null}
+          {isStale ? (
+            <p className={styles.error}>
+              This Artifact changed in another Thread.{" "}
+              <button onClick={() => void reload()} type="button">
+                Reload
+              </button>
+            </p>
+          ) : null}
+          <ArtifactApp
+            artifactId={artifactId}
+            document={document}
+            projectId={projectId}
+          />
+          <details className={styles.details}>
+            <summary>Artifact details</summary>
+            <dl>
+              <div>
+                <dt>Type</dt>
+                <dd>{document.artifact.type}</dd>
+              </div>
+              <div>
+                <dt>Plugin</dt>
+                <dd>
+                  {document.artifact.plugin.id}{" "}
+                  {document.artifact.plugin.version}
+                </dd>
+              </div>
+              <div>
+                <dt>Created by</dt>
+                <dd>
+                  {provenanceLabel(document.artifact.provenance.createdBy)}
+                </dd>
+              </div>
+              <div>
+                <dt>Last changed by</dt>
+                <dd>
+                  {provenanceLabel(document.artifact.provenance.lastChangedBy)}
+                </dd>
+              </div>
+            </dl>
+          </details>
+          <details className={styles.fallback}>
+            <summary>Raw snapshot</summary>
+            <pre>{JSON.stringify(document.payload, null, 2)}</pre>
+          </details>
         </>
       ) : null}
     </section>
   );
+}
+
+function provenanceLabel(
+  actor: ArtifactDocument["artifact"]["provenance"]["createdBy"],
+) {
+  return actor.kind === "agentRun"
+    ? `Thread ${actor.threadId} · Run ${actor.runId}`
+    : `User action ${actor.userActionId}`;
 }
