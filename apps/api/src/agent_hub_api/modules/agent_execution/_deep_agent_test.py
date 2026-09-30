@@ -15,6 +15,12 @@ from agent_hub_api.modules.agent_execution._deep_agent import (
     _project_change_notice_middleware,
     _project_file_permissions,
 )
+from agent_hub_api.modules.datasets import (
+    DatasetModule,
+    DatasetRecordInput,
+    MemoryDatasetStore,
+)
+from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 
 
 def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:
@@ -169,6 +175,67 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert {"discover_project_datasets", "load_project_dataset"} <= names
     assert "create_project_dataset" in captured["interrupt_on"]
     assert "create_project_batch_definition" in captured["interrupt_on"]
+
+
+@pytest.mark.asyncio
+async def test_agent_loads_a_batch_definition_on_demand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ToolSchemas:
+        async def input_schema(self, *_: object) -> dict[str, object]:
+            return {
+                "type": "object",
+                "required": ["length_m"],
+                "properties": {"length_m": {"type": "number"}},
+            }
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Bridge")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        access, project.id, "Load cases", [DatasetRecordInput({"length": 2.5})]
+    )
+    definition = await datasets.create_definition(
+        access,
+        project.id,
+        dataset.id,
+        "Beam checks",
+        "reference-calculation",
+        "calculate_beam",
+        {"length_m": "/length"},
+    )
+    runner = object.__new__(PostgresDeepAgentRunner)
+    runner._checkpointer = cast(Any, object())
+    runner._model = cast(Any, object())
+    runner._project_files = cast(Any, object())
+    runner._plugin_gateway = None
+    runner._datasets = datasets
+    runner._settings = cast(
+        Any,
+        SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
+    )
+    captured: dict[str, Any] = {}
+
+    def create_agent(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(nodes={})
+
+    monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
+
+    await runner._agent_for(project.id, subject=access.subject)
+
+    tools = {registered.name: registered for registered in captured["tools"]}
+    result = await tools["load_project_batch_definition"].ainvoke({"definition_id": definition.id})
+
+    assert result == (
+        '{"id": "'
+        + definition.id
+        + '", "name": "Beam checks", "datasetId": "'
+        + dataset.id
+        + '", "pluginId": "reference-calculation", "toolName": "calculate_beam", '
+        '"argumentMappings": {"length_m": "/length"}}'
+    )
 
 
 @pytest.mark.asyncio

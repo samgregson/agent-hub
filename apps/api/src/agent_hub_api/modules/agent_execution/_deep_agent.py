@@ -325,6 +325,21 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
+        async def load_project_batch_definition(definition_id: str) -> str:
+            """Load one Batch Definition when its Dataset mapping or target tool is needed."""
+            definition = await datasets.load_definition(access, project_id, definition_id)
+            return json.dumps(
+                {
+                    "id": definition.id,
+                    "name": definition.name,
+                    "datasetId": definition.dataset_id,
+                    "pluginId": definition.plugin_id,
+                    "toolName": definition.tool_name,
+                    "argumentMappings": definition.argument_mappings,
+                }
+            )
+
+        @tool
         async def create_project_dataset(name: str, records_json: str) -> str:
             """Create a Dataset from a JSON array of Records after user approval."""
             dataset = await datasets.create_dataset(
@@ -402,6 +417,7 @@ class PostgresDeepAgentRunner:
         return [
             discover_project_datasets,
             load_project_dataset,
+            load_project_batch_definition,
             create_project_dataset,
             delete_project_dataset,
             update_project_dataset,
