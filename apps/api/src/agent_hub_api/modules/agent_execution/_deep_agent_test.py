@@ -157,6 +157,7 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     runner._project_files = cast(Any, object())
     runner._plugin_gateway = None
     runner._datasets = cast(Any, object())
+    runner._batches = cast(Any, object())
     runner._settings = cast(
         Any,
         SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
@@ -175,6 +176,8 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert {"discover_project_datasets", "load_project_dataset"} <= names
     assert "create_project_dataset" in captured["interrupt_on"]
     assert "create_project_batch_definition" in captured["interrupt_on"]
+    assert "start_project_batch_run" in captured["interrupt_on"]
+    assert "start_project_batch_run" in names
 
 
 @pytest.mark.asyncio
@@ -236,6 +239,30 @@ async def test_agent_loads_a_batch_definition_on_demand(
         + '", "pluginId": "reference-calculation", "toolName": "calculate_beam", '
         '"argumentMappings": {"length_m": "/length"}}'
     )
+
+
+@pytest.mark.asyncio
+async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
+    class Batches:
+        def __init__(self) -> None:
+            self.submission: tuple[str, str] | None = None
+            self.enqueued_run_id: str | None = None
+
+        async def submit_all(self, _access: object, project_id: str, definition_id: str) -> object:
+            self.submission = (project_id, definition_id)
+            return SimpleNamespace(id="run-1")
+
+        async def enqueue(self, _access: object, _project_id: str, run_id: str) -> None:
+            self.enqueued_run_id = run_id
+
+    batches = Batches()
+    tool = PostgresDeepAgentRunner._batch_tools(cast(Any, batches), "project-1", "sam")[0]
+
+    result = await tool.ainvoke({"definition_id": "definition-1"})
+
+    assert result == "Started Batch Run run-1."
+    assert batches.submission == ("project-1", "definition-1")
+    assert batches.enqueued_run_id == "run-1"
 
 
 @pytest.mark.asyncio

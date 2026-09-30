@@ -32,6 +32,7 @@ from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
 from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
+from agent_hub_api.modules.batch_execution import BatchExecutionModule
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
@@ -102,12 +103,14 @@ class PostgresDeepAgentRunner:
         plugin_gateway: PluginGatewayModule | None = None,
         artifacts: ArtifactModule | None = None,
         datasets: DatasetModule | None = None,
+        batches: BatchExecutionModule | None = None,
     ) -> None:
         self._settings = settings
         self._project_files = project_files
         self._plugin_gateway = plugin_gateway
         self._artifacts = artifacts
         self._datasets = datasets
+        self._batches = batches
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
@@ -166,6 +169,9 @@ class PostgresDeepAgentRunner:
         datasets = getattr(self, "_datasets", None)
         if datasets is not None and subject is not None:
             tools.extend(self._dataset_tools(datasets, project_id, subject))
+        batches = getattr(self, "_batches", None)
+        if batches is not None and subject is not None:
+            tools.extend(self._batch_tools(batches, project_id, subject))
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -205,6 +211,11 @@ class PostgresDeepAgentRunner:
                     },
                 }
             )
+        if batches is not None and subject is not None:
+            interrupt_on["start_project_batch_run"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Start the proposed Batch Run?",
+            }
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
@@ -425,6 +436,24 @@ class PostgresDeepAgentRunner:
             delete_project_batch_definition,
             update_project_batch_definition,
         ]
+
+    @staticmethod
+    def _batch_tools(
+        batches: BatchExecutionModule, project_id: str, subject: str
+    ) -> list[BaseTool]:
+        access = ProjectAccess(subject=subject)
+
+        @tool
+        async def start_project_batch_run(definition_id: str, record_id: str | None = None) -> str:
+            """Start one Record or all Records from a Batch Definition after user approval."""
+            if record_id is None:
+                run = await batches.submit_all(access, project_id, definition_id)
+            else:
+                run = await batches.submit_one(access, project_id, definition_id, record_id)
+            await batches.enqueue(access, project_id, run.id)
+            return f"Started Batch Run {run.id}."
+
+        return [start_project_batch_run]
 
     async def close(self) -> None:
         if self._stack is not None:
