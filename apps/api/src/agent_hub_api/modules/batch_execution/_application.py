@@ -104,6 +104,7 @@ class BatchExecutionModule:
             store,
         )
         self._max_concurrency = max_concurrency
+        self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
 
     async def start_one(
         self,
@@ -243,6 +244,20 @@ class BatchExecutionModule:
         )
         return await self._store.replace(completed) or completed
 
+    async def enqueue(
+        self, access: ProjectAccess, project_id: str, run_id: str
+    ) -> asyncio.Task[BatchRun]:
+        """Schedule one durable Batch Run once within this host process."""
+        await self.load(access, project_id, run_id)
+        key = (project_id, run_id)
+        task = self._tasks.get(key)
+        if task is not None and not task.done():
+            return task
+        task = asyncio.create_task(self.execute(access, project_id, run_id))
+        self._tasks[key] = task
+        task.add_done_callback(lambda _: self._tasks.pop(key, None))
+        return task
+
     async def _execute_snapshot(
         self, access: ProjectAccess, project_id: str, run: BatchRun, record: ResultRecord
     ) -> ResultRecord:
@@ -320,6 +335,18 @@ class BatchExecutionModule:
         return tuple(
             run for run in await self._store.non_terminal() if run.initiator_subject is not None
         )
+
+    async def recover(self) -> tuple[asyncio.Task[BatchRun], ...]:
+        """Schedule durable non-terminal runs after a host restart."""
+        tasks: list[asyncio.Task[BatchRun]] = []
+        for run in await self.recoverable():
+            assert run.initiator_subject is not None
+            tasks.append(
+                await self.enqueue(
+                    ProjectAccess(subject=run.initiator_subject), run.project_id, run.id
+                )
+            )
+        return tuple(tasks)
 
     async def _authorize(self, access: ProjectAccess, project_id: str) -> None:
         try:

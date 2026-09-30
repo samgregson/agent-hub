@@ -152,6 +152,21 @@ async def test_repeated_idempotency_key_returns_the_original_run_without_reexecu
 
 
 @pytest.mark.asyncio
+async def test_enqueuing_the_same_batch_run_twice_executes_it_once() -> None:
+    gateway = Gateway()
+    access, project_id, batches, definition_id = await create_module(gateway)
+    queued = await batches.submit_all(access, project_id, definition_id)
+
+    first = await batches.enqueue(access, project_id, queued.id)
+    second = await batches.enqueue(access, project_id, queued.id)
+    completed = await first
+
+    assert first is second
+    assert completed.status is BatchRunStatus.succeeded
+    assert gateway.calls == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.asyncio
 async def test_a_user_can_archive_a_completed_batch_run_without_losing_its_result_set() -> None:
     gateway = Gateway()
     access, project_id, batches, definition_id = await create_module(gateway)
@@ -193,10 +208,10 @@ async def test_captured_run_can_be_reclaimed_and_completed_after_restart() -> No
     access, project_id, batches, definition_id = await create_module(gateway)
     queued = await batches.submit_all(access, project_id, definition_id)
 
-    recovered = await batches.recoverable()
-    completed = await batches.execute(access, project_id, recovered[0].id)
+    recovered = await batches.recover()
+    completed = await recovered[0]
 
-    assert recovered == (queued,)
+    assert len(recovered) == 1
     assert queued.initiator_subject == "sam"
     assert [record.input for record in queued.records] == [
         {"load": 1},

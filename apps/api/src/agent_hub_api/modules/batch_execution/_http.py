@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -77,7 +76,6 @@ def _response(run: BatchRun) -> BatchRunResponse:
 def create_batch_execution_router(
     identity: IdentityModule,
     batches: BatchExecutionModule,
-    dispatch: Callable[[ProjectAccess, str, str], None] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}/batch-runs", tags=["batch-runs"])
 
@@ -134,8 +132,7 @@ def create_batch_execution_router(
                 body.record_id or "",
                 body.idempotency_key,
             )
-            if dispatch is not None:
-                dispatch(request_access, project_id, run.id)
+            await batches.enqueue(request_access, project_id, run.id)
             return _response(run)
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
@@ -173,8 +170,7 @@ def create_batch_execution_router(
             run = await batches.submit_all(
                 request_access, project_id, body.definition_id, body.idempotency_key
             )
-            if dispatch is not None:
-                dispatch(request_access, project_id, run.id)
+            await batches.enqueue(request_access, project_id, run.id)
             return _response(run)
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
