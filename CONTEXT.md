@@ -36,6 +36,14 @@ _Avoid_: Plugin protocol, run result, Artifact
 A durable host-owned Project rule that maps an explicitly selected structured value to a declared argument of a target operation. Its mapping and execution policy are inspectable; it is not Plugin-owned code or an iframe-to-iframe connection.
 _Avoid_: Plugin protocol extension, arbitrary parser, direct app communication
 
+**Transform Definition**:
+A durable project-owned declaration of a user-authored data transformation, including its source, declared inputs, declared output, and runtime identity. It is distinct from a direct Binding and does not grant its source authority to access Project storage, secrets, or the network.
+_Avoid_: Binding expression, Plugin-owned state, notebook session
+
+**Transform Run**:
+One bounded host-orchestrated execution of a Transform Definition against immutable selected input snapshots. It records its runtime, inputs, outputs, provenance, and outcome. A per-record Transform Run is a Batch Run and produces a Result Set.
+_Avoid_: Browser preview, Project File, Artifact
+
 **Project File**:
 A durable file in the project's virtual filesystem used as agent working material. It may be linked from chat and previewed without becoming an artifact. Elevation to an artifact is explicit: an agent-initiated elevation requires human approval, while a user-initiated plugin save is direct authorization.
 _Avoid_: Artifact, source, local file
