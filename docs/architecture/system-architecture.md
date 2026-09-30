@@ -150,9 +150,10 @@ save_dataset(context, draft) -> Dataset
 save_definition(context, draft) -> Batch Definition
 start(context, definition, selection, initiator, idempotency_key) -> Batch Run
 inspect(context, batch_run_id, query?) -> Batch Run summary / Result page
+archive(context, batch_run_id) -> archived Batch Run summary
 ```
 
-`start` captures the selected Dataset records, Batch Definition, Plugin/tool identity, schemas, policy, and initiator before execution. The executor invokes one real selected record first; a failure or schema-invalid response stops fan-out, while later failures produce an explicitly partial Result Set. It accepts only catalogued repeat-safe tools, uses host-configured bounded concurrency, and does not provide cancellation or retry in the first pass. A Result Set retains normalized inputs and complete structured outputs within explicit limits, but is not an Artifact unless a user or approved agent explicitly saves a curated conclusion.
+`start` captures the selected Dataset records, Batch Definition, Plugin/tool identity, schemas, policy, and initiator before execution. The executor invokes one real selected record first; a failure or schema-invalid response stops fan-out, while later failures produce an explicitly partial Result Set. It accepts only catalogued repeat-safe tools, uses host-configured bounded concurrency, and does not provide cancellation or retry in the first pass. A Result Set retains normalized inputs and complete structured outputs within explicit limits, but is not an Artifact unless a user or approved agent explicitly saves a curated conclusion. Completed Batch Runs are immutable; `archive` hides a run from normal workspace views without deleting its Result Set or provenance.
 
 Agent-proposed Dataset saves, definition changes, and `start` calls pause at the existing LangGraph approval interrupt. Resumption invokes the same idempotent command a directly authorized user action uses. The Agent Run may await a short bounded completion window; otherwise it receives a Batch Run reference and ends normally. The executor outlives the AG-UI stream, and later runs inspect persisted results through host tools.
 

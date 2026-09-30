@@ -21,12 +21,12 @@ One ordered JSON-object entry in a Dataset, identified by a stable host-issued I
 _Avoid_: Tool call, result record, table row without identity
 
 **Result Set**:
-A durable, queryable collection of machine-scale outcomes produced by one Batch Run. It is available to agents and users for inspection and may inform an Artifact, but is not itself automatically a curated Artifact.
+A durable, queryable collection of machine-scale outcomes produced by one Batch Run. It is available to agents and users for inspection and may inform an Artifact, but is not itself automatically a curated Artifact. It is retained when its completed Batch Run is archived.
 _Avoid_: Artifact, chat transcript, plugin-owned database
 
 **Batch Run**:
-One bounded host-orchestrated execution of a Plugin tool over a Dataset or explicitly supplied collection of inputs. Agent-proposed execution requires approval; a directly authorized user action does not. It records its completion state and Result Set.
-_Avoid_: Plugin, Artifact, retry button
+One bounded host-orchestrated execution of a Plugin tool over a Dataset or explicitly supplied collection of inputs. Agent-proposed execution requires approval; a directly authorized user action does not. It records its completion state and Result Set. A completed Batch Run is immutable and may be archived, rather than erased, from normal workspace views.
+_Avoid_: Plugin, Artifact, retry button, disposable job
 
 **Batch Definition**:
 A durable project-owned execution setup that maps Dataset values to the JSON arguments of one Plugin tool. It may be reused to start Batch Runs, but a Batch Run captures the definition it actually used.

@@ -13,4 +13,4 @@ Agent Hub will persist and execute Dataset Batch Runs through a host-owned Batch
 
 ## Consequences
 
-The first implementation uses PostgreSQL with explicit size limits. Batch-capable tools are catalogued as safe for repeated execution and return ordinary MCP structured output with declared schemas. A completed Result Set is an immutable execution snapshot; native summaries and explicit Artifact elevation avoid producing an Artifact for every result.
+The first implementation uses PostgreSQL with explicit size limits. Batch-capable tools are catalogued as safe for repeated execution and return ordinary MCP structured output with declared schemas. A completed Result Set is an immutable execution snapshot; completed Batch Runs may be archived from normal views but are not erased. Native summaries and explicit Artifact elevation avoid producing an Artifact for every result.
