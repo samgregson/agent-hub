@@ -18,11 +18,19 @@ Deno.test("fresh restricted Pyodide executions share the preview and run contrac
 counter = globals().get("counter", 0) + 1
 def transform(inputs, parameters):
     import js
+    try:
+        open("/app/worker.mjs").read()
+        host_file_visible = True
+    except Exception:
+        host_file_visible = False
     return {
         "value": inputs["load"] * parameters["factor"],
         "counter": counter,
         "denoVisible": hasattr(js, "Deno"),
         "fetchVisible": hasattr(js, "fetch"),
+        "globalThisVisible": hasattr(js, "globalThis"),
+        "functionVisible": hasattr(js, "Function"),
+        "hostFileVisible": host_file_visible,
     }
 `,
     inputs: { load: 3 },
@@ -40,6 +48,9 @@ def transform(inputs, parameters):
         counter: 1,
         denoVisible: false,
         fetchVisible: false,
+        globalThisVisible: false,
+        functionVisible: false,
+        hostFileVisible: false,
       })
     ) throw new Error(`Unexpected output: ${JSON.stringify(result.output)}`);
   }
