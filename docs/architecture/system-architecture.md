@@ -70,6 +70,7 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Dataset / Batch Definition | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
 | Batch Run / Result Set     | Agent Hub                                       | PostgreSQL execution and result records                                               |
 | Transform Definition       | Agent Hub                                       | Project-scoped PostgreSQL definition record                                           |
+| Transform Run              | Agent Hub                                       | Project-scoped PostgreSQL snapshot and outcome record                                 |
 | Plugin definition          | Deployment-controlled catalog                   | Version-controlled manifest                                                          |
 | Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
 | Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
@@ -160,9 +161,9 @@ Agent-proposed Dataset saves, definition changes, and `start` calls pause at the
 
 ### Transform Module — API
 
-Owns Project-scoped Transform Definitions and, as execution is delivered, Transform Runs. Its current Interface validates, creates, lists, loads, revises, and deletes definitions. A definition stores source, declared JSON input selectors and output schema, source hash, and revision. Runtime identity remains unset until the shared Deno-hosted Pyodide runner is pinned; it must be captured before a Transform Run can start. FastAPI routes translate requests only; validation and authorization remain in the Module.
+Owns Project-scoped Transform Definitions and Transform Runs. Its Interface validates, creates, lists, loads, revises, and deletes definitions; previews a definition against explicit JSON input; starts a durable Run; and loads a retained Run. A definition stores source, declared JSON input selectors and output schema, source hash, and revision. The current preview and Run commands resolve selectors and validate the output contract before returning it. FastAPI routes translate requests only; authorization, snapshots, output manifests, and validation remain in the Module.
 
-Both previews and durable Transform Runs execute through one Deno-hosted Pyodide runner with explicit read-only input snapshots and a bounded output channel. Only the durable path persists the outcome and provenance. Source stored in a definition does not execute in the API process. A Transform Run and explicit output save will be added behind this Interface when the runner boundary is available. This keeps definition changes separate from immutable execution provenance.
+Both previews and durable Runs execute through the same internal Deno-hosted Pyodide service. Each invocation starts a fresh restricted child process inside an offline, read-only container with CPU, memory, timeout, input, output, and concurrency limits. The Python API has no Python-source execution path. Durable Runs retain the source/definition and selected input snapshots, their hashes, initiator, runtime response, outcome, and output manifest. A startup reconciliation marks interrupted Runs failed; terminal Runs remain inspectable after a Definition changes or is deleted. Full runtime and package identity capture, explicit output saving, agent approval integration, dataflow inspection, and per-record Batch integration remain to be delivered.
 
 ### Plugin Gateway Module — API
 

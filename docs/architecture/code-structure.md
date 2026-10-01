@@ -39,7 +39,10 @@ apps/api/src/agent_hub_api/
     project_files/             # project-scoped Deep Agents filesystem
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
+    transforms/                # Project Transform Definitions, previews, and durable Runs
     persistence/               # shared transaction and database facilities
+
+apps/transform-runner/         # isolated Deno/Pyodide execution service
 ```
 
 Only directories needed by the current slice are created. Calculation, diagram, unit, and structural-engineering Modules remain Plugin work after the foundation.
