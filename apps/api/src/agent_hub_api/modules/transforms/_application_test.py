@@ -1,5 +1,6 @@
 import pytest
 
+from agent_hub_api.modules.datasets import DatasetModule, MemoryDatasetStore
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
     MemoryTransformStore,
@@ -161,6 +162,44 @@ async def test_run_retains_failure_without_fabricating_output() -> None:
     assert run.package_hash == "a" * 64
     assert run.runtime == "deno:2.9.7;pyodide:314.0.7"
     assert await transforms.load_run(owner, project.id, run.id) == run
+
+
+@pytest.mark.asyncio
+async def test_successful_run_output_is_saved_as_dataset_only_on_explicit_command() -> None:
+    from agent_hub_api.modules.transforms import MemoryTransformRunStore
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+
+    class ToolSchemas:
+        async def input_schema(
+            self, access: ProjectAccess, project_id: str, plugin_id: str, tool_name: str
+        ) -> dict[str, object]:
+            return {}
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return [{"value": 2}, {"value": 4}], "deno:2.9.7;pyodide:314.0.7"
+
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(), datasets
+    )
+    definition = await transforms.define(
+        owner, project.id, "Values", "def transform(inputs, parameters):\n    return []\n",
+        {"load": "/load"}, {"type": "array"},
+    )
+    run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
+    assert await datasets.list_datasets(owner, project.id) == ()
+    dataset = await transforms.save_run_as_dataset(owner, project.id, run.id, "Values")
+    assert [record.value for record in dataset.records] == [{"value": 2}, {"value": 4}]
+    assert [record.source_key for record in dataset.records] == [
+        f"transform-run:{run.id}:0", f"transform-run:{run.id}:1"
+    ]
+    assert (await transforms.load_run(owner, project.id, run.id)) == run
 
 
 @pytest.mark.asyncio

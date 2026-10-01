@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from agent_hub_api.modules.datasets import DatasetValidationError
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
@@ -79,6 +80,17 @@ class RunResponse(_Model):
 class RunPageResponse(_Model):
     items: list[RunResponse]
     next_offset: int | None
+
+
+class SaveDatasetRequest(_Model):
+    name: str
+
+
+class SaveDatasetResponse(_Model):
+    id: str
+    name: str
+    record_count: int
+    source_run_id: str
 
 
 def _response(definition: TransformDefinition) -> DefinitionResponse:
@@ -239,6 +251,28 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                 access(request_context), project_id, run_id
             ))
         except (TransformNotFound, TransformExecutionError) as error:
+            raise failure(error) from error
+
+    @router.post(
+        "/runs/{run_id}/save-dataset", response_model=SaveDatasetResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def save_dataset(
+        project_id: str, run_id: str, body: SaveDatasetRequest,
+        request_context: Context,
+    ) -> SaveDatasetResponse:
+        try:
+            dataset = await transforms.save_run_as_dataset(
+                access(request_context), project_id, run_id, body.name
+            )
+            return SaveDatasetResponse(
+                id=dataset.id, name=dataset.name,
+                record_count=len(dataset.records), source_run_id=run_id,
+            )
+        except (
+            TransformNotFound, TransformValidationError, TransformExecutionError,
+            DatasetValidationError,
+        ) as error:
             raise failure(error) from error
 
     @router.put("/{definition_id}", response_model=DefinitionResponse)

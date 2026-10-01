@@ -2,6 +2,7 @@ import pytest
 from psycopg import AsyncConnection, OperationalError
 from pydantic import PostgresDsn
 
+from agent_hub_api.modules.datasets import create_postgres_dataset_module
 from agent_hub_api.modules.projects import ProjectAccess, create_postgres_project_module
 from agent_hub_api.modules.transforms import (
     TransformRuntimeIdentity,
@@ -31,9 +32,18 @@ async def test_transform_run_round_trips_through_postgres() -> None:
         ) -> tuple[object, str]:
             return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
+    class ToolSchemas:
+        async def input_schema(
+            self, access: ProjectAccess, project_id: str, plugin_id: str, tool_name: str
+        ) -> dict[str, object]:
+            return {}
+
     access = ProjectAccess(subject="transform-postgres-integration")
     projects = create_postgres_project_module(settings)
-    transforms = create_postgres_transform_module(settings, projects, Runner())
+    datasets = create_postgres_dataset_module(settings, projects, ToolSchemas())
+    transforms = create_postgres_transform_module(
+        settings, projects, Runner(), datasets
+    )
     project = await projects.create(access, "Transform run integration")
     try:
         definition = await transforms.define(
@@ -46,6 +56,10 @@ async def test_transform_run_round_trips_through_postgres() -> None:
         assert run.status == "succeeded"
         assert await transforms.load_run(access, project.id, run.id) == run
         assert (await transforms.list_runs(access, project.id)).items == (run,)
+        assert await datasets.list_datasets(access, project.id) == ()
+        saved = await transforms.save_run_as_dataset(access, project.id, run.id, "Saved")
+        assert saved.records[0].value == {"value": 6}
+        assert (await datasets.load_dataset(access, project.id, saved.id)) == saved
         await transforms.delete(access, project.id, definition.id)
         assert await transforms.load_run(access, project.id, run.id) == run
         connection = await AsyncConnection.connect(str(settings.database_url))

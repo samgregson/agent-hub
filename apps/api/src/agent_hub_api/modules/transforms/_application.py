@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator, SchemaError  # type: ignore[import-
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from agent_hub_api.modules.datasets import Dataset, DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.settings import Settings
 
@@ -122,11 +123,13 @@ class TransformModule:
         self, projects: ProjectModule, store: TransformStore,
         runner: TransformRunner | None = None,
         run_store: TransformRunStore | None = None,
+        datasets: DatasetModule | None = None,
     ) -> None:
         self._projects = projects
         self._store = store
         self._runner = runner
         self._run_store = run_store
+        self._datasets = datasets
 
     async def define(
         self,
@@ -299,6 +302,33 @@ class TransformModule:
         if not 1 <= limit <= 100 or offset < 0:
             raise TransformValidationError("Run page limit or offset is invalid.")
         return await self._run_store.list(project_id, definition_id, limit, offset)
+
+    async def save_run_as_dataset(
+        self, access: ProjectAccess, project_id: str, run_id: str, name: str
+    ) -> Dataset:
+        run = await self.load_run(access, project_id, run_id)
+        if self._datasets is None:
+            raise TransformExecutionError("dataset_save_unavailable")
+        if run.status != "succeeded":
+            raise TransformValidationError("Only successful Transform Run output can be saved.")
+        output = run.output
+        values = [output] if isinstance(output, dict) else output
+        if not isinstance(values, list) or not values or any(
+            not isinstance(value, dict) or not all(isinstance(key, str) for key in value)
+            for value in values
+        ):
+            raise TransformValidationError(
+                "Dataset save requires an object or a nonempty array of objects."
+            )
+        return await self._datasets.create_dataset(
+            access, project_id, name,
+            [
+                DatasetRecordInput(
+                    value, source_key=f"transform-run:{run.id}:{index}"
+                )
+                for index, value in enumerate(values)
+            ],
+        )
 
     async def recover(self) -> int:
         if self._run_store is None:
@@ -559,6 +589,7 @@ def _from_row(row: Mapping[str, object]) -> TransformDefinition:
 def create_postgres_transform_module(
     settings: Settings, projects: ProjectModule,
     runner: TransformRunner | None = None,
+    datasets: DatasetModule | None = None,
 ) -> TransformModule:
     from agent_hub_api.modules.transforms._run_store import PostgresTransformRunStore
     from agent_hub_api.modules.transforms._runner import DenoTransformRunner
@@ -569,5 +600,5 @@ def create_postgres_transform_module(
     )
     return TransformModule(
         projects, PostgresTransformStore(settings), resolved_runner,
-        PostgresTransformRunStore(settings),
+        PostgresTransformRunStore(settings), datasets,
     )

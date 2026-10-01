@@ -75,7 +75,9 @@ def create_app(
     resolved_batches = create_postgres_batch_execution_module(
         resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway
     )
-    resolved_transforms = create_postgres_transform_module(resolved_settings, resolved_projects)
+    resolved_transforms = create_postgres_transform_module(
+        resolved_settings, resolved_projects, datasets=resolved_datasets
+    )
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(

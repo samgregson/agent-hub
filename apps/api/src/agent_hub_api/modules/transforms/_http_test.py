@@ -2,6 +2,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from agent_hub_api.modules.datasets import DatasetModule, MemoryDatasetStore
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
@@ -106,8 +107,15 @@ async def test_durable_run_http_can_be_inspected_after_execution() -> None:
         ) -> tuple[object, str]:
             return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
+    class ToolSchemas:
+        async def input_schema(
+            self, access: ProjectAccess, project_id: str, plugin_id: str, tool_name: str
+        ) -> dict[str, object]:
+            return {}
+
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
     transforms = TransformModule(
-        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(), datasets
     )
     definition = await transforms.define(
         owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
@@ -130,8 +138,16 @@ async def test_durable_run_http_can_be_inspected_after_execution() -> None:
         assert started.status_code == 201
         loaded = await client.get(f"{path}/runs/{started.json()['id']}")
         listed = await client.get(f"{path}/runs?limit=1&definitionId={definition.id}")
+        saved = await client.post(
+            f"{path}/runs/{started.json()['id']}/save-dataset",
+            json={"name": "Saved values"},
+        )
     assert loaded.status_code == 200
     assert loaded.json() == started.json()
     assert listed.status_code == 200
     assert listed.json() == {"items": [started.json()], "nextOffset": None}
+    assert saved.status_code == 201
+    assert saved.json()["recordCount"] == 1
+    stored = await datasets.load_dataset(owner, project.id, saved.json()["id"])
+    assert stored.records[0].value == {"value": 6}
     assert loaded.json()["outputManifest"]["kind"] == "json"
