@@ -33,7 +33,9 @@ interface BatchRun {
   definitionId: string;
   id: string;
   status: string;
-  records: ResultRecord[];
+  recordCount: number;
+  succeededCount: number;
+  failedCount: number;
   updatedAt: string;
 }
 
@@ -60,9 +62,7 @@ function displayTool(pluginId: string, toolName: string) {
 }
 
 function runSummary(run: BatchRun) {
-  const failed = run.records.filter((record) => record.error).length;
-  const succeeded = run.records.length - failed;
-  return `${run.status} · ${run.records.length} records · ${succeeded} succeeded${failed ? ` · ${failed} failed` : ""}`;
+  return `${run.status} · ${run.recordCount} records · ${run.succeededCount} succeeded${run.failedCount ? ` · ${run.failedCount} failed` : ""}`;
 }
 
 export function DatasetCatalog({

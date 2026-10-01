@@ -45,7 +45,9 @@ class BatchRunResponse(_Model):
     id: str
     definition_id: str
     status: str
-    records: list[ResultResponse]
+    record_count: int
+    succeeded_count: int
+    failed_count: int
     updated_at: str
 
 
@@ -78,15 +80,9 @@ def _response(run: BatchRun) -> BatchRunResponse:
         id=run.id,
         definition_id=run.definition_id,
         status=run.status.value,
-        records=[
-            ResultResponse(
-                dataset_record_id=item.dataset_record_id,
-                input=dict(item.input),
-                structured_output=dict(item.structured_output) if item.structured_output else None,
-                error=item.error,
-            )
-            for item in run.records
-        ],
+        record_count=len(run.records),
+        succeeded_count=sum(item.structured_output is not None for item in run.records),
+        failed_count=sum(item.error is not None for item in run.records),
         updated_at=run.updated_at.isoformat(),
     )
 

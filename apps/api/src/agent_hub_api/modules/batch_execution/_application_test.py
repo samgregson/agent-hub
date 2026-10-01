@@ -239,6 +239,7 @@ async def test_result_set_http_query_returns_a_filtered_page_and_summary() -> No
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        run_response = await client.get(f"/api/projects/{project_id}/batch-runs/{run.id}")
         response = await client.get(
             f"/api/projects/{project_id}/batch-runs/{run.id}/results",
             params={
@@ -249,6 +250,10 @@ async def test_result_set_http_query_returns_a_filtered_page_and_summary() -> No
         )
 
     assert response.status_code == 200
+    assert run_response.status_code == 200
+    assert "records" not in run_response.json()
+    assert run_response.json()["recordCount"] == 5
+    assert run_response.json()["succeededCount"] == 5
     assert response.json()["items"][0]["structuredOutput"] == {"result": 10}
     assert response.json()["nextOffset"] == 1
     assert response.json()["summary"]["numericSum"] == 28
