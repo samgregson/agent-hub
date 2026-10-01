@@ -42,6 +42,23 @@ services:
       retries: 10
     ports:
       - "8000:8000"
+    networks:
+      - default
+      - transform_internal
+
+  transform-runner:
+    build:
+      context: .
+      dockerfile: apps/transform-runner/Dockerfile
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1
+    networks:
+      - transform_internal
 
   foundation-fixture:
     build:
@@ -73,3 +90,7 @@ services:
 
 volumes:
   agent-hub-postgres:
+
+networks:
+  transform_internal:
+    internal: true

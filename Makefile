@@ -1,4 +1,4 @@
-.PHONY: acceptance architecture-check build contracts contracts-check dev down format format-check lint migrate setup test typecheck
+.PHONY: acceptance architecture-check build contracts contracts-check dev down format format-check lint migrate setup test test-runner typecheck
 
 export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export npm_config_cache := $(CURDIR)/.cache/npm
@@ -42,6 +42,9 @@ typecheck:
 test:
 	$(PNPM) test
 
+test-runner:
+	docker build --target test -f apps/transform-runner/Dockerfile .
+
 migrate:
 	uv run --package agent-hub-api alembic -c apps/api/alembic.ini upgrade head
 
@@ -51,4 +54,5 @@ acceptance:
 	$(MAKE) lint
 	$(MAKE) typecheck
 	$(MAKE) test
+	$(MAKE) test-runner
 	$(MAKE) build
