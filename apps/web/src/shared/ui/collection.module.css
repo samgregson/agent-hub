@@ -1,6 +1,6 @@
 .collection {
   display: grid;
-  gap: var(--space-3);
+  gap: var(--space-2);
   container-type: inline-size;
 }
 
@@ -8,14 +8,15 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--radius-control);
   background: var(--surface-card);
 }
 
 .item:hover,
 .item:focus-within {
-  border-color: var(--accent);
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
 }
 
 .content,
@@ -24,9 +25,9 @@
   flex: 1;
   min-width: 0;
   gap: var(--space-1);
-  padding: var(--space-3);
+  padding: var(--space-4);
   color: var(--text);
-  font-size: var(--font-size-label);
+  font-size: var(--font-size-body);
 }
 
 .open {
@@ -38,7 +39,7 @@
 }
 
 .open:hover {
-  background: var(--surface-selected);
+  background: transparent;
 }
 
 .content span,
@@ -52,7 +53,7 @@
 
 .content small,
 .open small {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: var(--font-size-meta);
 }
 

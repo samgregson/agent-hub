@@ -1,37 +1,37 @@
 :root {
   color-scheme: dark;
-  --accent: #e9ff70;
-  --accent-ink: #15160c;
-  --background: #11110f;
-  --surface: #181816;
-  --surface-card: #1b1b18;
-  --surface-raised: #22221e;
-  --surface-selected: #25251f;
-  --text: #f4f2ec;
-  --text-strong: #f0eee8;
-  --text-subtle: #d7d4cb;
-  --text-muted: #aaa69d;
-  --muted: #8e8a82;
-  --line: #3b3933;
-  --line-subtle: #302f2a;
-  --line-strong: #35342f;
+  --accent: #dcf56b;
+  --accent-ink: #17200f;
+  --background: #10130f;
+  --surface: #181c17;
+  --surface-card: #1b211a;
+  --surface-raised: #252c22;
+  --surface-selected: #2e3828;
+  --text: #f1f4ea;
+  --text-strong: #fbfdf6;
+  --text-subtle: #d5dccd;
+  --text-muted: #b1bda9;
+  --muted: #a0ad99;
+  --line: #394536;
+  --line-subtle: #2c352a;
+  --line-strong: #485643;
   --danger: #ff9b86;
   --danger-border: #6c3f39;
   --focus-ring: #e9ff70;
-  --font-size-meta: 0.6875rem;
-  --font-size-label: 0.75rem;
-  --font-size-body: 0.8125rem;
+  --font-size-meta: 0.75rem;
+  --font-size-label: 0.8125rem;
+  --font-size-body: 0.9375rem;
   --font-size-code: 0.78rem;
-  --font-size-heading: 1.375rem;
+  --font-size-heading: 1.5rem;
   --font-size-display: clamp(1.75rem, 5vw, 3.25rem);
-  --control-height: 1.875rem;
-  --radius-control: 0.5rem;
-  --radius-panel: 0.875rem;
+  --control-height: 2.5rem;
+  --radius-control: 0.625rem;
+  --radius-panel: 1rem;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
+  --space-3: 0.875rem;
+  --space-4: 1.25rem;
+  --space-5: 1.75rem;
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   background: var(--background);
   color: var(--text);
@@ -50,6 +50,21 @@ body {
 button {
   color: inherit;
   font: inherit;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+* {
+  scrollbar-color: var(--line-strong) transparent;
+  scrollbar-width: thin;
+}
+
+::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 
 button:focus-visible,

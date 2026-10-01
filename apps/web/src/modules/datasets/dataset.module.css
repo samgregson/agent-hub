@@ -1,9 +1,10 @@
 .form {
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-4);
   border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-panel);
+  background: var(--surface-card);
 }
 
 .formActions {
@@ -17,11 +18,12 @@
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
-  background: var(--surface-raised);
+  background: var(--surface-card);
   color: var(--text-strong);
   font: inherit;
   font-size: var(--font-size-label);
-  padding: var(--space-2);
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
 }
 
 .error {
@@ -30,8 +32,8 @@
 
 .runSection {
   display: grid;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
+  gap: var(--space-4);
+  margin-top: var(--space-5);
 }
 
 .runSection h2 {
@@ -53,8 +55,8 @@
 
 .detail {
   display: grid;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
+  gap: var(--space-4);
+  margin-top: var(--space-5);
 }
 
 .detail h2,
@@ -63,21 +65,21 @@
 }
 
 .detail p {
-  color: var(--muted);
-  font-size: var(--font-size-label);
+  color: var(--text-muted);
+  font-size: var(--font-size-body);
 }
 
 .record {
-  padding: var(--space-3);
+  padding: var(--space-4);
   border: 1px solid var(--line);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius-panel);
   background: var(--surface-card);
 }
 
 .record pre {
   overflow: auto;
   margin: var(--space-2) 0 0;
-  color: var(--text-strong);
+  color: var(--text-subtle);
   font-size: var(--font-size-meta);
 }
 
@@ -94,7 +96,7 @@
 }
 
 .resultValues dt {
-  color: var(--muted);
+  color: var(--text-muted);
   font-size: var(--font-size-meta);
 }
 

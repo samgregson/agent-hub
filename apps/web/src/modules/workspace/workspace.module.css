@@ -1,31 +1,33 @@
 .shell {
   display: grid;
   grid-template-areas: "title title title title" "rail navigator chat artifact";
-  grid-template-columns: 128px 230px minmax(360px, 1fr) minmax(320px, 0.8fr);
-  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-columns: 112px 256px minmax(360px, 1.15fr) minmax(300px, 0.85fr);
+  grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
+  background: var(--background);
 }
 
 .titlebar {
   grid-area: title;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
-  border-bottom: 1px solid #302f2a;
-  background: #181816;
+  gap: 16px;
+  padding: 0 20px;
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--surface);
 }
 
 .mark {
   display: grid;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 7px;
-  background: #e9ff70;
-  color: #15160c;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-ink);
   font-weight: 900;
+  letter-spacing: -0.04em;
 }
 
 .projectPicker select,
@@ -33,16 +35,18 @@
 .newProjectCancel,
 .newProjectSubmit,
 .newProjectDialogClose {
-  height: 30px;
-  border: 1px solid #3b3933;
-  border-radius: 7px;
-  background: #22221e;
-  font-size: 12px;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--font-size-label);
 }
 
 .projectPicker select {
-  min-width: 170px;
-  padding: 0 30px 0 10px;
+  min-width: 220px;
+  max-width: min(42vw, 420px);
+  padding: 0 32px 0 12px;
 }
 
 .projectControls {
@@ -73,10 +77,10 @@
   width: min(100%, 440px);
   gap: 20px;
   padding: 24px;
-  border: 1px solid #4a493f;
-  border-radius: 12px;
-  background: #1c1c19;
-  box-shadow: 0 24px 64px rgb(0 0 0 / 45%);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: 0 24px 64px rgb(0 0 0 / 38%);
 }
 
 .newProjectDialogHeading {
@@ -94,8 +98,8 @@
 .newProjectDialogClose,
 .newProjectCancel,
 .newProjectSubmit {
-  padding: 0 10px;
-  color: #d7d4cb;
+  padding: 0 14px;
+  color: var(--text-subtle);
   cursor: pointer;
 }
 
@@ -107,14 +111,14 @@
 .newProjectNameField {
   display: grid;
   gap: 7px;
-  color: #d7d4cb;
-  font-size: 13px;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
 }
 
 .newProjectNameField input {
   width: 100%;
   padding: 0 10px;
-  color: #f0eee8;
+  color: var(--text);
 }
 
 .newProjectDialogActions {
@@ -124,19 +128,19 @@
 }
 
 .newProjectSubmit {
-  border-color: #e9ff70;
-  background: #e9ff70;
-  color: #15160c;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
   font-weight: 800;
 }
 
 .foundation {
   margin-left: auto;
-  color: #77746e;
+  color: var(--text-muted);
   font:
-    10px ui-monospace,
+    11px ui-monospace,
     monospace;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -152,40 +156,47 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 12px 8px;
-  border-right: 1px solid #302f2a;
-  background: #121311;
+  gap: 6px;
+  padding: 24px 10px;
+  border-right: 1px solid var(--line-subtle);
+  background: #141914;
 }
 
 .railButton {
   width: 100%;
-  min-height: 38px;
-  border: 1px solid #35342f;
-  border-radius: 10px;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #8b887f;
-  font-size: 12px;
-  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  padding: 8px 10px;
   text-align: left;
   cursor: pointer;
 }
 
+.railButton:hover:not(:disabled) {
+  background: var(--surface-raised);
+  color: var(--text-strong);
+}
+
 .railButton[aria-pressed="true"] {
-  border-color: #e9ff70;
-  background: #25271d;
-  color: #e9ff70;
+  border-color: var(--line-strong);
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 700;
 }
 
 .navigator,
 .artifact {
-  padding: 20px;
-  background: #171714;
+  padding: 24px;
+  background: var(--surface);
+  overflow: auto;
 }
 
 .shell.explorerOpen {
   grid-template-areas: "title title title" "rail navigator artifact";
-  grid-template-columns: 128px minmax(0, 1fr) 0;
+  grid-template-columns: 112px minmax(0, 1fr) 0;
 }
 
 .shell.explorerOpen .chat,
@@ -199,20 +210,23 @@
 
 .navigator {
   grid-area: navigator;
-  border-right: 1px solid #302f2a;
+  min-width: 0;
+  overflow-x: hidden;
+  border-right: 1px solid var(--line-subtle);
 }
 
 .artifact {
   grid-area: artifact;
-  border-left: 1px solid #302f2a;
+  border-left: 1px solid var(--line-subtle);
+  background: #161b15;
 }
 
 .navigator p,
 .artifact p,
 .chat p {
-  color: #8e8a82;
-  font-size: 13px;
-  line-height: 1.6;
+  color: var(--text-muted);
+  font-size: var(--font-size-body);
+  line-height: 1.55;
 }
 
 .workCatalog {
@@ -228,14 +242,15 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  border: 1px solid #35342f;
-  border-radius: 8px;
-  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
 }
 
 .workItem:hover,
 .workItem:focus-within {
-  border-color: #e9ff70;
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
 }
 
 .workItemOpen {
@@ -243,27 +258,27 @@
   flex: 1;
   min-width: 0;
   gap: 0.3rem;
-  padding: 0.7rem;
+  padding: 0.875rem;
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: #d7d4cb;
+  color: var(--text);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-label);
   text-align: left;
 }
 
 .workItemOpen:hover {
-  background: #25251f;
+  background: transparent;
 }
 
 .deleteDialog {
   width: min(100% - 32px, 420px);
   padding: 24px;
-  border: 1px solid #4a493f;
-  border-radius: 12px;
-  background: #1c1c19;
-  color: #f0eee8;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--text);
   box-shadow: 0 24px 64px rgb(0 0 0 / 55%);
 }
 
@@ -293,7 +308,7 @@
   display: block;
   margin: 16px 0 10px;
   overflow-wrap: anywhere;
-  color: #c7c3b8;
+  color: var(--text-subtle);
   font-size: 12px;
 }
 
@@ -318,23 +333,24 @@
 }
 
 .workCatalog button small {
-  color: #8e8a82;
-  font-size: 11px;
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
 }
 
 .datasetForm {
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid #4a493f;
-  border-radius: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface-card);
 }
 
 .datasetForm label {
   display: grid;
   gap: 5px;
-  color: #c7c3b8;
-  font-size: 12px;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
 }
 
 .datasetForm input,
@@ -342,14 +358,14 @@
 .datasetForm select,
 .recordSelector {
   width: 100%;
-  border: 1px solid #3b3933;
-  border-radius: 6px;
-  background: #22221e;
-  color: #f0eee8;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
   font:
-    12px ui-monospace,
+    var(--font-size-label) ui-monospace,
     monospace;
-  padding: 7px;
+  padding: 10px;
 }
 
 .datasetFormActions {
@@ -373,8 +389,8 @@
 
 .catalogDelete {
   margin-right: 8px;
-  border: 1px solid #6c3f39;
-  border-radius: 6px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-control);
   background: transparent;
   color: #e5aaa0;
   cursor: pointer;
@@ -385,43 +401,55 @@
 .newThread,
 .threadButton {
   width: 100%;
-  border: 1px solid #35342f;
-  border-radius: 8px;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #aaa69d;
+  color: var(--text-subtle);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--font-size-label);
   text-align: left;
 }
 
 .newThread {
-  margin: 16px 0 10px;
-  padding: 9px 10px;
+  margin: 18px 0 16px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.newThread:hover,
+.threadButton:hover {
+  background: var(--surface-raised);
 }
 
 .threadList {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .threadRow {
   display: flex;
   align-items: center;
   gap: 3px;
+  min-width: 0;
 }
 
 .threadButton {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
-  padding: 9px 10px;
+  padding: 10px 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .threadButton[aria-pressed="true"] {
-  border-color: #5b5a4f;
-  background: #25251f;
-  color: #f0eee8;
+  border-color: var(--line-strong);
+  background: var(--surface-selected);
+  color: var(--text-strong);
+  font-weight: 700;
 }
 
 .threadRow > div {
@@ -438,26 +466,27 @@
   grid-area: chat;
   min-width: 0;
   min-height: 0;
-  background: #11110f;
+  background: var(--background);
 }
 
 .chatPlaceholder {
   display: grid;
   height: 100%;
   place-content: center;
-  max-width: 620px;
+  max-width: 640px;
   margin: auto;
-  padding: 40px;
+  padding: clamp(28px, 6vw, 64px);
 }
 
 .chat h1 {
-  margin: 8px 0;
-  font-size: clamp(28px, 5vw, 52px);
-  letter-spacing: -0.04em;
+  margin: 12px 0 20px;
+  font-size: clamp(32px, 4vw, 54px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
 }
 
 .eyebrow {
-  color: #e9ff70 !important;
+  color: var(--accent) !important;
   font:
     700 10px ui-monospace,
     monospace !important;
@@ -466,7 +495,7 @@
 }
 
 .error {
-  color: #ff9b86 !important;
+  color: var(--danger) !important;
 }
 
 .srOnly {
@@ -503,18 +532,28 @@
     display: none;
   }
 
-  .mobileNavigationToggle {
-    display: inline-flex;
-    height: 30px;
-    flex: 0 0 auto;
-    align-items: center;
-    border: 1px solid #e9ff70;
-    border-radius: 7px;
-    background: #e9ff70;
-    color: #15160c;
-    font-size: 12px;
-    font-weight: 800;
-  }
+.mobileNavigationToggle {
+  display: inline-flex;
+  min-height: 40px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--font-size-label);
+  font-weight: 800;
+}
+
+.mobileNavigationToggle::before {
+  width: 14px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 -5px currentColor, 0 5px currentColor;
+  content: "";
+}
 
   .mobileNavigationBackdrop {
     display: block;
@@ -525,7 +564,7 @@
     background: rgb(0 0 0 / 55%);
   }
 
-  .mobileNavigationDrawer {
+.mobileNavigationDrawer {
     display: block;
     position: fixed;
     z-index: 11;
@@ -534,49 +573,51 @@
     left: 0;
     width: min(340px, calc(100vw - 32px));
     overflow-y: auto;
-    border-right: 1px solid #302f2a;
-    background: #171714;
+  border-right: 1px solid var(--line-subtle);
+  background: var(--surface);
     box-shadow: 12px 0 32px rgb(0 0 0 / 30%);
   }
 
-  .mobileNavigationHeader {
+.mobileNavigationHeader {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-height: 52px;
+  min-height: 56px;
     padding: 0 14px;
-    border-bottom: 1px solid #302f2a;
+  border-bottom: 1px solid var(--line-subtle);
   }
 
-  .mobileNavigationClose {
-    border: 0;
-    background: transparent;
-    color: #d7d4cb;
-    font-size: 12px;
+.mobileNavigationClose {
+  min-height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
   }
 
-  .mobileViewList {
+.mobileViewList {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     padding: 14px;
-    border-bottom: 1px solid #302f2a;
+  border-bottom: 1px solid var(--line-subtle);
   }
 
-  .mobileViewButton {
-    min-height: 38px;
-    border: 1px solid #35342f;
-    border-radius: 8px;
-    background: transparent;
-    color: #aaa69d;
-    font-size: 12px;
+.mobileViewButton {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  padding: 8px;
     text-align: left;
   }
 
-  .mobileViewButton[aria-pressed="true"] {
-    border-color: #e9ff70;
-    background: #25271d;
-    color: #e9ff70;
+.mobileViewButton[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
   }
 
   .mobileNavigatorContent {
@@ -616,15 +657,16 @@
     overflow: auto;
   }
 
-  .mobileReturnToChat {
-    display: block;
+.mobileReturnToChat {
+  display: block;
+  min-height: 40px;
     margin-bottom: 16px;
-    border: 1px solid #3b3933;
-    border-radius: 7px;
-    background: #22221e;
-    color: #d7d4cb;
-    font-size: 12px;
-    padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+  padding: 8px 12px;
   }
 }
 

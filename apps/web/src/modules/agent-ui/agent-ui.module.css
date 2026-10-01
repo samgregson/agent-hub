@@ -8,33 +8,34 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 28px clamp(20px, 5vw, 64px) 18px;
+  padding: 40px clamp(24px, 5vw, 72px) 20px;
 }
 
 .empty {
   display: grid;
   min-height: 60vh;
   place-content: center;
-  max-width: 620px;
+  max-width: 640px;
   margin: auto;
 }
 
 .empty h1 {
-  margin: 8px 0;
-  font-size: clamp(28px, 5vw, 52px);
-  letter-spacing: -0.04em;
+  margin: 12px 0 20px;
+  font-size: clamp(32px, 4vw, 54px);
+  line-height: 1.08;
+  letter-spacing: -0.035em;
 }
 
 .empty p,
 .message,
 .runError {
-  color: var(--text-muted);
-  font-size: 14px;
+  color: var(--text-subtle);
+  font-size: var(--font-size-body);
   line-height: 1.65;
 }
 
 .eyebrow {
-  color: #e9ff70 !important;
+  color: var(--accent) !important;
   font:
     700 10px ui-monospace,
     monospace !important;
@@ -43,32 +44,32 @@
 }
 
 .message {
-  width: min(100%, 760px);
-  margin: 0 auto 18px;
+  width: min(100%, 740px);
+  margin: 0 auto 22px;
 }
 
 .messageAuthor {
   display: block;
   margin-bottom: var(--space-1);
-  color: var(--muted);
-  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .assistantMessage {
-  padding: var(--space-3) 0;
+  padding: var(--space-4) 0;
 }
 
 .userMessage {
   width: fit-content;
   max-width: min(80%, 680px);
   margin-right: clamp(0px, 3vw, 40px);
-  padding: 10px 14px;
+  padding: 12px 16px;
   border: 1px solid var(--line);
-  border-radius: 14px 14px 3px 14px;
-  background: var(--surface-raised);
+  border-radius: 14px 14px 4px 14px;
+  background: var(--surface-card);
   color: var(--text);
 }
 
@@ -138,28 +139,28 @@
 
 .runStatus {
   display: flex;
-  width: min(100%, 760px);
-  margin: 0 auto 12px;
+  width: min(100%, 740px);
+  margin: 0 auto 16px;
   gap: 12px;
-  color: #aaa69d;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
   text-transform: capitalize;
 }
 
 .toolCall {
-  margin: 12px 0;
-  padding: 12px;
-  border: 1px solid #38372f;
-  border-radius: 10px;
-  background: #181815;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface-card);
 }
 
 .approvalCard {
-  margin: 12px 0;
-  padding: 12px;
+  margin: 16px 0;
+  padding: 18px;
   border: 1px solid var(--accent);
-  border-radius: 10px;
-  background: var(--surface-raised);
+  border-radius: var(--radius-panel);
+  background: var(--surface-card);
 }
 
 .approvalCard p {
@@ -168,8 +169,8 @@
 
 .toolCall pre {
   overflow-x: auto;
-  color: #aaa69d;
-  font-size: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-size-code);
 }
 
 .approvalActions {
@@ -178,45 +179,58 @@
 }
 
 .approvalActions button {
-  padding: 7px 10px;
-  border: 1px solid #5b5a4f;
-  border-radius: 7px;
-  background: #25251f;
-  color: #f0eee8;
+  min-height: var(--control-height);
+  padding: 8px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
   cursor: pointer;
 }
 
+.approvalActions button:first-child {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 750;
+}
+
 .runError {
-  width: min(100%, 760px);
+  width: min(100%, 740px);
   margin: 0 auto 12px;
 }
 
 .footer {
   position: sticky;
   bottom: -18px;
-  width: min(100%, 760px);
+  width: min(100%, 740px);
   margin: auto auto 0;
   padding: 12px 0 18px;
-  background: linear-gradient(transparent, #11110f 20%);
+  background: linear-gradient(transparent, var(--background) 20%);
 }
 
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  padding: 10px;
-  border: 1px solid #3b3933;
-  border-radius: 14px;
-  background: #1b1b18;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 16px;
+  background: var(--surface-card);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+}
+
+.composer:focus-within {
+  border-color: var(--accent);
 }
 
 .input {
-  min-height: 46px;
+  min-height: 52px;
   resize: none;
   border: 0;
   outline: 0;
   background: transparent;
-  color: #f4f1eb;
+  color: var(--text-strong);
   font: inherit;
   line-height: 1.5;
 }
@@ -229,23 +243,23 @@
 
 .send,
 .cancel {
-  height: 34px;
-  padding: 0 12px;
-  border: 1px solid #46443e;
-  border-radius: 8px;
+  min-height: var(--control-height);
+  padding: 0 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
   cursor: pointer;
 }
 
 .send {
-  border-color: #e9ff70;
-  background: #e9ff70;
-  color: #15160c;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
   font-weight: 700;
 }
 
 .cancel {
   background: transparent;
-  color: #aaa69d;
+  color: var(--text-muted);
 }
 
 .send:disabled,

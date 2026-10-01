@@ -329,7 +329,7 @@ export function ProjectWorkspace() {
           onClick={() => setIsMobileNavigationOpen(true)}
           type="button"
         >
-          ☰ Navigation
+          Navigation
         </button>
         <span className={styles.foundation}>
           Foundation · Project workspace

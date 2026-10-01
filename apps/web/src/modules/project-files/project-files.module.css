@@ -12,20 +12,20 @@
 }
 
 .preview header code {
-  color: var(--muted);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
 .preview header span,
 .preview footer {
-  color: var(--muted);
-  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
 }
 
 .preview pre {
-  background: #111210;
+  background: var(--background);
   border: 1px solid var(--line);
-  border-radius: 0.45rem;
+  border-radius: var(--radius-control);
   margin: 0;
   min-height: 0;
   overflow: auto;
@@ -39,7 +39,7 @@
 }
 
 .error {
-  color: #ff9585;
+  color: var(--danger);
 }
 
 .catalog {
@@ -49,17 +49,22 @@
 
 .catalog p,
 .catalog span {
-  color: var(--muted);
-  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
 }
 
 .catalog button {
   display: grid;
   gap: 0.3rem;
-  padding: 0.7rem;
+  padding: var(--space-3);
   border: 1px solid var(--line);
-  border-radius: 0.45rem;
-  background: var(--surface-raised);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
   color: var(--text);
   text-align: left;
+}
+
+.catalog button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
 }
