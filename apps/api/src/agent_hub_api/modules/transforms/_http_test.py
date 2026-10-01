@@ -5,6 +5,7 @@ from httpx import ASGITransport, AsyncClient
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
+    MemoryTransformRunStore,
     MemoryTransformStore,
     TransformModule,
     create_transform_router,
@@ -85,3 +86,43 @@ async def test_preview_http_uses_definition_and_returns_transient_output() -> No
         "output": {"value": 6}, "runtime": "pyodide:314.0.7",
         "sourceHash": definition.source_hash,
     }
+
+
+@pytest.mark.asyncio
+async def test_durable_run_http_can_be_inspected_after_execution() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+
+    class Runner:
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"value": 6}, "pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+    )
+    definition = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"}, {"type": "object"},
+    )
+    app = FastAPI()
+    app.include_router(
+        create_transform_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            transforms,
+        ),
+        prefix="/api",
+    )
+    path = f"/api/projects/{project.id}/transforms"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        started = await client.post(
+            f"{path}/{definition.id}/runs",
+            json={"record": {"load": 3}, "parameters": {}},
+        )
+        assert started.status_code == 201
+        loaded = await client.get(f"{path}/runs/{started.json()['id']}")
+    assert loaded.status_code == 200
+    assert loaded.json() == started.json()
+    assert loaded.json()["outputManifest"]["kind"] == "json"

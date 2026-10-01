@@ -39,6 +39,26 @@ class TransformPreview:
     source_hash: str
 
 
+@dataclass(frozen=True, slots=True)
+class TransformRun:
+    id: str
+    project_id: str
+    definition_id: str
+    status: str
+    definition_snapshot: Mapping[str, object]
+    inputs: Mapping[str, object]
+    parameters: Mapping[str, object]
+    input_hash: str
+    source_hash: str
+    runtime: str | None
+    output: object | None
+    output_manifest: Mapping[str, object]
+    error: str | None
+    initiator_subject: str
+    created_at: datetime
+    completed_at: datetime | None
+
+
 class TransformNotFound(Exception):
     """The Transform Definition is unavailable in this Project."""
 
@@ -69,16 +89,25 @@ class TransformRunner(Protocol):
     ) -> tuple[object, str]: ...
 
 
+class TransformRunStore(Protocol):
+    async def create(self, run: TransformRun) -> TransformRun: ...
+    async def complete(self, run: TransformRun) -> TransformRun: ...
+    async def load(self, project_id: str, run_id: str) -> TransformRun | None: ...
+    async def reconcile_running(self, now: datetime) -> int: ...
+
+
 class TransformModule:
     """Own validation and authorized lifecycle of Transform Definitions."""
 
     def __init__(
         self, projects: ProjectModule, store: TransformStore,
         runner: TransformRunner | None = None,
+        run_store: TransformRunStore | None = None,
     ) -> None:
         self._projects = projects
         self._store = store
         self._runner = runner
+        self._run_store = run_store
 
     async def define(
         self,
@@ -156,24 +185,78 @@ class TransformModule:
         definition = await self.load(access, project_id, definition_id)
         if self._runner is None:
             raise TransformExecutionError("runner_unavailable")
-        inputs = {
-            name: _select(record, pointer)
-            for name, pointer in definition.input_selectors.items()
-        }
-        parameter_values = dict(parameters)
-        try:
-            if len(json.dumps(
-                {"inputs": inputs, "parameters": parameter_values}, allow_nan=False
-            ).encode()) > 64_000:
-                raise TransformValidationError("Transform inputs exceed 64000 bytes.")
-        except (TypeError, ValueError) as error:
-            raise TransformValidationError("Transform inputs must be JSON values.") from error
+        inputs, parameter_values = _inputs(definition, record, parameters)
         output, runtime = await self._runner.execute(
             definition.source, inputs, parameter_values
         )
         if not Draft202012Validator(definition.output_schema).is_valid(output):
             raise TransformValidationError("Transform output does not match its output schema.")
         return TransformPreview(output, runtime, definition.source_hash)
+
+    async def start_run(
+        self, access: ProjectAccess, project_id: str, definition_id: str,
+        record: Mapping[str, object], parameters: Mapping[str, object],
+    ) -> TransformRun:
+        definition = await self.load(access, project_id, definition_id)
+        if self._run_store is None:
+            raise TransformExecutionError("run_store_unavailable")
+        inputs, parameter_values = _inputs(definition, record, parameters)
+        input_bytes = _canonical({"inputs": inputs, "parameters": parameter_values})
+        now = datetime.now(UTC)
+        run = await self._run_store.create(TransformRun(
+            id=str(uuid4()), project_id=project_id, definition_id=definition_id,
+            status="running", definition_snapshot={
+                "name": definition.name, "source": definition.source,
+                "input_selectors": dict(definition.input_selectors),
+                "output_schema": dict(definition.output_schema),
+                "revision": definition.revision,
+            },
+            inputs=inputs, parameters=parameter_values,
+            input_hash=hashlib.sha256(input_bytes).hexdigest(),
+            source_hash=definition.source_hash, runtime=None, output=None,
+            output_manifest={}, error=None, initiator_subject=access.subject,
+            created_at=now, completed_at=None,
+        ))
+        try:
+            if self._runner is None:
+                raise TransformExecutionError("runner_unavailable")
+            output, runtime = await self._runner.execute(
+                definition.source, inputs, parameter_values
+            )
+            if not Draft202012Validator(definition.output_schema).is_valid(output):
+                raise TransformExecutionError("output_schema")
+            output_bytes = _canonical(output)
+            if len(output_bytes) > 128_000:
+                raise TransformExecutionError("output_limit")
+            completed = replace(
+                run, status="succeeded", runtime=runtime, output=output,
+                output_manifest={
+                    "kind": "json", "bytes": len(output_bytes),
+                    "sha256": hashlib.sha256(output_bytes).hexdigest(),
+                },
+                completed_at=datetime.now(UTC),
+            )
+        except TransformExecutionError as error:
+            completed = replace(
+                run, status="failed", error=error.code, completed_at=datetime.now(UTC)
+            )
+        return await self._run_store.complete(completed)
+
+    async def load_run(
+        self, access: ProjectAccess, project_id: str, run_id: str
+    ) -> TransformRun:
+        await self._authorize(access, project_id)
+        if self._run_store is None:
+            raise TransformExecutionError("run_store_unavailable")
+        run = await self._run_store.load(project_id, run_id)
+        if run is None:
+            raise TransformNotFound
+        return run
+
+    async def recover(self) -> int:
+        if self._run_store is None:
+            return 0
+        return await self._run_store.reconcile_running(datetime.now(UTC))
 
     async def _authorize(self, access: ProjectAccess, project_id: str) -> None:
         try:
@@ -193,6 +276,56 @@ def _select(record: Mapping[str, object], pointer: str) -> object:
         else:
             raise TransformValidationError("Transform input selector did not match the record.")
     return value
+
+
+def _canonical(value: object) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode()
+
+
+def _inputs(
+    definition: TransformDefinition, record: Mapping[str, object],
+    parameters: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    inputs = {
+        name: _select(record, pointer)
+        for name, pointer in definition.input_selectors.items()
+    }
+    parameter_values = dict(parameters)
+    try:
+        if len(_canonical({"inputs": inputs, "parameters": parameter_values})) > 64_000:
+            raise TransformValidationError("Transform inputs exceed 64000 bytes.")
+    except (TypeError, ValueError) as error:
+        raise TransformValidationError("Transform inputs must be JSON values.") from error
+    return inputs, parameter_values
+
+
+class MemoryTransformRunStore:
+    def __init__(self) -> None:
+        self._runs: dict[tuple[str, str], TransformRun] = {}
+
+    async def create(self, run: TransformRun) -> TransformRun:
+        self._runs[(run.project_id, run.id)] = run
+        return run
+
+    async def complete(self, run: TransformRun) -> TransformRun:
+        key = (run.project_id, run.id)
+        if self._runs[key].status != "running":
+            raise TransformExecutionError("run_already_completed")
+        self._runs[key] = run
+        return run
+
+    async def load(self, project_id: str, run_id: str) -> TransformRun | None:
+        return self._runs.get((project_id, run_id))
+
+    async def reconcile_running(self, now: datetime) -> int:
+        active = [key for key, run in self._runs.items() if run.status == "running"]
+        for key in active:
+            self._runs[key] = replace(
+                self._runs[key], status="failed", error="interrupted", completed_at=now
+            )
+        return len(active)
 
 
 def _validate_definition(
@@ -358,12 +491,17 @@ def _from_row(row: Mapping[str, object]) -> TransformDefinition:
 
 
 def create_postgres_transform_module(
-    settings: Settings, projects: ProjectModule
+    settings: Settings, projects: ProjectModule,
+    runner: TransformRunner | None = None,
 ) -> TransformModule:
+    from agent_hub_api.modules.transforms._run_store import PostgresTransformRunStore
     from agent_hub_api.modules.transforms._runner import DenoTransformRunner
 
-    runner = (
+    resolved_runner = runner or (
         DenoTransformRunner(settings.transform_runner_url)
         if settings.transform_runner_url else None
     )
-    return TransformModule(projects, PostgresTransformStore(settings), runner)
+    return TransformModule(
+        projects, PostgresTransformStore(settings), resolved_runner,
+        PostgresTransformRunStore(settings),
+    )

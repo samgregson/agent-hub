@@ -96,6 +96,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await resolved_agent_execution.reconcile_non_terminal()
         await resolved_batches.recover()
+        await resolved_transforms.recover()
         yield
         if deep_agent_runner is not None:
             await deep_agent_runner.close()

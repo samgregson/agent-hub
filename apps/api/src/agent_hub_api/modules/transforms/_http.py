@@ -16,6 +16,7 @@ from agent_hub_api.modules.transforms._application import (
     TransformExecutionError,
     TransformModule,
     TransformNotFound,
+    TransformRun,
     TransformValidationError,
 )
 
@@ -55,6 +56,24 @@ class PreviewResponse(_Model):
     source_hash: str
 
 
+class RunResponse(_Model):
+    id: str
+    definition_id: str
+    status: str
+    definition_snapshot: dict[str, object]
+    inputs: dict[str, object]
+    parameters: dict[str, object]
+    input_hash: str
+    source_hash: str
+    runtime: str | None
+    output: object | None
+    output_manifest: dict[str, object]
+    error: str | None
+    initiator_subject: str
+    created_at: str
+    completed_at: str | None
+
+
 def _response(definition: TransformDefinition) -> DefinitionResponse:
     return DefinitionResponse(
         id=definition.id,
@@ -67,6 +86,18 @@ def _response(definition: TransformDefinition) -> DefinitionResponse:
         revision=definition.revision,
         created_at=definition.created_at.isoformat(),
         updated_at=definition.updated_at.isoformat(),
+    )
+
+
+def _run_response(run: TransformRun) -> RunResponse:
+    return RunResponse(
+        id=run.id, definition_id=run.definition_id, status=run.status,
+        definition_snapshot=dict(run.definition_snapshot), inputs=dict(run.inputs),
+        parameters=dict(run.parameters), input_hash=run.input_hash,
+        source_hash=run.source_hash, runtime=run.runtime, output=run.output,
+        output_manifest=dict(run.output_manifest), error=run.error,
+        initiator_subject=run.initiator_subject, created_at=run.created_at.isoformat(),
+        completed_at=run.completed_at.isoformat() if run.completed_at else None,
     )
 
 
@@ -153,6 +184,34 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                 source_hash=result.source_hash,
             )
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+
+    @router.post(
+        "/{definition_id}/runs", response_model=RunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def start_run(
+        project_id: str, definition_id: str, body: PreviewRequest,
+        request_context: Context,
+    ) -> RunResponse:
+        try:
+            run = await transforms.start_run(
+                access(request_context), project_id, definition_id,
+                body.record, body.parameters,
+            )
+            return _run_response(run)
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+
+    @router.get("/runs/{run_id}", response_model=RunResponse)
+    async def load_run(
+        project_id: str, run_id: str, request_context: Context
+    ) -> RunResponse:
+        try:
+            return _run_response(await transforms.load_run(
+                access(request_context), project_id, run_id
+            ))
+        except (TransformNotFound, TransformExecutionError) as error:
             raise failure(error) from error
 
     @router.put("/{definition_id}", response_model=DefinitionResponse)
