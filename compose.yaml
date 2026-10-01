@@ -26,6 +26,7 @@ services:
       AGENT_HUB_IDENTITY_MODE: fixed
       AGENT_HUB_OPENAI_API_KEY: ${AGENT_HUB_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
       AGENT_HUB_OPENAI_MODEL: ${AGENT_HUB_OPENAI_MODEL:-gpt-5.1}
+      AGENT_HUB_TRANSFORM_RUNNER_URL: http://transform-runner:8000
     depends_on:
       postgres:
         condition: service_healthy

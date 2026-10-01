@@ -10,6 +10,62 @@ from agent_hub_api.modules.transforms import (
 
 
 @pytest.mark.asyncio
+async def test_preview_resolves_selectors_and_validates_runner_output() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    outsider = ProjectAccess(subject="alex")
+    project = await projects.create(owner, "Bridge")
+
+    class Runner:
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert "def transform" in source
+            assert inputs == {"load": 3}
+            assert parameters == {"factor": 2}
+            return {"value": 6}, "pyodide:314.0.7"
+
+    transforms = TransformModule(projects, MemoryTransformStore(), Runner())
+    definition = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load~1value"},
+        {"type": "object", "required": ["value"], "properties": {"value": {"type": "number"}}},
+    )
+    preview = await transforms.preview(
+        owner, project.id, definition.id, {"load/value": 3}, {"factor": 2}
+    )
+    assert preview.output == {"value": 6}
+    assert preview.runtime == "pyodide:314.0.7"
+    assert preview.source_hash == definition.source_hash
+    with pytest.raises(TransformNotFound):
+        await transforms.preview(outsider, project.id, definition.id, {"load/value": 3}, {})
+    with pytest.raises(TransformValidationError, match="selector"):
+        await transforms.preview(owner, project.id, definition.id, {}, {})
+
+
+@pytest.mark.asyncio
+async def test_preview_rejects_output_outside_declared_schema() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+
+    class Runner:
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"value": "wrong"}, "pyodide:314.0.7"
+
+    transforms = TransformModule(projects, MemoryTransformStore(), Runner())
+    definition = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object", "properties": {"value": {"type": "number"}}},
+    )
+    with pytest.raises(TransformValidationError, match="output schema"):
+        await transforms.preview(owner, project.id, definition.id, {"load": 3}, {})
+
+
+@pytest.mark.asyncio
 async def test_definition_is_project_scoped_and_revisions_keep_identity() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="sam")

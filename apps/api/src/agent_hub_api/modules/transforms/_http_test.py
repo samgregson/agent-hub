@@ -47,3 +47,41 @@ async def test_transform_definition_http_round_trip() -> None:
     assert invalid.status_code == 422
     assert deleted.status_code == 204
     assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_preview_http_uses_definition_and_returns_transient_output() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
+
+    class Runner:
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert inputs == {"load": 3}
+            return {"value": 6}, "pyodide:314.0.7"
+
+    transforms = TransformModule(projects, MemoryTransformStore(), Runner())
+    definition = await transforms.define(
+        ProjectAccess(subject="sam"), project.id, "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"}, {"type": "object"},
+    )
+    app = FastAPI()
+    app.include_router(
+        create_transform_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            transforms,
+        ),
+        prefix="/api",
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            f"/api/projects/{project.id}/transforms/{definition.id}/preview",
+            json={"record": {"load": 3}, "parameters": {}},
+        )
+    assert response.status_code == 200
+    assert response.json() == {
+        "output": {"value": 6}, "runtime": "pyodide:314.0.7",
+        "sourceHash": definition.source_hash,
+    }

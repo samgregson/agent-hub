@@ -32,12 +32,27 @@ class TransformDefinition:
     updated_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class TransformPreview:
+    output: object
+    runtime: str
+    source_hash: str
+
+
 class TransformNotFound(Exception):
     """The Transform Definition is unavailable in this Project."""
 
 
 class TransformValidationError(Exception):
     """The Transform Definition does not meet its declared contract."""
+
+
+class TransformExecutionError(Exception):
+    """The isolated Transform runner could not produce a valid output."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 class TransformStore(Protocol):
@@ -48,12 +63,22 @@ class TransformStore(Protocol):
     async def delete(self, project_id: str, definition_id: str) -> bool: ...
 
 
+class TransformRunner(Protocol):
+    async def execute(
+        self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+    ) -> tuple[object, str]: ...
+
+
 class TransformModule:
     """Own validation and authorized lifecycle of Transform Definitions."""
 
-    def __init__(self, projects: ProjectModule, store: TransformStore) -> None:
+    def __init__(
+        self, projects: ProjectModule, store: TransformStore,
+        runner: TransformRunner | None = None,
+    ) -> None:
         self._projects = projects
         self._store = store
+        self._runner = runner
 
     async def define(
         self,
@@ -124,11 +149,50 @@ class TransformModule:
         if not await self._store.delete(project_id, definition_id):
             raise TransformNotFound
 
+    async def preview(
+        self, access: ProjectAccess, project_id: str, definition_id: str,
+        record: Mapping[str, object], parameters: Mapping[str, object],
+    ) -> TransformPreview:
+        definition = await self.load(access, project_id, definition_id)
+        if self._runner is None:
+            raise TransformExecutionError("runner_unavailable")
+        inputs = {
+            name: _select(record, pointer)
+            for name, pointer in definition.input_selectors.items()
+        }
+        parameter_values = dict(parameters)
+        try:
+            if len(json.dumps(
+                {"inputs": inputs, "parameters": parameter_values}, allow_nan=False
+            ).encode()) > 64_000:
+                raise TransformValidationError("Transform inputs exceed 64000 bytes.")
+        except (TypeError, ValueError) as error:
+            raise TransformValidationError("Transform inputs must be JSON values.") from error
+        output, runtime = await self._runner.execute(
+            definition.source, inputs, parameter_values
+        )
+        if not Draft202012Validator(definition.output_schema).is_valid(output):
+            raise TransformValidationError("Transform output does not match its output schema.")
+        return TransformPreview(output, runtime, definition.source_hash)
+
     async def _authorize(self, access: ProjectAccess, project_id: str) -> None:
         try:
             await self._projects.load(access, project_id)
         except ProjectNotFound as error:
             raise TransformNotFound from error
+
+
+def _select(record: Mapping[str, object], pointer: str) -> object:
+    value: object = record
+    for raw in pointer[1:].split("/"):
+        key = raw.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, dict) and key in value:
+            value = value[key]
+        elif isinstance(value, list) and key.isdecimal() and int(key) < len(value):
+            value = value[int(key)]
+        else:
+            raise TransformValidationError("Transform input selector did not match the record.")
+    return value
 
 
 def _validate_definition(
@@ -296,4 +360,10 @@ def _from_row(row: Mapping[str, object]) -> TransformDefinition:
 def create_postgres_transform_module(
     settings: Settings, projects: ProjectModule
 ) -> TransformModule:
-    return TransformModule(projects, PostgresTransformStore(settings))
+    from agent_hub_api.modules.transforms._runner import DenoTransformRunner
+
+    runner = (
+        DenoTransformRunner(settings.transform_runner_url)
+        if settings.transform_runner_url else None
+    )
+    return TransformModule(projects, PostgresTransformStore(settings), runner)

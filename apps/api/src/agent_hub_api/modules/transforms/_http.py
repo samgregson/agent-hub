@@ -13,6 +13,7 @@ from agent_hub_api.modules.identity import (
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms._application import (
     TransformDefinition,
+    TransformExecutionError,
     TransformModule,
     TransformNotFound,
     TransformValidationError,
@@ -41,6 +42,17 @@ class DefinitionResponse(_Model):
     revision: int
     created_at: str
     updated_at: str
+
+
+class PreviewRequest(_Model):
+    record: dict[str, object]
+    parameters: dict[str, object]
+
+
+class PreviewResponse(_Model):
+    output: object
+    runtime: str
+    source_hash: str
 
 
 def _response(definition: TransformDefinition) -> DefinitionResponse:
@@ -80,6 +92,16 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
             return HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Transform not found"
             )
+        if isinstance(error, TransformExecutionError):
+            status_code = {
+                "timeout": status.HTTP_504_GATEWAY_TIMEOUT,
+                "input_limit": status.HTTP_413_CONTENT_TOO_LARGE,
+                "output_limit": status.HTTP_413_CONTENT_TOO_LARGE,
+                "execution_failed": status.HTTP_422_UNPROCESSABLE_CONTENT,
+                "runner_unavailable": status.HTTP_503_SERVICE_UNAVAILABLE,
+                "busy": status.HTTP_503_SERVICE_UNAVAILABLE,
+            }.get(error.code, status.HTTP_502_BAD_GATEWAY)
+            return HTTPException(status_code=status_code, detail=error.code)
         return HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
         )
@@ -114,6 +136,23 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
             definition = await transforms.load(access(request_context), project_id, definition_id)
             return _response(definition)
         except TransformNotFound as error:
+            raise failure(error) from error
+
+    @router.post("/{definition_id}/preview", response_model=PreviewResponse)
+    async def preview(
+        project_id: str, definition_id: str, body: PreviewRequest,
+        request_context: Context,
+    ) -> PreviewResponse:
+        try:
+            result = await transforms.preview(
+                access(request_context), project_id, definition_id,
+                body.record, body.parameters,
+            )
+            return PreviewResponse(
+                output=result.output, runtime=result.runtime,
+                source_hash=result.source_hash,
+            )
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error
 
     @router.put("/{definition_id}", response_model=DefinitionResponse)
