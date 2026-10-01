@@ -4,10 +4,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, cast
 from uuid import uuid4
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
@@ -745,16 +745,20 @@ async def _load(
         BatchRunStatus(str(row["status"])),
         _obj(row["definition_snapshot"]),
         records,
-        row["created_at"],
-        row["updated_at"],
+        cast(datetime, row["created_at"]),
+        cast(datetime, row["updated_at"]),
         str(row["idempotency_key"]) if row["idempotency_key"] is not None else None,
         str(row["initiator_subject"]) if row["initiator_subject"] is not None else None,
-        row["archived_at"],  # type: ignore[arg-type]
+        cast(datetime | None, row["archived_at"]),
     )
 
 
 def _obj(value: object) -> Mapping[str, object]:
-    return json.loads(value) if isinstance(value, str) else dict(value)  # type: ignore[arg-type]
+    if isinstance(value, str):
+        value = json.loads(value)
+    if isinstance(value, Mapping):
+        return dict(value)
+    raise TypeError("Stored Batch Run JSON must be an object")
 
 
 def _select(value: Mapping[str, object], pointer: str) -> object:

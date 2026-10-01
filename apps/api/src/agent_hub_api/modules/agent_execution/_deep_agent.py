@@ -1,5 +1,5 @@
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -34,7 +34,13 @@ from agent_hub_api.modules.agent_execution._project_files_backend import (
 from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
 from agent_hub_api.modules.batch_execution import BatchExecutionModule
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
-from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
+from agent_hub_api.modules.plugin_gateway import (
+    PluginGatewayModule,
+    PluginManifest,
+    PluginResultRecorder,
+    PluginTool,
+    PluginToolResult,
+)
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.settings import Settings
@@ -241,14 +247,20 @@ class PostgresDeepAgentRunner:
 
     def _snapshot_recorder(
         self, project_id: str, thread_id: str | None, run_id: str | None, subject: str | None
-    ):
+    ) -> PluginResultRecorder | None:
         if self._artifacts is None or thread_id is None or run_id is None or subject is None:
             return None
+        artifacts = self._artifacts
 
-        async def record(manifest, tool, arguments, result) -> None:
+        async def record(
+            manifest: PluginManifest,
+            tool: PluginTool,
+            arguments: Mapping[str, object],
+            result: PluginToolResult,
+        ) -> None:
             if result.structured_content is None:
                 return
-            await self._artifacts.create_tool_result_snapshot(
+            await artifacts.create_tool_result_snapshot(
                 ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id),
                 project_id,
                 plugin_id=manifest.id,
@@ -557,11 +569,11 @@ def _dataset_records(value: str) -> list[DatasetRecordInput]:
     for item in parsed:
         if not isinstance(item, dict):
             raise ValueError("Every Dataset Record must be a JSON object.")
-        value = dict(item)
-        source_key = value.pop("sourceKey", None)
+        record_value = dict(item)
+        source_key = record_value.pop("sourceKey", None)
         if source_key is not None and not isinstance(source_key, str):
             raise ValueError("Dataset Record sourceKey values must be strings.")
-        records.append(DatasetRecordInput(value, source_key))
+        records.append(DatasetRecordInput(record_value, source_key))
     return records
 
 

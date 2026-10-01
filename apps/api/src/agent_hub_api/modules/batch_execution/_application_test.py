@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 from fastapi import FastAPI
@@ -20,7 +21,7 @@ from agent_hub_api.modules.datasets import (
     MemoryDatasetStore,
 )
 from agent_hub_api.modules.identity import create_identity_module
-from agent_hub_api.modules.plugin_gateway import PluginToolResult
+from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolResult
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.settings import Settings
 
@@ -48,7 +49,9 @@ class Gateway:
         self, _access: ProjectAccess, _project_id: str, _plugin_id: str, _tool_name: str,
         arguments: Mapping[str, object],
     ) -> PluginToolResult:
-        load = int(arguments["load"])
+        raw_load = arguments["load"]
+        assert isinstance(raw_load, (int, float))
+        load = int(raw_load)
         self.calls.append(load)
         self.active += 1
         self.maximum_active = max(self.maximum_active, self.active)
@@ -94,7 +97,8 @@ async def create_module(
         access,
         project.id,
         BatchExecutionModule(
-            projects, datasets, gateway, MemoryBatchRunStore(), max_concurrency=max_concurrency
+            projects, datasets, cast(PluginGatewayModule, gateway), MemoryBatchRunStore(),
+            max_concurrency=max_concurrency,
         ),
         definition.id,
     )
@@ -312,7 +316,7 @@ async def test_restart_reconciliation_fails_non_terminal_batch_runs() -> None:
     gateway = Gateway()
     access, project_id, batches, definition_id = await create_module(gateway)
     now = datetime.now(UTC)
-    await batches._store.create_or_load(  # type: ignore[attr-defined]
+    await batches._store.create_or_load(
         BatchRun(
             "queued-run", project_id, definition_id, BatchRunStatus.queued, {}, (), now, now
         )

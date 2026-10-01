@@ -2,12 +2,12 @@ import json
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from langchain_core.tools import BaseTool, StructuredTool
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
-from pydantic import create_model
+from pydantic import BaseModel, create_model
 
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule
 from agent_hub_api.settings import Settings
@@ -469,18 +469,24 @@ def _agent_tool(
 
 def _input_model(
     manifest: PluginManifest, plugin_tool: PluginTool, discovered: PluginDiscoveredTool
-) -> type[Any]:
+) -> type[BaseModel]:
     schema = discovered.input_schema or {}
     declared_required = schema.get("required", [])
     required = set(declared_required) if isinstance(declared_required, list) else set()
     properties = schema.get("properties", {})
-    fields: dict[str, tuple[type[object], object]] = {}
+    fields: dict[str, tuple[type[Any], Any]] = {}
     if isinstance(properties, Mapping):
         for name, definition in properties.items():
             if not isinstance(name, str) or not isinstance(definition, Mapping):
                 continue
-            value_type = {"number": float, "integer": int, "boolean": bool}.get(
-                definition.get("type"), str
+            declared_type = definition.get("type")
+            value_type = (
+                {"number": float, "integer": int, "boolean": bool}.get(declared_type, str)
+                if isinstance(declared_type, str)
+                else str
             )
             fields[name] = (value_type, ... if name in required else None)
-    return create_model(f"{manifest.id}_{plugin_tool.name}_Input", **fields)
+    return cast(
+        type[BaseModel],
+        create_model(f"{manifest.id}_{plugin_tool.name}_Input", **cast(Any, fields)),
+    )

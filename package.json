@@ -13,7 +13,7 @@
     "format:check": "pnpm --recursive --if-present format:check && uv run ruff format --check apps/api",
     "lint": "pnpm architecture:check && pnpm ui:check && pnpm --recursive --if-present lint && uv run ruff check apps/api",
     "test": "pnpm --recursive --if-present test && uv run pytest",
-    "typecheck": "pnpm --recursive --if-present typecheck && uv run mypy apps/api/src apps/api/tests"
+    "typecheck": "pnpm --recursive --if-present typecheck && uv run mypy apps/api/src"
   },
   "devDependencies": {
     "json-schema-to-typescript": "16.0.0"

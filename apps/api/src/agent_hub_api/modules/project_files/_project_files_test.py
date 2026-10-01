@@ -4,16 +4,18 @@ import pytest
 
 from agent_hub_api.modules.project_files import (
     ProjectFile,
+    ProjectFileAccess,
     ProjectFileLimitExceeded,
     ProjectFileNotFound,
     ProjectFileSearchMatch,
     ProjectFilesModule,
     create_memory_project_files,
 )
+from agent_hub_api.modules.project_files._application import MemoryProjectFileStore
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 
 
-class ArtifactBackedFileStore:
+class ArtifactBackedFileStore(MemoryProjectFileStore):
     async def list(self, project_id: str) -> tuple[ProjectFile, ...]:
         timestamp = datetime.now(UTC)
         return (
@@ -51,6 +53,6 @@ async def test_visible_project_files_exclude_artifact_backing_documents() -> Non
         search_max_matches=100,
     )
 
-    visible = await files.list_visible(ProjectAccess(subject="alice"), project.id)
+    visible = await files.list_visible(ProjectFileAccess(subject="alice"), project.id)
 
     assert [file.path for file in visible] == ["/notes/check.md"]
