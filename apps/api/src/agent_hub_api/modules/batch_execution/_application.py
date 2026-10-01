@@ -553,6 +553,7 @@ class PostgresBatchRunStore:
                 ),
             )
             if await cursor.fetchone() is not None:
+                await _insert_result_records(connection, run)
                 return run, True
             if run.idempotency_key is not None:
                 cursor = await connection.execute(
@@ -660,10 +661,19 @@ async def _save(
                 run.id,
             ),
         )
-        await connection.execute(
-            "DELETE FROM batch_result_records WHERE project_id=%s AND batch_run_id=%s",
-            (run.project_id, run.id),
-        )
+        for record in run.records:
+            await connection.execute(
+                """UPDATE batch_result_records
+                SET structured_output=%s, error=%s
+                WHERE project_id=%s AND batch_run_id=%s AND dataset_record_id=%s""",
+                (
+                    json.dumps(record.structured_output) if record.structured_output else None,
+                    record.error,
+                    run.project_id,
+                    run.id,
+                    record.dataset_record_id,
+                ),
+            )
     else:
         await connection.execute(
             """INSERT INTO batch_runs
@@ -682,15 +692,22 @@ async def _save(
                 run.archived_at,
             ),
         )
-    for record in run.records:
+        await _insert_result_records(connection, run)
+
+
+async def _insert_result_records(
+    connection: AsyncConnection[dict[str, object]], run: BatchRun
+) -> None:
+    for position, record in enumerate(run.records):
         await connection.execute(
             """INSERT INTO batch_result_records
-            (project_id,batch_run_id,dataset_record_id,input,structured_output,error)
-            VALUES (%s,%s,%s,%s,%s,%s)""",
+            (project_id,batch_run_id,dataset_record_id,position,input,structured_output,error)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)""",
             (
                 run.project_id,
                 run.id,
                 record.dataset_record_id,
+                position,
                 json.dumps(record.input),
                 json.dumps(record.structured_output) if record.structured_output else None,
                 record.error,
@@ -708,7 +725,8 @@ async def _load(
     if row is None:
         return None
     cursor = await connection.execute(
-        "SELECT * FROM batch_result_records WHERE project_id=%s AND batch_run_id=%s",
+        """SELECT * FROM batch_result_records WHERE project_id=%s AND batch_run_id=%s
+        ORDER BY position, dataset_record_id""",
         (project_id, run_id),
     )
     records = tuple(
