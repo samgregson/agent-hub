@@ -1,3 +1,4 @@
+import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -56,6 +57,18 @@ class BatchRunPageResponse(_Model):
 class ResultRecordPageResponse(_Model):
     items: list[ResultResponse]
     next_offset: int | None
+    summary: "ResultSummaryResponse"
+
+
+class ResultSummaryResponse(_Model):
+    total_count: int
+    succeeded_count: int
+    failed_count: int
+    numeric_count: int
+    numeric_sum: float | None
+    numeric_min: float | None
+    numeric_max: float | None
+    numeric_average: float | None
 
 
 def _response(run: BatchRun) -> BatchRunResponse:
@@ -160,14 +173,31 @@ def create_batch_execution_router(
         request_context: Context,
         limit: int = 100,
         offset: int = 0,
+        filter_path: str | None = None,
+        equals: str | None = None,
+        minimum: float | None = None,
+        maximum: float | None = None,
+        sort_path: str | None = None,
+        descending: bool = False,
+        aggregate_path: str | None = None,
     ) -> ResultRecordPageResponse:
         try:
+            equal_value = json.loads(equals) if equals is not None else None
+            if equals is not None and not isinstance(equal_value, (str, int, float, bool)):
+                raise ValueError("Equality must be a JSON string, number, or boolean.")
             page = await batches.inspect_results(
                 ProjectAccess(subject=request_context.subject),
                 project_id,
                 run_id,
                 limit=limit,
                 offset=offset,
+                filter_path=filter_path,
+                equals=equal_value,
+                minimum=minimum,
+                maximum=maximum,
+                sort_path=sort_path,
+                descending=descending,
+                aggregate_path=aggregate_path,
             )
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run not found") from error
@@ -186,6 +216,16 @@ def create_batch_execution_router(
                 for item in page.items
             ],
             next_offset=page.next_offset,
+            summary=ResultSummaryResponse(
+                total_count=page.summary.total_count,
+                succeeded_count=page.summary.succeeded_count,
+                failed_count=page.summary.failed_count,
+                numeric_count=page.summary.numeric_count,
+                numeric_sum=page.summary.numeric_sum,
+                numeric_min=page.summary.numeric_min,
+                numeric_max=page.summary.numeric_max,
+                numeric_average=page.summary.numeric_average,
+            ),
         )
 
     @router.post("/{run_id}/archive", response_model=BatchRunResponse)

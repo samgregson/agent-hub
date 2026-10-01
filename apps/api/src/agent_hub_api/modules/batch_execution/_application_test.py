@@ -3,6 +3,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 
 import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 
 from agent_hub_api.modules.batch_execution import (
     BatchExecutionModule,
@@ -10,14 +12,17 @@ from agent_hub_api.modules.batch_execution import (
     BatchRunOrder,
     BatchRunStatus,
     MemoryBatchRunStore,
+    create_batch_execution_router,
 )
 from agent_hub_api.modules.datasets import (
     DatasetModule,
     DatasetRecordInput,
     MemoryDatasetStore,
 )
+from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.plugin_gateway import PluginToolResult
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
+from agent_hub_api.settings import Settings
 
 
 class ToolSchemas:
@@ -176,6 +181,77 @@ async def test_result_set_inspection_pages_records_without_losing_the_run_snapsh
     assert first_page.next_offset == 2
     assert [record.input for record in second_page.items] == [{"load": 3}, {"load": 4}]
     assert second_page.next_offset == 4
+
+
+@pytest.mark.asyncio
+async def test_result_set_filters_then_sorts_before_pagination() -> None:
+    access, project_id, batches, definition_id = await create_module(Gateway())
+    run = await batches.start_all(access, project_id, definition_id)
+
+    page = await batches.inspect_results(
+        access, project_id, run.id, limit=2,
+        filter_path="/structuredOutput/result", minimum=4, maximum=10,
+        sort_path="/structuredOutput/result", descending=True,
+    )
+
+    assert [record.structured_output for record in page.items] == [
+        {"result": 10}, {"result": 8},
+    ]
+    assert page.next_offset == 2
+
+
+@pytest.mark.asyncio
+async def test_result_set_equality_and_numeric_summary_use_all_matching_records() -> None:
+    access, project_id, batches, definition_id = await create_module(Gateway({4}))
+    run = await batches.start_all(access, project_id, definition_id)
+
+    page = await batches.inspect_results(
+        access, project_id, run.id, limit=1,
+        filter_path="/input/load", minimum=2,
+        aggregate_path="/structuredOutput/result",
+    )
+    equal = await batches.inspect_results(
+        access, project_id, run.id, filter_path="/input/load", equals=3,
+    )
+
+    assert page.summary.total_count == 4
+    assert page.summary.succeeded_count == 3
+    assert page.summary.failed_count == 1
+    assert page.summary.numeric_count == 3
+    assert page.summary.numeric_sum == 20
+    assert page.summary.numeric_min == 4
+    assert page.summary.numeric_max == 10
+    assert page.summary.numeric_average == pytest.approx(20 / 3)
+    assert [record.input for record in equal.items] == [{"load": 3}]
+
+
+@pytest.mark.asyncio
+async def test_result_set_http_query_returns_a_filtered_page_and_summary() -> None:
+    access, project_id, batches, definition_id = await create_module(Gateway())
+    run = await batches.start_all(access, project_id, definition_id)
+    app = FastAPI()
+    app.include_router(
+        create_batch_execution_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            batches,
+        ),
+        prefix="/api",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            f"/api/projects/{project_id}/batch-runs/{run.id}/results",
+            params={
+                "filter_path": "/input/load", "minimum": 2, "limit": 1,
+                "sort_path": "/structuredOutput/result", "descending": "true",
+                "aggregate_path": "/structuredOutput/result",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["structuredOutput"] == {"result": 10}
+    assert response.json()["nextOffset"] == 1
+    assert response.json()["summary"]["numericSum"] == 28
 
 
 @pytest.mark.asyncio

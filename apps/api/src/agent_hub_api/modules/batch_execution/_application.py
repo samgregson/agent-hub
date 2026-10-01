@@ -63,6 +63,19 @@ class BatchRunPage:
 class ResultRecordPage:
     items: tuple[ResultRecord, ...]
     next_offset: int | None
+    summary: "ResultSummary"
+
+
+@dataclass(frozen=True, slots=True)
+class ResultSummary:
+    total_count: int
+    succeeded_count: int
+    failed_count: int
+    numeric_count: int = 0
+    numeric_sum: float | None = None
+    numeric_min: float | None = None
+    numeric_max: float | None = None
+    numeric_average: float | None = None
 
 
 class BatchRunNotFound(Exception):
@@ -335,6 +348,13 @@ class BatchExecutionModule:
         *,
         limit: int = 100,
         offset: int = 0,
+        filter_path: str | None = None,
+        equals: str | int | float | bool | None = None,
+        minimum: int | float | None = None,
+        maximum: int | float | None = None,
+        sort_path: str | None = None,
+        descending: bool = False,
+        aggregate_path: str | None = None,
     ) -> ResultRecordPage:
         """Read one bounded page from a durable Result Set."""
         if not 1 <= limit <= 100 or offset < 0:
@@ -342,9 +362,48 @@ class BatchExecutionModule:
                 "Result Set pagination requires a limit from 1 to 100 and an offset >= 0."
             )
         run = await self.load(access, project_id, run_id)
-        items = run.records[offset : offset + limit]
-        next_offset = offset + len(items) if offset + len(items) < len(run.records) else None
-        return ResultRecordPage(items, next_offset)
+        if (equals is not None or minimum is not None or maximum is not None) and not filter_path:
+            raise ValueError("A filter path is required for scalar comparisons.")
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise ValueError("Minimum cannot exceed maximum.")
+        if filter_path is not None:
+            _validate_result_path(filter_path)
+        if sort_path is not None:
+            _validate_result_path(sort_path)
+        if aggregate_path is not None:
+            _validate_result_path(aggregate_path)
+        records = [
+            record for record in run.records
+            if filter_path is None or _matches_result(record, filter_path, equals, minimum, maximum)
+        ]
+        if sort_path is not None:
+            records.sort(
+                key=lambda record: _sort_value(_result_value(record, sort_path)),
+                reverse=descending,
+            )
+            records.sort(key=lambda record: _result_value(record, sort_path) is None)
+        items = tuple(records[offset : offset + limit])
+        next_offset = offset + len(items) if offset + len(items) < len(records) else None
+        values = [
+            value for record in records
+            if aggregate_path is not None
+            if (value := _result_value(record, aggregate_path)) is not None
+            and not isinstance(value, bool) and isinstance(value, (int, float))
+        ]
+        total = sum(values) if values else None
+        return ResultRecordPage(
+            items, next_offset,
+            ResultSummary(
+                total_count=len(records),
+                succeeded_count=sum(record.structured_output is not None for record in records),
+                failed_count=sum(record.error is not None for record in records),
+                numeric_count=len(values),
+                numeric_sum=total,
+                numeric_min=min(values) if values else None,
+                numeric_max=max(values) if values else None,
+                numeric_average=total / len(values) if total is not None else None,
+            ),
+        )
 
     async def list(
         self,
@@ -691,6 +750,63 @@ def _select(value: Mapping[str, object], pointer: str) -> object:
 
 def _arguments(value: Mapping[str, object], definition: BatchDefinition) -> Mapping[str, object]:
     return {name: _select(value, pointer) for name, pointer in definition.argument_mappings.items()}
+
+
+def _validate_result_path(path: str) -> None:
+    if not (path.startswith(("/input/", "/structuredOutput/")) or path == "/error"):
+        raise ValueError("Result paths must select input, structuredOutput, or error.")
+
+
+def _result_value(record: ResultRecord, path: str) -> object | None:
+    parts = path[1:].split("/")
+    value: object = {
+        "input": record.input,
+        "structuredOutput": record.structured_output,
+        "error": record.error,
+    }[parts[0]]
+    for part in parts[1:]:
+        if not isinstance(value, Mapping):
+            return None
+        value = value.get(part.replace("~1", "/").replace("~0", "~"))
+    return value if isinstance(value, (str, int, float, bool)) else None
+
+
+def _matches_result(
+    record: ResultRecord,
+    path: str,
+    equals: str | int | float | bool | None,
+    minimum: int | float | None,
+    maximum: int | float | None,
+) -> bool:
+    value = _result_value(record, path)
+    if value is None:
+        return False
+    same_numeric_type = (
+        not isinstance(value, bool) and not isinstance(equals, bool)
+        and isinstance(value, (int, float)) and isinstance(equals, (int, float))
+    )
+    if equals is not None and not (same_numeric_type or type(value) is type(equals)):
+        return False
+    if equals is not None and value != equals:
+        return False
+    if minimum is not None or maximum is not None:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        if minimum is not None and value < minimum:
+            return False
+        if maximum is not None and value > maximum:
+            return False
+    return True
+
+
+def _sort_value(value: object | None) -> tuple[int, object]:
+    if isinstance(value, bool):
+        return (0, int(value))
+    if isinstance(value, (int, float)):
+        return (1, value)
+    if isinstance(value, str):
+        return (2, value)
+    return (3, "")
 
 
 def _snapshot(

@@ -33,13 +33,21 @@ interface BatchRun {
   definitionId: string;
   id: string;
   status: string;
-  records: {
-    datasetRecordId: string;
-    error: string | null;
-    input: Record<string, unknown>;
-    structuredOutput: Record<string, unknown> | null;
-  }[];
+  records: ResultRecord[];
   updatedAt: string;
+}
+
+interface ResultRecord {
+  datasetRecordId: string;
+  error: string | null;
+  input: Record<string, unknown>;
+  structuredOutput: Record<string, unknown> | null;
+}
+
+interface ResultPage {
+  items: ResultRecord[];
+  nextOffset: number | null;
+  summary: { totalCount: number; succeededCount: number; failedCount: number };
 }
 
 interface BatchRunPage {
@@ -76,6 +84,10 @@ export function DatasetCatalog({
   const [runOrder, setRunOrder] = useState("newest");
   const [runStatus, setRunStatus] = useState("all");
   const [selectedRun, setSelectedRun] = useState<BatchRun | null>(null);
+  const [resultPage, setResultPage] = useState<(ResultPage & { runId: string }) | null>(null);
+  const selectedRunId = selectedRun?.id;
+  const selectedRunStatus = selectedRun?.status;
+  const visibleResults = resultPage?.runId === selectedRunId ? resultPage : null;
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
 
   useEffect(() => {
@@ -159,6 +171,44 @@ export function DatasetCatalog({
     }, 750);
     return () => window.clearInterval(interval);
   }, [projectId, selectedRun]);
+
+  useEffect(() => {
+    if (!selectedRunId) return;
+    let active = true;
+    void fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRunId)}/results?limit=20`,
+      { cache: "no-store" },
+    )
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Result Set unavailable");
+        return response.json() as Promise<ResultPage>;
+      })
+      .then((page) => {
+        if (active) setResultPage({ ...page, runId: selectedRunId });
+      })
+      .catch(() => {
+        if (active) setError("Result Set could not be loaded.");
+      });
+    return () => { active = false; };
+  }, [projectId, selectedRunId, selectedRunStatus]);
+
+  async function loadMoreResults() {
+    if (!selectedRun || visibleResults?.nextOffset == null) return;
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRun.id)}/results?limit=20&offset=${visibleResults.nextOffset}`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) {
+      setError("Result Set could not be loaded.");
+      return;
+    }
+    const page = (await response.json()) as ResultPage;
+    setResultPage((current) => current?.runId === selectedRun.id ? {
+      ...page,
+      items: [...current.items, ...page.items],
+      runId: selectedRun.id,
+    } : { ...page, runId: selectedRun.id });
+  }
 
   async function createDataset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -608,7 +658,8 @@ export function DatasetCatalog({
             <section aria-label="Batch Run results" className={styles.detail}>
               <h2>Batch Run results</h2>
               <p>{runSummary(selectedRun)}</p>
-              {selectedRun.records.map((record) => (
+              {visibleResults ? <p>{visibleResults.summary.totalCount} results · {visibleResults.summary.succeededCount} succeeded · {visibleResults.summary.failedCount} failed</p> : null}
+              {visibleResults?.items.map((record) => (
                 <article className={styles.record} key={record.datasetRecordId}>
                   <strong>Record {record.datasetRecordId.slice(0, 8)}</strong>
                   {record.error ? (
@@ -628,6 +679,9 @@ export function DatasetCatalog({
                   </dl>
                 </article>
               ))}
+              {visibleResults?.nextOffset != null ? (
+                <Button onClick={() => void loadMoreResults()}>Load more results</Button>
+              ) : null}
             </section>
           ) : null}
         </>
