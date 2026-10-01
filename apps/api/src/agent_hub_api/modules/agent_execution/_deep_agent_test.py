@@ -158,6 +158,7 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     runner._plugin_gateway = None
     runner._datasets = cast(Any, object())
     runner._batches = cast(Any, object())
+    runner._transforms = cast(Any, object())
     runner._settings = cast(
         Any,
         SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
@@ -178,6 +179,12 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "create_project_batch_definition" in captured["interrupt_on"]
     assert "start_project_batch_run" in captured["interrupt_on"]
     assert "start_project_batch_run" in names
+    assert {"discover_project_transforms", "load_project_transform"} <= names
+    assert "create_project_transform" in captured["interrupt_on"]
+    assert "update_project_transform" in captured["interrupt_on"]
+    assert "delete_project_transform" in captured["interrupt_on"]
+    assert "start_project_transform_run" in captured["interrupt_on"]
+    assert "save_project_transform_run_as_dataset" in captured["interrupt_on"]
 
 
 @pytest.mark.asyncio
@@ -263,6 +270,46 @@ async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
     assert result == "Started Batch Run run-1."
     assert batches.submission == ("project-1", "definition-1")
     assert batches.enqueued_run_id == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_agent_transform_tools_call_the_project_module() -> None:
+    class Transforms:
+        def __init__(self) -> None:
+            self.started: tuple[str, dict[str, object], dict[str, object]] | None = None
+            self.saved: tuple[str, str] | None = None
+
+        async def start_run(
+            self, _access: object, _project_id: str, definition_id: str,
+            record: dict[str, object], parameters: dict[str, object],
+        ) -> object:
+            self.started = definition_id, record, parameters
+            return SimpleNamespace(id="run-1", status="succeeded")
+
+        async def save_run_as_dataset(
+            self, _access: object, _project_id: str, run_id: str, name: str
+        ) -> object:
+            self.saved = run_id, name
+            return SimpleNamespace(id="dataset-1", name=name)
+
+    transforms = Transforms()
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._transform_tools(
+            cast(Any, transforms), "project-1", "sam"
+        )
+    }
+    started = await tools["start_project_transform_run"].ainvoke({
+        "definition_id": "definition-1", "record_json": '{"load": 3}',
+        "parameters_json": '{"factor": 2}',
+    })
+    saved = await tools["save_project_transform_run_as_dataset"].ainvoke({
+        "run_id": "run-1", "name": "Saved",
+    })
+    assert started == "Transform Run run-1 succeeded."
+    assert transforms.started == ("definition-1", {"load": 3}, {"factor": 2})
+    assert saved == "Saved Dataset Saved (dataset-1) from Transform Run run-1."
+    assert transforms.saved == ("run-1", "Saved")
 
 
 @pytest.mark.asyncio

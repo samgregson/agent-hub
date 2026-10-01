@@ -1,7 +1,7 @@
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
-from typing import Any
+from typing import Any, cast
 
 from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
@@ -43,6 +43,7 @@ from agent_hub_api.modules.plugin_gateway import (
 )
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
+from agent_hub_api.modules.transforms import TransformModule
 from agent_hub_api.settings import Settings
 
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
@@ -62,6 +63,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "When a user asks to save, inspect, or change one, use the Project Dataset tools. "
         "Do not write a Dataset as a JSON file under /project. Dataset and Batch Definition "
         "mutations use the approval card automatically.",
+        "Transform Definitions and Runs are durable Project records. Use the Project "
+        "Transform tools to inspect or change them; Definition changes, Run starts, and "
+        "output saves use the approval card automatically.",
         "Never claim access to the host filesystem. When referring to a virtual file in "
         "a response, link it as Markdown using its absolute /project or /scratch path.",
     )
@@ -110,6 +114,7 @@ class PostgresDeepAgentRunner:
         artifacts: ArtifactModule | None = None,
         datasets: DatasetModule | None = None,
         batches: BatchExecutionModule | None = None,
+        transforms: TransformModule | None = None,
     ) -> None:
         self._settings = settings
         self._project_files = project_files
@@ -117,6 +122,7 @@ class PostgresDeepAgentRunner:
         self._artifacts = artifacts
         self._datasets = datasets
         self._batches = batches
+        self._transforms = transforms
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
@@ -178,6 +184,9 @@ class PostgresDeepAgentRunner:
         batches = getattr(self, "_batches", None)
         if batches is not None and subject is not None:
             tools.extend(self._batch_tools(batches, project_id, subject))
+        transforms = getattr(self, "_transforms", None)
+        if transforms is not None and subject is not None:
+            tools.extend(self._transform_tools(transforms, project_id, subject))
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -222,6 +231,29 @@ class PostgresDeepAgentRunner:
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Start the proposed Batch Run?",
             }
+        if transforms is not None and subject is not None:
+            interrupt_on.update({
+                "create_project_transform": {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Create the proposed Transform Definition?",
+                },
+                "update_project_transform": {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Update the proposed Transform Definition?",
+                },
+                "delete_project_transform": {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Delete the proposed Transform Definition?",
+                },
+                "start_project_transform_run": {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Start the proposed Transform Run?",
+                },
+                "save_project_transform_run_as_dataset": {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Save this Transform Run output as a Dataset?",
+                },
+            })
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
@@ -466,6 +498,114 @@ class PostgresDeepAgentRunner:
             return f"Started Batch Run {run.id}."
 
         return [start_project_batch_run]
+
+    @staticmethod
+    def _transform_tools(
+        transforms: TransformModule, project_id: str, subject: str
+    ) -> list[BaseTool]:
+        access = ProjectAccess(subject=subject)
+
+        def object_json(raw: str) -> dict[str, Any]:
+            value = json.loads(raw)
+            if not isinstance(value, dict):
+                raise ValueError("Expected a JSON object")
+            return value
+
+        @tool
+        async def discover_project_transforms() -> str:
+            """List the saved Transform Definitions in this Project."""
+            definitions = await transforms.list(access, project_id)
+            return json.dumps([
+                {"id": item.id, "name": item.name, "revision": item.revision}
+                for item in definitions
+            ])
+
+        @tool
+        async def load_project_transform(definition_id: str) -> str:
+            """Load one Transform Definition, including source and declared contracts."""
+            item = await transforms.load(access, project_id, definition_id)
+            return json.dumps({
+                "id": item.id, "name": item.name, "source": item.source,
+                "inputSelectors": item.input_selectors,
+                "outputSchema": item.output_schema,
+                "runtime": item.runtime, "revision": item.revision,
+            })
+
+        @tool
+        async def list_project_transform_runs(definition_id: str | None = None) -> str:
+            """List recent durable Transform Runs and their outcomes."""
+            page = await transforms.list_runs(access, project_id, definition_id)
+            return json.dumps([
+                {"id": run.id, "definitionId": run.definition_id, "status": run.status,
+                 "createdAt": run.created_at.isoformat()}
+                for run in page.items
+            ])
+
+        @tool
+        async def load_project_transform_run(run_id: str) -> str:
+            """Inspect a Transform Run's captured inputs, output, and provenance."""
+            run = await transforms.load_run(access, project_id, run_id)
+            return json.dumps({
+                "id": run.id, "status": run.status, "inputs": run.inputs,
+                "parameters": run.parameters, "output": run.output,
+                "error": run.error, "runtime": run.runtime,
+                "packageHash": run.package_hash, "sourceHash": run.source_hash,
+            })
+
+        @tool
+        async def create_project_transform(
+            name: str, source: str, input_selectors_json: str, output_schema_json: str
+        ) -> str:
+            """Create a Project Transform Definition after user approval."""
+            item = await transforms.define(
+                access, project_id, name, source,
+                cast(dict[str, str], object_json(input_selectors_json)),
+                object_json(output_schema_json),
+            )
+            return f"Created Transform Definition {item.name} ({item.id})."
+
+        @tool
+        async def update_project_transform(
+            definition_id: str, name: str, source: str,
+            input_selectors_json: str, output_schema_json: str,
+        ) -> str:
+            """Revise a Project Transform Definition after user approval."""
+            item = await transforms.revise(
+                access, project_id, definition_id, name, source,
+                cast(dict[str, str], object_json(input_selectors_json)),
+                object_json(output_schema_json),
+            )
+            return f"Updated Transform Definition {item.name} ({item.id})."
+
+        @tool
+        async def delete_project_transform(definition_id: str) -> str:
+            """Delete a Transform Definition after user approval; retained Runs remain."""
+            await transforms.delete(access, project_id, definition_id)
+            return f"Deleted Transform Definition {definition_id}."
+
+        @tool
+        async def start_project_transform_run(
+            definition_id: str, record_json: str, parameters_json: str = "{}"
+        ) -> str:
+            """Start a durable Transform Run after user approval."""
+            run = await transforms.start_run(
+                access, project_id, definition_id,
+                object_json(record_json), object_json(parameters_json),
+            )
+            return f"Transform Run {run.id} {run.status}."
+
+        @tool
+        async def save_project_transform_run_as_dataset(run_id: str, name: str) -> str:
+            """Save a successful Transform Run output as a Dataset after user approval."""
+            dataset = await transforms.save_run_as_dataset(access, project_id, run_id, name)
+            return f"Saved Dataset {dataset.name} ({dataset.id}) from Transform Run {run_id}."
+
+        return [
+            discover_project_transforms, load_project_transform,
+            list_project_transform_runs, load_project_transform_run,
+            create_project_transform, update_project_transform, delete_project_transform,
+            start_project_transform_run, save_project_transform_run_as_dataset,
+        ]
 
     async def close(self) -> None:
         if self._stack is not None:

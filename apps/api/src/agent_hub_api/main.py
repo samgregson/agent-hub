@@ -87,6 +87,7 @@ def create_app(
             resolved_artifacts,
             resolved_datasets,
             resolved_batches,
+            resolved_transforms,
         )
         resolved_agent_execution = create_postgres_agent_execution(
             resolved_settings, deep_agent_runner
