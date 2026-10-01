@@ -32,6 +32,7 @@ import { Markdown } from "@/shared/ui";
 
 import { restoreInterruptMetadata } from "./_history";
 import { approvalLabel, isApprovalOnlyTool } from "./_approval";
+import { shouldClearTransientRunError } from "./_run-state";
 import styles from "./agent-ui.module.css";
 
 const OpenVirtualFileContext = createContext<(path: string) => void>(() => {});
@@ -117,7 +118,13 @@ function Message() {
   );
 }
 
-function RunStatus({ runsUrl }: { runsUrl: string }) {
+function RunStatus({
+  onSuccessfulRun,
+  runsUrl,
+}: {
+  onSuccessfulRun: () => void;
+  runsUrl: string;
+}) {
   const isRunning = useAuiState((state) => state.thread.isRunning);
   const [latestRun, setLatestRun] = useState<AgentRun | null>(null);
 
@@ -157,6 +164,10 @@ function RunStatus({ runsUrl }: { runsUrl: string }) {
       if (refreshTimer) clearTimeout(refreshTimer);
     };
   }, [isRunning, runsUrl]);
+
+  useEffect(() => {
+    if (shouldClearTransientRunError(latestRun?.status)) onSuccessfulRun();
+  }, [latestRun?.status, onSuccessfulRun]);
 
   const status = isRunning ? "running" : latestRun?.status;
   if (!status) return null;
@@ -268,7 +279,7 @@ export function AgentChat({
               </div>
             </ThreadPrimitive.Empty>
             <ThreadPrimitive.Messages components={{ Message }} />
-            <RunStatus runsUrl={runsUrl} />
+            <RunStatus onSuccessfulRun={() => setError(null)} runsUrl={runsUrl} />
             {error ? <p className={styles.runError}>{error}</p> : null}
             <ThreadPrimitive.ViewportFooter className={styles.footer}>
               <ComposerPrimitive.Root

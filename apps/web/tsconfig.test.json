@@ -16,6 +16,8 @@
     "src/modules/workspace/_thread-title.test.ts",
     "src/modules/agent-ui/_history.ts",
     "src/modules/agent-ui/_history.test.ts",
+    "src/modules/agent-ui/_run-state.ts",
+    "src/modules/agent-ui/_run-state.test.ts",
     "src/modules/agent-ui/_project-links.ts",
     "src/modules/agent-ui/_project-links.test.ts",
     "src/modules/agent-ui/_scratch-proxy.test.ts",
