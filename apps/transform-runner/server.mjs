@@ -43,7 +43,15 @@ export async function handle(request) {
     return json({ status: "ok" });
   }
   if (request.method === "GET" && path === "/runtime") {
-    return json({ deno: Deno.version.deno, pyodide: "314.0.7" });
+    const lock = await Deno.readFile("/app/deno.lock");
+    const digest = await crypto.subtle.digest("SHA-256", lock);
+    const packageHash = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return json({
+      deno: Deno.version.deno,
+      pyodide: "314.0.7",
+      packageHash,
+    });
   }
   if (request.method !== "POST" || path !== "/execute") {
     return json({ code: "not_found" }, 404);

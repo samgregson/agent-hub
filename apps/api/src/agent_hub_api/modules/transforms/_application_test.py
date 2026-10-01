@@ -5,8 +5,14 @@ from agent_hub_api.modules.transforms import (
     MemoryTransformStore,
     TransformModule,
     TransformNotFound,
+    TransformRuntimeIdentity,
     TransformValidationError,
 )
+
+
+class _PinnedRunner:
+    async def identity(self) -> TransformRuntimeIdentity:
+        return TransformRuntimeIdentity("deno:2.9.7;pyodide:314.0.7", "a" * 64)
 
 
 @pytest.mark.asyncio
@@ -16,14 +22,14 @@ async def test_preview_resolves_selectors_and_validates_runner_output() -> None:
     outsider = ProjectAccess(subject="alex")
     project = await projects.create(owner, "Bridge")
 
-    class Runner:
+    class Runner(_PinnedRunner):
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
             assert "def transform" in source
             assert inputs == {"load": 3}
             assert parameters == {"factor": 2}
-            return {"value": 6}, "pyodide:314.0.7"
+            return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     definition = await transforms.define(
@@ -35,7 +41,7 @@ async def test_preview_resolves_selectors_and_validates_runner_output() -> None:
         owner, project.id, definition.id, {"load/value": 3}, {"factor": 2}
     )
     assert preview.output == {"value": 6}
-    assert preview.runtime == "pyodide:314.0.7"
+    assert preview.runtime == "deno:2.9.7;pyodide:314.0.7"
     assert preview.source_hash == definition.source_hash
     with pytest.raises(TransformNotFound):
         await transforms.preview(outsider, project.id, definition.id, {"load/value": 3}, {})
@@ -49,11 +55,11 @@ async def test_preview_rejects_output_outside_declared_schema() -> None:
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Bridge")
 
-    class Runner:
+    class Runner(_PinnedRunner):
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
-            return {"value": "wrong"}, "pyodide:314.0.7"
+            return {"value": "wrong"}, "deno:2.9.7;pyodide:314.0.7"
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     definition = await transforms.define(
@@ -73,13 +79,13 @@ async def test_run_retains_immutable_snapshots_after_definition_revision() -> No
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Bridge")
 
-    class Runner:
+    class Runner(_PinnedRunner):
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
             assert isinstance(inputs["load"], int)
             assert isinstance(parameters["factor"], int)
-            return {"value": inputs["load"] * parameters["factor"]}, "pyodide:314.0.7"
+            return {"value": inputs["load"] * parameters["factor"]}, "deno:2.9.7;pyodide:314.0.7"
 
     transforms = TransformModule(
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
@@ -97,6 +103,8 @@ async def test_run_retains_immutable_snapshots_after_definition_revision() -> No
     assert run.output == {"value": 6}
     assert run.initiator_subject == "sam"
     assert run.input_hash and run.output_manifest["sha256"]
+    assert run.package_hash == definition.package_hash == "a" * 64
+    assert run.runtime == definition.runtime == "deno:2.9.7;pyodide:314.0.7"
     assert run.definition_snapshot["source"] == definition.source
     await transforms.revise(
         owner, project.id, definition.id, "Triple",
@@ -120,7 +128,7 @@ async def test_run_retains_failure_without_fabricating_output() -> None:
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Bridge")
 
-    class Runner:
+    class Runner(_PinnedRunner):
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
@@ -138,6 +146,8 @@ async def test_run_retains_failure_without_fabricating_output() -> None:
     assert run.error == "timeout"
     assert run.output is None
     assert run.output_manifest == {}
+    assert run.package_hash == "a" * 64
+    assert run.runtime == "deno:2.9.7;pyodide:314.0.7"
     assert await transforms.load_run(owner, project.id, run.id) == run
 
 

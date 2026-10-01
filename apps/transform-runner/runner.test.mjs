@@ -1,4 +1,16 @@
 import { runTransform } from "./runner.mjs";
+import { handle } from "./server.mjs";
+
+Deno.test("runtime endpoint reports the pinned package lock", async () => {
+  const response = await handle(new Request("http://runner/runtime"));
+  const runtime = await response.json();
+  if (
+    response.status !== 200 || runtime.deno !== Deno.version.deno ||
+    runtime.pyodide !== "314.0.7" || runtime.packageHash.length !== 64
+  ) {
+    throw new Error(`Unexpected runtime identity: ${JSON.stringify(runtime)}`);
+  }
+});
 
 Deno.test("fresh restricted Pyodide executions share the preview and run contract", async () => {
   const request = {

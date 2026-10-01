@@ -8,6 +8,7 @@ from agent_hub_api.modules.transforms._application import (
     TransformPreview,
     TransformRun,
     TransformRunner,
+    TransformRuntimeIdentity,
     TransformValidationError,
     create_postgres_transform_module,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "TransformPreview",
     "TransformRunner",
     "TransformRun",
+    "TransformRuntimeIdentity",
     "TransformValidationError",
     "create_postgres_transform_module",
     "create_transform_router",

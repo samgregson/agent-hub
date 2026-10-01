@@ -5,7 +5,10 @@ import json
 from http.client import HTTPConnection
 from urllib.parse import urlsplit
 
-from agent_hub_api.modules.transforms._application import TransformExecutionError
+from agent_hub_api.modules.transforms._application import (
+    TransformExecutionError,
+    TransformRuntimeIdentity,
+)
 
 
 class DenoTransformRunner:
@@ -16,6 +19,36 @@ class DenoTransformRunner:
         self._host = parsed.hostname
         self._port = parsed.port or 80
         self._path = f"{parsed.path.rstrip('/')}/execute"
+
+    async def identity(self) -> TransformRuntimeIdentity:
+        return await asyncio.to_thread(self._identity)
+
+    def _identity(self) -> TransformRuntimeIdentity:
+        connection = HTTPConnection(self._host, self._port, timeout=4)
+        try:
+            connection.request("GET", self._path.removesuffix("/execute") + "/runtime")
+            response = connection.getresponse()
+            raw = response.read(2049)
+            if response.status != 200 or len(raw) > 2048:
+                raise TransformExecutionError("runner_unavailable")
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise TransformExecutionError("runner_failed")
+            deno, pyodide, package_hash = (
+                payload.get("deno"), payload.get("pyodide"), payload.get("packageHash")
+            )
+            if (
+                not isinstance(deno, str) or not isinstance(pyodide, str)
+                or not isinstance(package_hash, str) or len(package_hash) != 64
+            ):
+                raise TransformExecutionError("runner_failed")
+            return TransformRuntimeIdentity(
+                f"deno:{deno};pyodide:{pyodide}", package_hash
+            )
+        except (OSError, TimeoutError, ValueError) as error:
+            raise TransformExecutionError("runner_unavailable") from error
+        finally:
+            connection.close()
 
     async def execute(
         self, source: str, inputs: dict[str, object], parameters: dict[str, object]
@@ -49,10 +82,10 @@ class DenoTransformRunner:
             if response.status != 200 or result.get("ok") is not True:
                 code = result.get("code")
                 raise TransformExecutionError(code if isinstance(code, str) else "runner_failed")
-            runtime = result.get("pyodide")
-            if not isinstance(runtime, str) or "output" not in result:
+            deno, pyodide = result.get("deno"), result.get("pyodide")
+            if not isinstance(deno, str) or not isinstance(pyodide, str) or "output" not in result:
                 raise TransformExecutionError("runner_failed")
-            return result["output"], f"pyodide:{runtime}"
+            return result["output"], f"deno:{deno};pyodide:{pyodide}"
         except (OSError, TimeoutError, ValueError) as error:
             raise TransformExecutionError("runner_unavailable") from error
         finally:

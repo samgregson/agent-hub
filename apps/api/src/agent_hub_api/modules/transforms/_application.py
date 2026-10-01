@@ -26,6 +26,7 @@ class TransformDefinition:
     input_selectors: Mapping[str, str]
     output_schema: Mapping[str, object]
     runtime: str | None
+    package_hash: str | None
     source_hash: str
     revision: int
     created_at: datetime
@@ -40,6 +41,12 @@ class TransformPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class TransformRuntimeIdentity:
+    runtime: str
+    package_hash: str
+
+
+@dataclass(frozen=True, slots=True)
 class TransformRun:
     id: str
     project_id: str
@@ -51,6 +58,7 @@ class TransformRun:
     input_hash: str
     source_hash: str
     runtime: str | None
+    package_hash: str | None
     output: object | None
     output_manifest: Mapping[str, object]
     error: str | None
@@ -84,6 +92,8 @@ class TransformStore(Protocol):
 
 
 class TransformRunner(Protocol):
+    async def identity(self) -> TransformRuntimeIdentity: ...
+
     async def execute(
         self, source: str, inputs: dict[str, object], parameters: dict[str, object]
     ) -> tuple[object, str]: ...
@@ -122,11 +132,14 @@ class TransformModule:
         clean_name, clean_source, selectors, schema = _validate_definition(
             name, source, input_selectors, output_schema
         )
+        identity = await self._runner.identity() if self._runner else None
         now = datetime.now(UTC)
         return await self._store.create(
             TransformDefinition(
                 str(uuid4()), project_id, clean_name, clean_source, selectors, schema,
-                None, hashlib.sha256(clean_source.encode()).hexdigest(), 1, now, now,
+                identity.runtime if identity else None,
+                identity.package_hash if identity else None,
+                hashlib.sha256(clean_source.encode()).hexdigest(), 1, now, now,
             )
         )
 
@@ -159,12 +172,15 @@ class TransformModule:
         clean_name, clean_source, selectors, schema = _validate_definition(
             name, source, input_selectors, output_schema
         )
+        identity = await self._runner.identity() if self._runner else None
         revised = replace(
             current,
             name=clean_name,
             source=clean_source,
             input_selectors=selectors,
             output_schema=schema,
+            runtime=identity.runtime if identity else None,
+            package_hash=identity.package_hash if identity else None,
             source_hash=hashlib.sha256(clean_source.encode()).hexdigest(),
             revision=current.revision + 1,
             updated_at=datetime.now(UTC),
@@ -200,6 +216,14 @@ class TransformModule:
         definition = await self.load(access, project_id, definition_id)
         if self._run_store is None:
             raise TransformExecutionError("run_store_unavailable")
+        if self._runner is None:
+            raise TransformExecutionError("runner_unavailable")
+        identity = await self._runner.identity()
+        if definition.runtime and (
+            definition.runtime != identity.runtime or
+            definition.package_hash != identity.package_hash
+        ):
+            raise TransformExecutionError("runtime_mismatch")
         inputs, parameter_values = _inputs(definition, record, parameters)
         input_bytes = _canonical({"inputs": inputs, "parameters": parameter_values})
         now = datetime.now(UTC)
@@ -210,26 +234,29 @@ class TransformModule:
                 "input_selectors": dict(definition.input_selectors),
                 "output_schema": dict(definition.output_schema),
                 "revision": definition.revision,
+                "runtime": identity.runtime,
+                "package_hash": identity.package_hash,
             },
             inputs=inputs, parameters=parameter_values,
             input_hash=hashlib.sha256(input_bytes).hexdigest(),
-            source_hash=definition.source_hash, runtime=None, output=None,
+            source_hash=definition.source_hash, runtime=identity.runtime,
+            package_hash=identity.package_hash, output=None,
             output_manifest={}, error=None, initiator_subject=access.subject,
             created_at=now, completed_at=None,
         ))
         try:
-            if self._runner is None:
-                raise TransformExecutionError("runner_unavailable")
             output, runtime = await self._runner.execute(
                 definition.source, inputs, parameter_values
             )
+            if runtime != identity.runtime:
+                raise TransformExecutionError("runtime_mismatch")
             if not Draft202012Validator(definition.output_schema).is_valid(output):
                 raise TransformExecutionError("output_schema")
             output_bytes = _canonical(output)
             if len(output_bytes) > 128_000:
                 raise TransformExecutionError("output_limit")
             completed = replace(
-                run, status="succeeded", runtime=runtime, output=output,
+                run, status="succeeded", output=output,
                 output_manifest={
                     "kind": "json", "bytes": len(output_bytes),
                     "sha256": hashlib.sha256(output_bytes).hexdigest(),
@@ -402,8 +429,8 @@ class PostgresTransformStore:
             await connection.execute(
                 """INSERT INTO transform_definitions
                 (project_id,transform_definition_id,name,source,input_selectors,output_schema,
-                runtime,source_hash,revision,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                runtime,package_hash,source_hash,revision,created_at,updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 _values(definition),
             )
         return definition
@@ -435,11 +462,12 @@ class PostgresTransformStore:
         async with connection:
             cursor = await connection.execute(
                 """UPDATE transform_definitions SET name=%s,source=%s,input_selectors=%s,
-                output_schema=%s,runtime=%s,source_hash=%s,revision=%s,updated_at=%s
+                output_schema=%s,runtime=%s,package_hash=%s,source_hash=%s,revision=%s,updated_at=%s
                 WHERE project_id=%s AND transform_definition_id=%s AND revision=%s""",
                 (
                     definition.name, definition.source, json.dumps(definition.input_selectors),
                     json.dumps(definition.output_schema), definition.runtime,
+                    definition.package_hash,
                     definition.source_hash, definition.revision, definition.updated_at,
                     definition.project_id, definition.id, definition.revision - 1,
                 ),
@@ -461,7 +489,7 @@ def _values(definition: TransformDefinition) -> tuple[object, ...]:
     return (
         definition.project_id, definition.id, definition.name, definition.source,
         json.dumps(definition.input_selectors), json.dumps(definition.output_schema),
-        definition.runtime, definition.source_hash, definition.revision,
+        definition.runtime, definition.package_hash, definition.source_hash, definition.revision,
         definition.created_at, definition.updated_at,
     )
 
@@ -483,6 +511,7 @@ def _from_row(row: Mapping[str, object]) -> TransformDefinition:
             else dict(cast(Mapping[str, object], schema))
         ),
         runtime=str(row["runtime"]) if row["runtime"] is not None else None,
+        package_hash=str(row["package_hash"]) if row["package_hash"] is not None else None,
         source_hash=str(row["source_hash"]),
         revision=cast(int, row["revision"]),
         created_at=cast(datetime, row["created_at"]),

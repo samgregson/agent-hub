@@ -29,9 +29,9 @@ class PostgresTransformRunStore:
             await connection.execute(
                 """INSERT INTO transform_runs
                 (project_id,transform_run_id,transform_definition_id,status,definition_snapshot,
-                inputs,parameters,input_hash,source_hash,runtime,output,output_manifest,error,
+                inputs,parameters,input_hash,source_hash,runtime,package_hash,output,output_manifest,error,
                 initiator_subject,created_at,completed_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 _values(run),
             )
         return run
@@ -80,7 +80,7 @@ def _values(run: TransformRun) -> tuple[object, ...]:
         run.project_id, run.id, run.definition_id, run.status,
         json.dumps(run.definition_snapshot), json.dumps(run.inputs),
         json.dumps(run.parameters), run.input_hash, run.source_hash,
-        run.runtime, json.dumps(run.output), json.dumps(run.output_manifest),
+        run.runtime, run.package_hash, json.dumps(run.output), json.dumps(run.output_manifest),
         run.error, run.initiator_subject, run.created_at, run.completed_at,
     )
 
@@ -101,6 +101,7 @@ def _from_row(row: Mapping[str, object]) -> TransformRun:
         input_hash=str(row["input_hash"]),
         source_hash=str(row["source_hash"]),
         runtime=str(row["runtime"]) if row["runtime"] is not None else None,
+        package_hash=str(row["package_hash"]) if row["package_hash"] is not None else None,
         output=_json(row["output"]),
         output_manifest=cast(Mapping[str, object], _json(row["output_manifest"])),
         error=str(row["error"]) if row["error"] is not None else None,

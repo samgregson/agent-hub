@@ -3,7 +3,10 @@ from psycopg import AsyncConnection, OperationalError
 from pydantic import PostgresDsn
 
 from agent_hub_api.modules.projects import ProjectAccess, create_postgres_project_module
-from agent_hub_api.modules.transforms import create_postgres_transform_module
+from agent_hub_api.modules.transforms import (
+    TransformRuntimeIdentity,
+    create_postgres_transform_module,
+)
 from agent_hub_api.settings import Settings
 
 
@@ -20,10 +23,13 @@ async def test_transform_run_round_trips_through_postgres() -> None:
     await connection.close()
 
     class Runner:
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:2.9.7;pyodide:314.0.7", "a" * 64)
+
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
-            return {"value": 6}, "pyodide:314.0.7"
+            return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
     access = ProjectAccess(subject="transform-postgres-integration")
     projects = create_postgres_project_module(settings)

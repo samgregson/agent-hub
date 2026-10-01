@@ -8,9 +8,15 @@ from agent_hub_api.modules.transforms import (
     MemoryTransformRunStore,
     MemoryTransformStore,
     TransformModule,
+    TransformRuntimeIdentity,
     create_transform_router,
 )
 from agent_hub_api.settings import Settings
+
+
+class _PinnedRunner:
+    async def identity(self) -> TransformRuntimeIdentity:
+        return TransformRuntimeIdentity("deno:2.9.7;pyodide:314.0.7", "a" * 64)
 
 
 @pytest.mark.asyncio
@@ -55,12 +61,12 @@ async def test_preview_http_uses_definition_and_returns_transient_output() -> No
     projects = create_memory_project_module()
     project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
 
-    class Runner:
+    class Runner(_PinnedRunner):
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
             assert inputs == {"load": 3}
-            return {"value": 6}, "pyodide:314.0.7"
+            return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     definition = await transforms.define(
@@ -83,7 +89,7 @@ async def test_preview_http_uses_definition_and_returns_transient_output() -> No
         )
     assert response.status_code == 200
     assert response.json() == {
-        "output": {"value": 6}, "runtime": "pyodide:314.0.7",
+        "output": {"value": 6}, "runtime": "deno:2.9.7;pyodide:314.0.7",
         "sourceHash": definition.source_hash,
     }
 
@@ -94,11 +100,11 @@ async def test_durable_run_http_can_be_inspected_after_execution() -> None:
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Bridge")
 
-    class Runner:
+    class Runner(_PinnedRunner):
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
-            return {"value": 6}, "pyodide:314.0.7"
+            return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
     transforms = TransformModule(
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()

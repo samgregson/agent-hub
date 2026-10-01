@@ -39,6 +39,7 @@ class DefinitionResponse(_Model):
     input_selectors: dict[str, str]
     output_schema: dict[str, object]
     runtime: str | None
+    package_hash: str | None
     source_hash: str
     revision: int
     created_at: str
@@ -66,6 +67,7 @@ class RunResponse(_Model):
     input_hash: str
     source_hash: str
     runtime: str | None
+    package_hash: str | None
     output: object | None
     output_manifest: dict[str, object]
     error: str | None
@@ -82,6 +84,7 @@ def _response(definition: TransformDefinition) -> DefinitionResponse:
         input_selectors=dict(definition.input_selectors),
         output_schema=dict(definition.output_schema),
         runtime=definition.runtime,
+        package_hash=definition.package_hash,
         source_hash=definition.source_hash,
         revision=definition.revision,
         created_at=definition.created_at.isoformat(),
@@ -95,6 +98,7 @@ def _run_response(run: TransformRun) -> RunResponse:
         definition_snapshot=dict(run.definition_snapshot), inputs=dict(run.inputs),
         parameters=dict(run.parameters), input_hash=run.input_hash,
         source_hash=run.source_hash, runtime=run.runtime, output=run.output,
+        package_hash=run.package_hash,
         output_manifest=dict(run.output_manifest), error=run.error,
         initiator_subject=run.initiator_subject, created_at=run.created_at.isoformat(),
         completed_at=run.completed_at.isoformat() if run.completed_at else None,

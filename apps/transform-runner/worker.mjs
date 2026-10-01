@@ -27,6 +27,7 @@ json.dumps(_result, allow_nan=False)
     respond({
       ok: true,
       output: JSON.parse(outputJson),
+      deno: Deno.version.deno,
       pyodide: pyodide.version,
     });
   }
