@@ -39,6 +39,10 @@ from agent_hub_api.modules.projects import (
     create_postgres_project_module,
     create_project_router,
 )
+from agent_hub_api.modules.transforms import (
+    create_postgres_transform_module,
+    create_transform_router,
+)
 from agent_hub_api.settings import Settings, get_settings
 
 
@@ -71,6 +75,7 @@ def create_app(
     resolved_batches = create_postgres_batch_execution_module(
         resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway
     )
+    resolved_transforms = create_postgres_transform_module(resolved_settings, resolved_projects)
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
@@ -120,6 +125,9 @@ def create_app(
     application.include_router(
         create_batch_execution_router(resolved_identity, resolved_batches),
         prefix="/api",
+    )
+    application.include_router(
+        create_transform_router(resolved_identity, resolved_transforms), prefix="/api"
     )
     application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),

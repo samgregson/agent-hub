@@ -69,6 +69,7 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
 | Dataset / Batch Definition | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
 | Batch Run / Result Set     | Agent Hub                                       | PostgreSQL execution and result records                                               |
+| Transform Definition       | Agent Hub                                       | Project-scoped PostgreSQL definition record                                           |
 | Plugin definition          | Deployment-controlled catalog                   | Version-controlled manifest                                                          |
 | Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
 | Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
@@ -156,6 +157,12 @@ archive(context, batch_run_id) -> archived Batch Run summary
 `start` captures the selected Dataset records, Batch Definition, Plugin/tool identity, schemas, policy, and initiator before execution. The executor invokes one real selected record first; a failure or schema-invalid response stops fan-out, while later failures produce an explicitly partial Result Set. It accepts only catalogued repeat-safe tools, uses host-configured bounded concurrency, and does not provide cancellation or retry in the first pass. A Result Set retains normalized inputs and complete structured outputs within explicit limits, but is not an Artifact unless a user or approved agent explicitly saves a curated conclusion. Completed Batch Runs are immutable; `archive` hides a run from normal workspace views without deleting its Result Set or provenance.
 
 Agent-proposed Dataset saves, definition changes, and `start` calls pause at the existing LangGraph approval interrupt. Resumption invokes the same idempotent command a directly authorized user action uses. The Agent Run may await a short bounded completion window; otherwise it receives a Batch Run reference and ends normally. The executor outlives the AG-UI stream, and later runs inspect persisted results through host tools.
+
+### Transform Module — API
+
+Owns Project-scoped Transform Definitions and, as execution is delivered, Transform Runs. Its current Interface validates, creates, lists, loads, revises, and deletes definitions. A definition stores source, declared JSON input selectors and output schema, source hash, revision, and pinned runtime identity. FastAPI routes translate requests only; validation and authorization remain in the Module.
+
+Transform execution must use an isolated runner with explicit read-only input snapshots and a bounded output channel. Source stored in a definition does not execute in the API process. A Transform Run and explicit output save will be added behind this Interface when the runner boundary is available. This keeps definition changes separate from immutable execution provenance.
 
 ### Plugin Gateway Module — API
 
