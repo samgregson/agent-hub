@@ -67,6 +67,12 @@ class TransformRun:
     completed_at: datetime | None
 
 
+@dataclass(frozen=True, slots=True)
+class TransformRunPage:
+    items: tuple[TransformRun, ...]
+    next_offset: int | None
+
+
 class TransformNotFound(Exception):
     """The Transform Definition is unavailable in this Project."""
 
@@ -103,6 +109,9 @@ class TransformRunStore(Protocol):
     async def create(self, run: TransformRun) -> TransformRun: ...
     async def complete(self, run: TransformRun) -> TransformRun: ...
     async def load(self, project_id: str, run_id: str) -> TransformRun | None: ...
+    async def list(
+        self, project_id: str, definition_id: str | None, limit: int, offset: int
+    ) -> TransformRunPage: ...
     async def reconcile_running(self, now: datetime) -> int: ...
 
 
@@ -280,6 +289,17 @@ class TransformModule:
             raise TransformNotFound
         return run
 
+    async def list_runs(
+        self, access: ProjectAccess, project_id: str,
+        definition_id: str | None = None, limit: int = 20, offset: int = 0,
+    ) -> TransformRunPage:
+        await self._authorize(access, project_id)
+        if self._run_store is None:
+            raise TransformExecutionError("run_store_unavailable")
+        if not 1 <= limit <= 100 or offset < 0:
+            raise TransformValidationError("Run page limit or offset is invalid.")
+        return await self._run_store.list(project_id, definition_id, limit, offset)
+
     async def recover(self) -> int:
         if self._run_store is None:
             return 0
@@ -345,6 +365,23 @@ class MemoryTransformRunStore:
 
     async def load(self, project_id: str, run_id: str) -> TransformRun | None:
         return self._runs.get((project_id, run_id))
+
+    async def list(
+        self, project_id: str, definition_id: str | None, limit: int, offset: int
+    ) -> TransformRunPage:
+        matching = sorted(
+            (
+                run for (stored_project, _), run in self._runs.items()
+                if stored_project == project_id and (
+                    definition_id is None or run.definition_id == definition_id
+                )
+            ),
+            key=lambda run: (run.created_at, run.id),
+            reverse=True,
+        )
+        items = tuple(matching[offset:offset + limit])
+        next_offset = offset + limit if len(matching) > offset + limit else None
+        return TransformRunPage(items, next_offset)
 
     async def reconcile_running(self, now: datetime) -> int:
         active = [key for key, run in self._runs.items() if run.status == "running"]

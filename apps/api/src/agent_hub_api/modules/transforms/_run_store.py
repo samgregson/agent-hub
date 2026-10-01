@@ -8,7 +8,11 @@ from typing import cast
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from agent_hub_api.modules.transforms._application import TransformExecutionError, TransformRun
+from agent_hub_api.modules.transforms._application import (
+    TransformExecutionError,
+    TransformRun,
+    TransformRunPage,
+)
 from agent_hub_api.settings import Settings
 
 
@@ -63,6 +67,23 @@ class PostgresTransformRunStore:
             )
             row = await cursor.fetchone()
         return _from_row(row) if row else None
+
+    async def list(
+        self, project_id: str, definition_id: str | None, limit: int, offset: int
+    ) -> TransformRunPage:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """SELECT * FROM transform_runs WHERE project_id=%s
+                AND (%s::text IS NULL OR transform_definition_id=%s)
+                ORDER BY created_at DESC, transform_run_id DESC LIMIT %s OFFSET %s""",
+                (project_id, definition_id, definition_id, limit + 1, offset),
+            )
+            rows = await cursor.fetchall()
+        return TransformRunPage(
+            tuple(_from_row(row) for row in rows[:limit]),
+            offset + limit if len(rows) > limit else None,
+        )
 
     async def reconcile_running(self, now: datetime) -> int:
         connection = await self._connect()

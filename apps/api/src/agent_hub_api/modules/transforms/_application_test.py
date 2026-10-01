@@ -113,8 +113,20 @@ async def test_run_retains_immutable_snapshots_after_definition_revision() -> No
     )
     loaded = await transforms.load_run(owner, project.id, run.id)
     assert loaded == run
+    page = await transforms.list_runs(owner, project.id, limit=1)
+    assert page.items == (run,)
+    assert page.next_offset is None
+    second = await transforms.start_run(
+        owner, project.id, definition.id, {"load": 3}, {"factor": 3}
+    )
+    first_page = await transforms.list_runs(owner, project.id, limit=1)
+    assert first_page.items == (second,)
+    assert first_page.next_offset == 1
+    assert (await transforms.list_runs(owner, project.id, limit=1, offset=1)).items == (run,)
     with pytest.raises(TransformNotFound):
         await transforms.load_run(ProjectAccess(subject="alex"), project.id, run.id)
+    with pytest.raises(TransformNotFound):
+        await transforms.list_runs(ProjectAccess(subject="alex"), project.id)
 
 
 @pytest.mark.asyncio

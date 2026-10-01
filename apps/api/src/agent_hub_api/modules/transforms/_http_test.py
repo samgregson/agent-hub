@@ -129,6 +129,9 @@ async def test_durable_run_http_can_be_inspected_after_execution() -> None:
         )
         assert started.status_code == 201
         loaded = await client.get(f"{path}/runs/{started.json()['id']}")
+        listed = await client.get(f"{path}/runs?limit=1&definitionId={definition.id}")
     assert loaded.status_code == 200
     assert loaded.json() == started.json()
+    assert listed.status_code == 200
+    assert listed.json() == {"items": [started.json()], "nextOffset": None}
     assert loaded.json()["outputManifest"]["kind"] == "json"

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -74,6 +74,11 @@ class RunResponse(_Model):
     initiator_subject: str
     created_at: str
     completed_at: str | None
+
+
+class RunPageResponse(_Model):
+    items: list[RunResponse]
+    next_offset: int | None
 
 
 def _response(definition: TransformDefinition) -> DefinitionResponse:
@@ -161,6 +166,24 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
             items = await transforms.list(access(request_context), project_id)
             return [_response(item) for item in items]
         except TransformNotFound as error:
+            raise failure(error) from error
+
+    @router.get("/runs", response_model=RunPageResponse)
+    async def list_runs(
+        project_id: str, request_context: Context,
+        definition_id: str | None = Query(default=None, alias="definitionId"),
+        limit: int = Query(default=20, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+    ) -> RunPageResponse:
+        try:
+            page = await transforms.list_runs(
+                access(request_context), project_id, definition_id, limit, offset
+            )
+            return RunPageResponse(
+                items=[_run_response(run) for run in page.items],
+                next_offset=page.next_offset,
+            )
+        except (TransformNotFound, TransformExecutionError) as error:
             raise failure(error) from error
 
     @router.get("/{definition_id}", response_model=DefinitionResponse)

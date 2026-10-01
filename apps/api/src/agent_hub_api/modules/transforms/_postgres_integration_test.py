@@ -45,6 +45,7 @@ async def test_transform_run_round_trips_through_postgres() -> None:
         )
         assert run.status == "succeeded"
         assert await transforms.load_run(access, project.id, run.id) == run
+        assert (await transforms.list_runs(access, project.id)).items == (run,)
         await transforms.delete(access, project.id, definition.id)
         assert await transforms.load_run(access, project.id, run.id) == run
         connection = await AsyncConnection.connect(str(settings.database_url))
