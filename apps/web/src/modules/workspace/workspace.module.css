@@ -578,6 +578,10 @@
     box-shadow: 12px 0 32px rgb(0 0 0 / 30%);
   }
 
+  .mobileNavigationDrawerWide {
+    width: 100vw;
+  }
+
 .mobileNavigationHeader {
     display: flex;
     align-items: center;

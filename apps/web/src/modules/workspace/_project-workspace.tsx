@@ -12,6 +12,7 @@ import {
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
 import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
 import { DatasetCatalog } from "@/modules/datasets";
+import { TransformCatalog } from "@/modules/transforms";
 import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
 import { Menu, MenuItem } from "@/shared/ui";
@@ -45,6 +46,7 @@ const activityLabels = {
   batchDefinitions: "Batch Definitions",
   chats: "Chats",
   datasets: "Datasets",
+  transforms: "Transforms",
   plugins: "Plugins",
   sources: "Sources",
 } as const;
@@ -114,6 +116,7 @@ export function ProjectWorkspace() {
   const isExplorerActivity = [
     "batchDefinitions",
     "datasets",
+    "transforms",
     "plugins",
     "sources",
   ].includes(selectedActivity);
@@ -442,7 +445,7 @@ export function ProjectWorkspace() {
           />
           <aside
             aria-label="Project navigation"
-            className={styles.mobileNavigationDrawer}
+            className={`${styles.mobileNavigationDrawer} ${selectedActivity === "transforms" ? styles.mobileNavigationDrawerWide : ""}`}
             id="mobile-project-navigation"
             role="dialog"
           >
@@ -603,7 +606,9 @@ function ProjectNavigator({
 }: ProjectNavigatorProps) {
   return (
     <>
-      <strong>{activityLabels[selectedActivity]}</strong>
+      {selectedActivity !== "transforms" ? (
+        <strong>{activityLabels[selectedActivity]}</strong>
+      ) : null}
       {selectedActivity === "chats" && project ? (
         <>
           <button
@@ -654,6 +659,8 @@ function ProjectNavigator({
           mode={selectedActivity === "datasets" ? "datasets" : "definitions"}
           projectId={project.id}
         />
+      ) : selectedActivity === "transforms" && project ? (
+        <TransformCatalog key={project.id} projectId={project.id} />
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />
       ) : (

@@ -3,6 +3,7 @@ export const activityViews = [
   "artifacts",
   "datasets",
   "batchDefinitions",
+  "transforms",
   "sources",
   "plugins",
 ] as const;
