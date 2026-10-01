@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("source", sa.Text(), nullable=False),
         sa.Column("input_selectors", sa.JSON(), nullable=False),
         sa.Column("output_schema", sa.JSON(), nullable=False),
-        sa.Column("runtime", sa.String(length=80), nullable=False),
+        sa.Column("runtime", sa.String(length=80), nullable=True),
         sa.Column("source_hash", sa.String(length=64), nullable=False),
         sa.Column("revision", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

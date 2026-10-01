@@ -160,9 +160,9 @@ Agent-proposed Dataset saves, definition changes, and `start` calls pause at the
 
 ### Transform Module — API
 
-Owns Project-scoped Transform Definitions and, as execution is delivered, Transform Runs. Its current Interface validates, creates, lists, loads, revises, and deletes definitions. A definition stores source, declared JSON input selectors and output schema, source hash, revision, and pinned runtime identity. FastAPI routes translate requests only; validation and authorization remain in the Module.
+Owns Project-scoped Transform Definitions and, as execution is delivered, Transform Runs. Its current Interface validates, creates, lists, loads, revises, and deletes definitions. A definition stores source, declared JSON input selectors and output schema, source hash, and revision. Runtime identity remains unset until the shared Deno-hosted Pyodide runner is pinned; it must be captured before a Transform Run can start. FastAPI routes translate requests only; validation and authorization remain in the Module.
 
-Transform execution must use an isolated runner with explicit read-only input snapshots and a bounded output channel. Source stored in a definition does not execute in the API process. A Transform Run and explicit output save will be added behind this Interface when the runner boundary is available. This keeps definition changes separate from immutable execution provenance.
+Both previews and durable Transform Runs execute through one Deno-hosted Pyodide runner with explicit read-only input snapshots and a bounded output channel. Only the durable path persists the outcome and provenance. Source stored in a definition does not execute in the API process. A Transform Run and explicit output save will be added behind this Interface when the runner boundary is available. This keeps definition changes separate from immutable execution provenance.
 
 ### Plugin Gateway Module — API
 

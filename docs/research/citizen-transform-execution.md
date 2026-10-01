@@ -2,6 +2,8 @@
 
 Research date: 2026-09-30
 
+Decision update: [ADR 0007](../adr/0007-use-one-deno-hosted-pyodide-runner.md) selects one Deno-hosted Pyodide runner for both previews and durable Transform Runs. The staged browser-Pyodide recommendation below is retained as research context, not the current implementation direction.
+
 ## Conclusion
 
 Agent Hub should eventually offer a **host-owned Transform Run**: a durable, approved execution that reads explicitly selected project values and produces a Dataset, Result Set, or Artifact through an explicit save action. It is a useful escape hatch between direct JSON bindings and asking every user to develop an MCP server.

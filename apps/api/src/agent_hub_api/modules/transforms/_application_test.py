@@ -38,7 +38,7 @@ async def test_definition_is_project_scoped_and_revisions_keep_identity() -> Non
     assert definition.source_hash != revised.source_hash
     assert revised.id == definition.id
     assert revised.revision == 2
-    assert revised.runtime == "python-3.14.4-stdlib-v1"
+    assert revised.runtime is None
     assert [item.id for item in await transforms.list(owner, project.id)] == [definition.id]
     with pytest.raises(TransformNotFound):
         await transforms.load(other, project.id, definition.id)

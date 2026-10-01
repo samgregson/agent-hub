@@ -36,7 +36,7 @@ class DefinitionResponse(_Model):
     source: str
     input_selectors: dict[str, str]
     output_schema: dict[str, object]
-    runtime: str
+    runtime: str | None
     source_hash: str
     revision: int
     created_at: str

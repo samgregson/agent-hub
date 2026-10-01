@@ -16,8 +16,6 @@ from psycopg.rows import dict_row
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.settings import Settings
 
-RUNTIME_ID = "python-3.14.4-stdlib-v1"
-
 
 @dataclass(frozen=True, slots=True)
 class TransformDefinition:
@@ -27,7 +25,7 @@ class TransformDefinition:
     source: str
     input_selectors: Mapping[str, str]
     output_schema: Mapping[str, object]
-    runtime: str
+    runtime: str | None
     source_hash: str
     revision: int
     created_at: datetime
@@ -74,7 +72,7 @@ class TransformModule:
         return await self._store.create(
             TransformDefinition(
                 str(uuid4()), project_id, clean_name, clean_source, selectors, schema,
-                RUNTIME_ID, hashlib.sha256(clean_source.encode()).hexdigest(), 1, now, now,
+                None, hashlib.sha256(clean_source.encode()).hexdigest(), 1, now, now,
             )
         )
 
@@ -287,7 +285,7 @@ def _from_row(row: Mapping[str, object]) -> TransformDefinition:
             json.loads(schema) if isinstance(schema, str)
             else dict(cast(Mapping[str, object], schema))
         ),
-        runtime=str(row["runtime"]),
+        runtime=str(row["runtime"]) if row["runtime"] is not None else None,
         source_hash=str(row["source_hash"]),
         revision=cast(int, row["revision"]),
         created_at=cast(datetime, row["created_at"]),
