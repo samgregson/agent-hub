@@ -333,28 +333,35 @@
   margin-top: 25px;
 }
 .variantBar {
-  position: fixed;
-  z-index: 6;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 7px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  background: var(--text-strong);
-  color: var(--background);
-  box-shadow: 0 12px 30px rgb(0 0 0 / 30%);
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 28px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--text);
   font-size: var(--font-size-label);
-  white-space: nowrap;
+}
+.variantBar strong {
+  margin-right: 12px;
 }
 .variantBar button {
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 50%;
+  min-height: 44px;
+  padding: 0 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  text-align: left;
+}
+.variantBar button:hover {
+  border-color: var(--accent);
+}
+.variantBar button[aria-pressed="true"] {
+  border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
   font-weight: 700;
@@ -495,12 +502,19 @@
     background: transparent;
   }
   .variantBar {
-    bottom: 12px;
-    max-width: calc(100vw - 24px);
-    gap: 7px;
-    font-size: 0.7rem;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 18px;
+    padding: 9px;
+  }
+  .variantBar strong {
+    grid-column: 1 / -1;
+    margin: 0 0 3px;
   }
   .variantBar button {
-    flex: 0 0 34px;
+    min-height: 58px;
+    padding: 8px;
+    font-size: 0.72rem;
   }
 }

@@ -1,5 +1,17 @@
 import { expect, test } from "@playwright/test";
 
+test("prototype variants are directly selectable in a built app", async ({
+  page,
+}) => {
+  await page.goto("/prototype/project-explorer?variant=A");
+  await expect(
+    page.getByRole("button", { name: "B · Expandable outline" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "B · Expandable outline" }).click();
+  await expect(page).toHaveURL(/variant=B/);
+  await expect(page.getByLabel("Data outline")).toBeVisible();
+});
+
 test("prototype keeps Runs and Result Sets contextual under Data definitions", async ({
   page,
 }) => {
@@ -29,12 +41,12 @@ test("prototype keeps Runs and Result Sets contextual under Data definitions", a
   await page.getByRole("button", { name: "Inspect dataflow" }).click();
   await expect(page.getByRole("heading", { name: "Dataflow" })).toBeVisible();
   await expect(page.getByText("per-record outcomes")).toBeVisible();
-  await page.getByRole("button", { name: "Next variant" }).click();
+  await page.getByRole("button", { name: "B · Expandable outline" }).click();
   await expect(page).toHaveURL(/variant=B/);
   await expect(page.getByLabel("Data outline")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("Data outline")).toBeVisible();
-  await page.getByRole("button", { name: "Next variant" }).click();
+  await page.getByRole("button", { name: "C · Overview index" }).click();
   await expect(page).toHaveURL(/variant=C/);
   await expect(page.getByLabel("Data overview")).toBeVisible();
   await page
@@ -63,6 +75,9 @@ test("phone width keeps one primary surface and touch-visible navigation", async
 
   await expect(
     page.getByRole("button", { name: "Open Project navigation" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "B · Expandable outline" }),
   ).toBeVisible();
   await expect(page.getByLabel("Selected Data record")).toBeHidden();
   await page.getByRole("button", { name: "Open Project navigation" }).click();

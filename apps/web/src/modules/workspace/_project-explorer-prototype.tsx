@@ -131,6 +131,24 @@ export function ProjectExplorerPrototype() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
 
+  function chooseVariant(next: Variant) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("variant", next);
+    window.history.replaceState(null, "", url);
+    window.dispatchEvent(new Event("prototype-variant-changed"));
+    setDestination("Data");
+    if (selected === "artifact") setSelected(primaryRecords[collection][0]);
+    setDrawerOpen(false);
+    setMobileDetail(false);
+  }
+
+  function cycle(delta: number) {
+    const index = variants.findIndex((item) => item.key === variant);
+    chooseVariant(
+      variants[(index + delta + variants.length) % variants.length].key,
+    );
+  }
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -143,21 +161,6 @@ export function ProjectExplorerPrototype() {
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [variant]);
-
-  function chooseVariant(next: Variant) {
-    const url = new URL(window.location.href);
-    url.searchParams.set("variant", next);
-    window.history.replaceState(null, "", url);
-    window.dispatchEvent(new Event("prototype-variant-changed"));
-    setDrawerOpen(false);
-  }
-
-  function cycle(delta: number) {
-    const index = variants.findIndex((item) => item.key === variant);
-    chooseVariant(
-      variants[(index + delta + variants.length) % variants.length].key,
-    );
-  }
 
   function chooseDestination(next: Destination) {
     setDestination(next);
@@ -271,6 +274,23 @@ export function ProjectExplorerPrototype() {
       ) : null}
 
       <section className={styles.workspace}>
+        <div
+          className={styles.variantBar}
+          role="group"
+          aria-label="Prototype variants"
+        >
+          <strong>Compare Data layouts</strong>
+          {variants.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              aria-pressed={variant === item.key}
+              onClick={() => chooseVariant(item.key)}
+            >
+              {item.key} · {item.label}
+            </button>
+          ))}
+        </div>
         {destination === "Data" ? (
           <>
             <div className={styles.workspaceHeading}>
@@ -458,28 +478,6 @@ export function ProjectExplorerPrototype() {
           </section>
         )}
       </section>
-
-      {process.env.NODE_ENV !== "production" ? (
-        <div className={styles.variantBar} aria-label="Prototype variants">
-          <button
-            type="button"
-            onClick={() => cycle(-1)}
-            aria-label="Previous variant"
-          >
-            ←
-          </button>
-          <span>
-            {variant} · {variants.find((item) => item.key === variant)?.label}
-          </span>
-          <button
-            type="button"
-            onClick={() => cycle(1)}
-            aria-label="Next variant"
-          >
-            →
-          </button>
-        </div>
-      ) : null}
     </main>
   );
 }
