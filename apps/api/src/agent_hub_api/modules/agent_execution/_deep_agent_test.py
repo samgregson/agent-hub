@@ -22,6 +22,7 @@ from agent_hub_api.modules.datasets import (
     MemoryDatasetStore,
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
+from agent_hub_api.modules.transforms import TransformInitiation
 
 
 def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:
@@ -304,13 +305,16 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
     class Transforms:
         def __init__(self) -> None:
             self.started: tuple[str, dict[str, object], dict[str, object]] | None = None
+            self.initiation: TransformInitiation | None = None
             self.saved: tuple[str, str] | None = None
 
         async def start_run(
             self, _access: object, _project_id: str, definition_id: str,
             record: dict[str, object], parameters: dict[str, object],
+            initiation: TransformInitiation,
         ) -> object:
             self.started = definition_id, record, parameters
+            self.initiation = initiation
             return SimpleNamespace(id="run-1", status="succeeded")
 
         async def save_run_as_dataset(
@@ -323,7 +327,7 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
     tools = {
         item.name: item
         for item in PostgresDeepAgentRunner._transform_tools(
-            cast(Any, transforms), "project-1", "sam"
+            cast(Any, transforms), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
     started = await tools["start_project_transform_run"].ainvoke({
@@ -335,6 +339,9 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
     })
     assert started == "Transform Run run-1 succeeded."
     assert transforms.started == ("definition-1", {"load": 3}, {"factor": 2})
+    assert transforms.initiation == TransformInitiation(
+        "agentRun", "approved", "thread-1", "agent-run-1"
+    )
     assert saved == "Saved Dataset Saved (dataset-1) from Transform Run run-1."
     assert transforms.saved == ("run-1", "Saved")
 

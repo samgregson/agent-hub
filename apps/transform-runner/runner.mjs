@@ -1,14 +1,22 @@
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+export const RUNNER_LIMITS = Object.freeze({
+  timeoutMs: 10_000,
+  maxInputBytes: 128_000,
+  maxOutputBytes: 128_000,
+  maxSourceBytes: 64_000,
+  maxConcurrent: 1,
+});
+
 export async function runTransform(request, limits = {}) {
-  const timeoutMs = limits.timeoutMs ?? 10_000;
-  const maxInputBytes = limits.maxInputBytes ?? 128_000;
-  const maxOutputBytes = limits.maxOutputBytes ?? 128_000;
+  const timeoutMs = limits.timeoutMs ?? RUNNER_LIMITS.timeoutMs;
+  const maxInputBytes = limits.maxInputBytes ?? RUNNER_LIMITS.maxInputBytes;
+  const maxOutputBytes = limits.maxOutputBytes ?? RUNNER_LIMITS.maxOutputBytes;
   if (
     !request || typeof request.source !== "string" ||
     request.source.length === 0 ||
-    encoder.encode(request.source).length > 64_000 ||
+    encoder.encode(request.source).length > RUNNER_LIMITS.maxSourceBytes ||
     !request.inputs || typeof request.inputs !== "object" ||
     Array.isArray(request.inputs) ||
     !request.parameters || typeof request.parameters !== "object" ||

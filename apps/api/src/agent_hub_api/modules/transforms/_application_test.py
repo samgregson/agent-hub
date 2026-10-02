@@ -9,6 +9,7 @@ from agent_hub_api.modules.datasets import DatasetModule, MemoryDatasetStore
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
     MemoryTransformStore,
+    TransformInitiation,
     TransformModule,
     TransformNotFound,
     TransformRuntimeIdentity,
@@ -214,6 +215,49 @@ async def test_run_retains_immutable_snapshots_after_definition_revision() -> No
         await transforms.load_run(ProjectAccess(subject="alex"), project.id, run.id)
     with pytest.raises(TransformNotFound):
         await transforms.list_runs(ProjectAccess(subject="alex"), project.id)
+
+
+@pytest.mark.asyncio
+async def test_run_retains_agent_approval_context_and_enforced_runner_limits() -> None:
+    from agent_hub_api.modules.transforms import MemoryTransformRunStore
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+
+    class Runner(_PinnedRunner):
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity(
+                "deno:2.9.7;pyodide:314.0.7", "a" * 64,
+                {"timeoutMs": 10_000, "maxInputBytes": 128_000, "maxOutputBytes": 128_000},
+            )
+
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+    )
+    definition = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"}, {"type": "object"},
+    )
+    run = await transforms.start_run(
+        owner, project.id, definition.id, {"load": 3}, {},
+        initiation=TransformInitiation(
+            kind="agentRun", approval="approved", thread_id="thread-1",
+            agent_run_id="agent-run-1",
+        ),
+    )
+
+    assert run.initiation == {
+        "kind": "agentRun", "approval": "approved",
+        "threadId": "thread-1", "agentRunId": "agent-run-1",
+    }
+    assert run.limits["timeoutMs"] == 10_000
+    assert (await transforms.load_run(owner, project.id, run.id)) == run
 
 
 @pytest.mark.asyncio

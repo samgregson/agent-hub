@@ -75,6 +75,8 @@ class RunResponse(_Model):
     output_manifest: dict[str, object]
     error: str | None
     initiator_subject: str
+    initiation: dict[str, object]
+    limits: dict[str, object]
     created_at: str
     completed_at: str | None
 
@@ -124,6 +126,7 @@ def _run_response(run: TransformRun) -> RunResponse:
         package_hash=run.package_hash,
         output_manifest=dict(run.output_manifest), error=run.error,
         initiator_subject=run.initiator_subject, created_at=run.created_at.isoformat(),
+        initiation=dict(run.initiation), limits=dict(run.limits),
         completed_at=run.completed_at.isoformat() if run.completed_at else None,
     )
 

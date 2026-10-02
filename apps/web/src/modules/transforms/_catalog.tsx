@@ -36,6 +36,17 @@ interface Run {
   output: unknown;
   outputManifest: { bytes?: number; sha256?: string };
   error: string | null;
+  initiation: {
+    kind: string;
+    approval: string;
+    threadId: string | null;
+    agentRunId: string | null;
+  };
+  limits: {
+    timeoutMs?: number;
+    maxInputBytes?: number;
+    maxOutputBytes?: number;
+  };
   createdAt: string;
 }
 
@@ -657,6 +668,16 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                 {selectedRun.packageHash
                   ? shortId(selectedRun.packageHash)
                   : "unknown"}
+              </p>
+              <p className={styles.provenance}>
+                {selectedRun.initiation.kind === "agentRun"
+                  ? "Approved Agent Run"
+                  : selectedRun.initiation.kind === "directUser"
+                    ? "Direct user action"
+                    : "Historical Run"}
+                {selectedRun.limits.timeoutMs
+                  ? ` · ${selectedRun.limits.timeoutMs / 1000}s timeout`
+                  : ""}
               </p>
               {selectedRun.status === "succeeded" ? (
                 <div className={styles.saveRow}>

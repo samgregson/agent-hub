@@ -34,8 +34,8 @@ class PostgresTransformRunStore:
                 """INSERT INTO transform_runs
                 (project_id,transform_run_id,transform_definition_id,status,definition_snapshot,
                 inputs,parameters,input_hash,source_hash,runtime,package_hash,output,output_manifest,error,
-                initiator_subject,created_at,completed_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                initiator_subject,initiation,limits,created_at,completed_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 _values(run),
             )
         return run
@@ -102,7 +102,8 @@ def _values(run: TransformRun) -> tuple[object, ...]:
         json.dumps(run.definition_snapshot), json.dumps(run.inputs),
         json.dumps(run.parameters), run.input_hash, run.source_hash,
         run.runtime, run.package_hash, json.dumps(run.output), json.dumps(run.output_manifest),
-        run.error, run.initiator_subject, run.created_at, run.completed_at,
+        run.error, run.initiator_subject, json.dumps(run.initiation),
+        json.dumps(run.limits), run.created_at, run.completed_at,
     )
 
 
@@ -127,6 +128,8 @@ def _from_row(row: Mapping[str, object]) -> TransformRun:
         output_manifest=cast(Mapping[str, object], _json(row["output_manifest"])),
         error=str(row["error"]) if row["error"] is not None else None,
         initiator_subject=str(row["initiator_subject"]),
+        initiation=cast(Mapping[str, object], _json(row["initiation"])),
+        limits=cast(Mapping[str, object], _json(row["limits"])),
         created_at=cast(datetime, row["created_at"]),
         completed_at=cast(datetime | None, row["completed_at"]),
     )

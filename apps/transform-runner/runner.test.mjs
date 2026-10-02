@@ -6,7 +6,10 @@ Deno.test("runtime endpoint reports the pinned package lock", async () => {
   const runtime = await response.json();
   if (
     response.status !== 200 || runtime.deno !== Deno.version.deno ||
-    runtime.pyodide !== "314.0.7" || runtime.packageHash.length !== 64
+    runtime.pyodide !== "314.0.7" || runtime.packageHash.length !== 64 ||
+    runtime.limits.timeoutMs !== 10_000 ||
+    runtime.limits.maxOutputBytes !== 128_000 ||
+    runtime.limits.maxConcurrent !== 1
   ) {
     throw new Error(`Unexpected runtime identity: ${JSON.stringify(runtime)}`);
   }

@@ -4,7 +4,7 @@ import ast
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Protocol, cast
 from uuid import uuid4
@@ -52,6 +52,15 @@ class TransformPreview:
 class TransformRuntimeIdentity:
     runtime: str
     package_hash: str
+    limits: Mapping[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class TransformInitiation:
+    kind: str
+    approval: str
+    thread_id: str | None = None
+    agent_run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +80,8 @@ class TransformRun:
     output_manifest: Mapping[str, object]
     error: str | None
     initiator_subject: str
+    initiation: Mapping[str, object]
+    limits: Mapping[str, object]
     created_at: datetime
     completed_at: datetime | None
 
@@ -253,6 +264,7 @@ class TransformModule:
             "outputSchema": dict(definition.output_schema),
             "runtime": identity.runtime,
             "packageHash": identity.package_hash,
+            "limits": dict(identity.limits),
         }
 
     async def execute_batch_record(
@@ -290,6 +302,7 @@ class TransformModule:
     async def start_run(
         self, access: ProjectAccess, project_id: str, definition_id: str,
         record: Mapping[str, object], parameters: Mapping[str, object],
+        initiation: TransformInitiation | None = None,
     ) -> TransformRun:
         definition = await self.load(access, project_id, definition_id)
         if self._run_store is None:
@@ -305,6 +318,7 @@ class TransformModule:
         inputs, parameter_values = _inputs(definition, record, parameters)
         input_bytes = _canonical({"inputs": inputs, "parameters": parameter_values})
         now = datetime.now(UTC)
+        context = initiation or TransformInitiation("directUser", "notRequired")
         run = await self._run_store.create(TransformRun(
             id=str(uuid4()), project_id=project_id, definition_id=definition_id,
             status="running", definition_snapshot={
@@ -320,6 +334,11 @@ class TransformModule:
             source_hash=definition.source_hash, runtime=identity.runtime,
             package_hash=identity.package_hash, output=None,
             output_manifest={}, error=None, initiator_subject=access.subject,
+            initiation={
+                "kind": context.kind, "approval": context.approval,
+                "threadId": context.thread_id, "agentRunId": context.agent_run_id,
+            },
+            limits=dict(identity.limits),
             created_at=now, completed_at=None,
         ))
         try:
@@ -424,6 +443,8 @@ class TransformModule:
                     "runtime": run.runtime,
                     "packageHash": run.package_hash,
                     "outputManifest": dict(run.output_manifest),
+                    "initiation": dict(run.initiation),
+                    "limits": dict(run.limits),
                 },
                 summary=f"Saved output from Transform Run {run.id}.",
             ),

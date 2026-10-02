@@ -43,7 +43,7 @@ from agent_hub_api.modules.plugin_gateway import (
 )
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transforms import TransformModule
+from agent_hub_api.modules.transforms import TransformInitiation, TransformModule
 from agent_hub_api.settings import Settings
 
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
@@ -614,6 +614,10 @@ class PostgresDeepAgentRunner:
             run = await transforms.start_run(
                 access, project_id, definition_id,
                 object_json(record_json), object_json(parameters_json),
+                initiation=TransformInitiation(
+                    kind="agentRun", approval="approved",
+                    thread_id=thread_id, agent_run_id=agent_run_id,
+                ),
             )
             return f"Transform Run {run.id} {run.status}."
 

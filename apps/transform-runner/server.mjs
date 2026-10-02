@@ -1,4 +1,4 @@
-import { runTransform } from "./runner.mjs";
+import { RUNNER_LIMITS, runTransform } from "./runner.mjs";
 
 const decoder = new TextDecoder();
 let active = false;
@@ -51,6 +51,7 @@ export async function handle(request) {
       deno: Deno.version.deno,
       pyodide: "314.0.7",
       packageHash,
+      limits: RUNNER_LIMITS,
     });
   }
   if (request.method !== "POST" || path !== "/execute") {
