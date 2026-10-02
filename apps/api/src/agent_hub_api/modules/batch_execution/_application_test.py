@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 
 from agent_hub_api.modules.batch_execution import (
     BatchExecutionModule,
+    BatchInitiation,
     BatchRun,
     BatchRunOrder,
     BatchRunStatus,
@@ -367,6 +368,11 @@ async def test_result_set_http_query_returns_a_filtered_page_and_summary() -> No
     assert "records" not in run_response.json()
     assert run_response.json()["recordCount"] == 5
     assert run_response.json()["succeededCount"] == 5
+    assert run_response.json()["initiatorSubject"] == "sam"
+    assert run_response.json()["initiation"] == {
+        "kind": "directUser", "approval": "notRequired", "threadId": None,
+        "agentRunId": None, "toolCallId": None,
+    }
     assert response.json()["items"][0]["structuredOutput"] == {"result": 10}
     assert response.json()["nextOffset"] == 1
     assert response.json()["summary"]["numericSum"] == 28
@@ -382,6 +388,29 @@ async def test_repeated_idempotency_key_returns_the_original_run_without_reexecu
 
     assert repeated == first
     assert len(gateway.calls) == 5
+
+
+@pytest.mark.asyncio
+async def test_approved_agent_batch_replay_retains_one_run_and_its_initiation() -> None:
+    access, project_id, batches, definition_id = await create_module(Gateway())
+    initiation = BatchInitiation(
+        kind="agentRun", approval="approved", thread_id="thread-1",
+        agent_run_id="agent-run-1", tool_call_id="call-1",
+    )
+
+    first = await batches.submit_all(
+        access, project_id, definition_id, "agent-batch-call-1", initiation=initiation
+    )
+    replayed = await batches.submit_all(
+        access, project_id, definition_id, "agent-batch-call-1", initiation=initiation
+    )
+
+    assert replayed.id == first.id
+    assert first.initiation == {
+        "kind": "agentRun", "approval": "approved", "threadId": "thread-1",
+        "agentRunId": "agent-run-1", "toolCallId": "call-1",
+    }
+    assert (await batches.list(access, project_id)).items == (first,)
 
 
 @pytest.mark.asyncio

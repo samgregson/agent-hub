@@ -38,6 +38,8 @@ interface BatchRun {
   createdAt: string;
   definitionId: string;
   id: string;
+  initiatorSubject: string | null;
+  initiation: { kind: string; approval: string };
   status: string;
   recordCount: number;
   succeededCount: number;
@@ -742,6 +744,13 @@ export function DatasetCatalog({
             <section aria-label="Batch Run results" className={styles.detail}>
               <h2>Batch Run results</h2>
               <p>{runSummary(selectedRun)}</p>
+              <p>
+                {selectedRun.initiation.kind === "agentRun"
+                  ? "Started by an approved agent action"
+                  : selectedRun.initiation.kind === "directUser"
+                    ? "Started directly by a user"
+                    : "Initiator context unavailable"}
+              </p>
               {visibleResults ? (
                 <p>
                   {visibleResults.summary.totalCount} results ·{" "}

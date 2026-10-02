@@ -1,7 +1,7 @@
 import asyncio
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol, cast
@@ -36,6 +36,15 @@ class BatchRunOrder(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class BatchInitiation:
+    kind: str
+    approval: str
+    thread_id: str | None = None
+    agent_run_id: str | None = None
+    tool_call_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ResultRecord:
     dataset_record_id: str
     input: Mapping[str, object]
@@ -56,6 +65,7 @@ class BatchRun:
     idempotency_key: str | None = None
     initiator_subject: str | None = None
     archived_at: datetime | None = None
+    initiation: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,8 +164,12 @@ class BatchExecutionModule:
         definition_id: str,
         record_id: str,
         idempotency_key: str | None = None,
+        *, initiation: BatchInitiation | None = None,
     ) -> BatchRun:
-        run = await self.submit_one(access, project_id, definition_id, record_id, idempotency_key)
+        run = await self.submit_one(
+            access, project_id, definition_id, record_id, idempotency_key,
+            initiation=initiation,
+        )
         return await self.execute(access, project_id, run.id)
 
     async def submit_one(
@@ -165,6 +179,7 @@ class BatchExecutionModule:
         definition_id: str,
         record_id: str,
         idempotency_key: str | None = None,
+        *, initiation: BatchInitiation | None = None,
     ) -> BatchRun:
         await self._authorize(access, project_id)
         definition = await self._datasets.load_definition(access, project_id, definition_id)
@@ -189,6 +204,7 @@ class BatchExecutionModule:
             now,
             idempotency_key,
             access.subject,
+            initiation=_initiation_snapshot(initiation),
         )
         run, created = await self._store.create_or_load(run)
         return run
@@ -199,8 +215,11 @@ class BatchExecutionModule:
         project_id: str,
         definition_id: str,
         idempotency_key: str | None = None,
+        *, initiation: BatchInitiation | None = None,
     ) -> BatchRun:
-        run = await self.submit_all(access, project_id, definition_id, idempotency_key)
+        run = await self.submit_all(
+            access, project_id, definition_id, idempotency_key, initiation=initiation
+        )
         return await self.execute(access, project_id, run.id)
 
     async def submit_all(
@@ -209,6 +228,7 @@ class BatchExecutionModule:
         project_id: str,
         definition_id: str,
         idempotency_key: str | None = None,
+        *, initiation: BatchInitiation | None = None,
     ) -> BatchRun:
         """Execute a captured Dataset after its first record succeeds."""
         await self._authorize(access, project_id)
@@ -240,6 +260,7 @@ class BatchExecutionModule:
             now,
             idempotency_key,
             access.subject,
+            initiation=_initiation_snapshot(initiation),
         )
         run, created = await self._store.create_or_load(run)
         return run
@@ -592,8 +613,8 @@ class PostgresBatchRunStore:
         async with connection:
             cursor = await connection.execute(
                 """INSERT INTO batch_runs
-                (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject,initiation)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (project_id,idempotency_key)
                 WHERE idempotency_key IS NOT NULL DO NOTHING
                 RETURNING batch_run_id""",
@@ -607,6 +628,7 @@ class PostgresBatchRunStore:
                     run.updated_at,
                     run.idempotency_key,
                     run.initiator_subject,
+                    json.dumps(run.initiation),
                 ),
             )
             if await cursor.fetchone() is not None:
@@ -734,8 +756,8 @@ async def _save(
     else:
         await connection.execute(
             """INSERT INTO batch_runs
-            (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject,archived_at)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (project_id,batch_run_id,batch_definition_id,status,definition_snapshot,created_at,updated_at,idempotency_key,initiator_subject,archived_at,initiation)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
             (
                 run.project_id,
                 run.id,
@@ -747,6 +769,7 @@ async def _save(
                 run.idempotency_key,
                 run.initiator_subject,
                 run.archived_at,
+                json.dumps(run.initiation),
             ),
         )
         await _insert_result_records(connection, run)
@@ -807,6 +830,7 @@ async def _load(
         str(row["idempotency_key"]) if row["idempotency_key"] is not None else None,
         str(row["initiator_subject"]) if row["initiator_subject"] is not None else None,
         cast(datetime | None, row["archived_at"]),
+        _obj(row["initiation"]),
     )
 
 
@@ -816,6 +840,15 @@ def _obj(value: object) -> Mapping[str, object]:
     if isinstance(value, Mapping):
         return dict(value)
     raise TypeError("Stored Batch Run JSON must be an object")
+
+
+def _initiation_snapshot(initiation: BatchInitiation | None) -> Mapping[str, object]:
+    context = initiation or BatchInitiation("directUser", "notRequired")
+    return {
+        "kind": context.kind, "approval": context.approval,
+        "threadId": context.thread_id, "agentRunId": context.agent_run_id,
+        "toolCallId": context.tool_call_id,
+    }
 
 
 def _select(value: Mapping[str, object], pointer: str) -> object:

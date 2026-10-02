@@ -6,6 +6,7 @@ from psycopg import AsyncConnection, OperationalError
 from pydantic import PostgresDsn
 
 from agent_hub_api.modules.batch_execution import (
+    BatchInitiation,
     BatchRunStatus,
     create_postgres_batch_execution_module,
 )
@@ -125,8 +126,13 @@ async def test_postgres_batch_run_retains_captured_records_in_dataset_order() ->
         definition = await datasets.create_definition(
             access, project.id, dataset.id, "Echo", "fixture", "echo", {"load": "/load"},
         )
+        initiation = BatchInitiation(
+            kind="agentRun", approval="approved", thread_id="thread-1",
+            agent_run_id="agent-run-1", tool_call_id="call-1",
+        )
         queued = await batches.submit_all(
-            access, project.id, definition.id, idempotency_key="same-submission"
+            access, project.id, definition.id, idempotency_key="same-submission",
+            initiation=initiation,
         )
 
         loaded = await batches.load(access, project.id, queued.id)
@@ -140,6 +146,8 @@ async def test_postgres_batch_run_retains_captured_records_in_dataset_order() ->
         ]
         assert completed.status is BatchRunStatus.succeeded
         assert repeated.id == queued.id
+        assert loaded.initiation == queued.initiation
+        assert loaded.initiation["agentRunId"] == "agent-run-1"
         assert [record.structured_output for record in completed.records] == [
             {"result": 3}, {"result": 1}, {"result": 2},
         ]

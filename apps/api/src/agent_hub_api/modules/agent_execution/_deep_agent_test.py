@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -16,6 +17,7 @@ from agent_hub_api.modules.agent_execution._deep_agent import (
     _project_file_permissions,
 )
 from agent_hub_api.modules.artifacts import ArtifactMutationAccess
+from agent_hub_api.modules.batch_execution import BatchInitiation
 from agent_hub_api.modules.datasets import (
     DatasetModule,
     DatasetRecordInput,
@@ -173,7 +175,9 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
 
     monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
 
-    await runner._agent_for("project-1", subject="sam")
+    await runner._agent_for(
+        "project-1", thread_id="thread-1", run_id="agent-run-1", subject="sam"
+    )
 
     names = {registered.name for registered in captured["tools"]}
     assert {"discover_project_datasets", "load_project_dataset"} <= names
@@ -181,6 +185,8 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "create_project_batch_definition" in captured["interrupt_on"]
     assert "start_project_batch_run" in captured["interrupt_on"]
     assert "start_project_batch_run" in names
+    assert {"list_project_batch_runs", "inspect_project_batch_results"} <= names
+    assert "inspect_project_batch_results" not in captured["interrupt_on"]
     assert "create_project_transform_batch_definition" in captured["interrupt_on"]
     assert "create_project_transform_batch_definition" in names
     assert {"discover_project_transforms", "load_project_transform"} <= names
@@ -256,24 +262,101 @@ async def test_agent_loads_a_batch_definition_on_demand(
 async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
     class Batches:
         def __init__(self) -> None:
-            self.submission: tuple[str, str] | None = None
+            self.submissions: list[tuple[str, str, str, BatchInitiation]] = []
             self.enqueued_run_id: str | None = None
 
-        async def submit_all(self, _access: object, project_id: str, definition_id: str) -> object:
-            self.submission = (project_id, definition_id)
+        async def submit_all(
+            self, _access: object, project_id: str, definition_id: str,
+            idempotency_key: str, *, initiation: BatchInitiation,
+        ) -> object:
+            self.submissions.append((project_id, definition_id, idempotency_key, initiation))
             return SimpleNamespace(id="run-1")
 
         async def enqueue(self, _access: object, _project_id: str, run_id: str) -> None:
             self.enqueued_run_id = run_id
 
     batches = Batches()
-    tool = PostgresDeepAgentRunner._batch_tools(cast(Any, batches), "project-1", "sam")[0]
+    tool = PostgresDeepAgentRunner._batch_tools(
+        cast(Any, batches), "project-1", "sam", "thread-1", "agent-run-1"
+    )[0]
 
-    result = await tool.ainvoke({"definition_id": "definition-1"})
+    call = {
+        "name": "start_project_batch_run", "type": "tool_call",
+        "args": {"definition_id": "definition-1"}, "id": "call-1",
+    }
+    result = await tool.ainvoke(call)
+    await tool.ainvoke(call)
+    resumed_tool = PostgresDeepAgentRunner._batch_tools(
+        cast(Any, batches), "project-1", "sam", "thread-1", "agent-run-2"
+    )[0]
+    await resumed_tool.ainvoke(call)
+    await resumed_tool.ainvoke({**call, "id": "call-2"})
 
-    assert result == "Started Batch Run run-1."
-    assert batches.submission == ("project-1", "definition-1")
+    assert result.content == "Started Batch Run run-1."
+    assert len(batches.submissions) == 4
+    assert batches.submissions[0][0:2] == ("project-1", "definition-1")
+    assert batches.submissions[0][2] == batches.submissions[1][2]
+    assert batches.submissions[0][2] == batches.submissions[2][2]
+    assert batches.submissions[0][2] != batches.submissions[3][2]
+    assert batches.submissions[0][3] == batches.submissions[1][3]
+    assert batches.submissions[0][3].agent_run_id == "agent-run-1"
+    assert batches.submissions[0][3].tool_call_id == "call-1"
     assert batches.enqueued_run_id == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_agent_discovers_batch_runs_and_inspects_a_bounded_result_page() -> None:
+    class Batches:
+        async def list(self, _access: object, project_id: str, **query: object) -> object:
+            assert project_id == "project-1"
+            assert query["limit"] == 10
+            return SimpleNamespace(
+                items=(SimpleNamespace(
+                    id="run-1", definition_id="definition-1", status="succeeded",
+                    records=(SimpleNamespace(structured_output={"result": 6}, error=None),),
+                    archived_at=None,
+                ),), next_offset=None,
+            )
+
+        async def inspect_results(
+            self, _access: object, project_id: str, run_id: str, **query: object
+        ) -> object:
+            assert (project_id, run_id) == ("project-1", "run-1")
+            assert query["limit"] == 20
+            return SimpleNamespace(
+                items=(SimpleNamespace(
+                    dataset_record_id="record-1", input={"load": 3},
+                    structured_output={"result": 6}, error=None,
+                ),),
+                next_offset=None,
+                summary=SimpleNamespace(
+                    total_count=1, succeeded_count=1, failed_count=0,
+                    numeric_count=1, numeric_sum=6, numeric_min=6,
+                    numeric_max=6, numeric_average=6,
+                ),
+            )
+
+    tools = {
+        item.name: item for item in PostgresDeepAgentRunner._batch_tools(
+            cast(Any, Batches()), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+
+    listed = json.loads(await tools["list_project_batch_runs"].ainvoke({}))
+    inspected = json.loads(await tools["inspect_project_batch_results"].ainvoke({
+        "run_id": "run-1", "aggregate_path": "/structuredOutput/result",
+    }))
+
+    assert listed["items"] == [{
+        "id": "run-1", "definitionId": "definition-1", "status": "succeeded",
+        "recordCount": 1, "succeededCount": 1, "failedCount": 0,
+        "archived": False,
+    }]
+    assert inspected["items"] == [{
+        "datasetRecordId": "record-1", "input": {"load": 3},
+        "structuredOutput": {"result": 6}, "error": None,
+    }]
+    assert inspected["summary"]["numericSum"] == 6
 
 
 @pytest.mark.asyncio
@@ -290,7 +373,9 @@ async def test_agent_can_propose_transform_batch_definition_after_approval() -> 
 
     tools = {
         item.name: item
-        for item in PostgresDeepAgentRunner._batch_tools(cast(Any, Batches()), "project-1", "sam")
+        for item in PostgresDeepAgentRunner._batch_tools(
+            cast(Any, Batches()), "project-1", "sam", "thread-1", "agent-run-1"
+        )
     }
     result = await tools["create_project_transform_batch_definition"].ainvoke({
         "dataset_id": "dataset-1", "name": "Double loads",

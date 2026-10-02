@@ -45,6 +45,8 @@ class BatchRunResponse(_Model):
     created_at: str
     id: str
     definition_id: str
+    initiator_subject: str | None
+    initiation: dict[str, object]
     status: str
     record_count: int
     succeeded_count: int
@@ -80,6 +82,8 @@ def _response(run: BatchRun) -> BatchRunResponse:
         created_at=run.created_at.isoformat(),
         id=run.id,
         definition_id=run.definition_id,
+        initiator_subject=run.initiator_subject,
+        initiation=dict(run.initiation),
         status=run.status.value,
         record_count=len(run.records),
         succeeded_count=sum(item.structured_output is not None for item in run.records),

@@ -1,7 +1,8 @@
+import hashlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
@@ -15,7 +16,7 @@ from langchain.agents.middleware import (
     wrap_model_call,
 )
 from langchain_core.messages import HumanMessage
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -32,7 +33,7 @@ from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
 from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
-from agent_hub_api.modules.batch_execution import BatchExecutionModule
+from agent_hub_api.modules.batch_execution import BatchExecutionModule, BatchInitiation
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
@@ -182,8 +183,8 @@ class PostgresDeepAgentRunner:
         if datasets is not None and subject is not None:
             tools.extend(self._dataset_tools(datasets, project_id, subject))
         batches = getattr(self, "_batches", None)
-        if batches is not None and subject is not None:
-            tools.extend(self._batch_tools(batches, project_id, subject))
+        if batches is not None and subject is not None and thread_id and run_id:
+            tools.extend(self._batch_tools(batches, project_id, subject, thread_id, run_id))
         transforms = getattr(self, "_transforms", None)
         if transforms is not None and subject is not None:
             tools.extend(self._transform_tools(
@@ -228,7 +229,7 @@ class PostgresDeepAgentRunner:
                     },
                 }
             )
-        if batches is not None and subject is not None:
+        if batches is not None and subject is not None and thread_id and run_id:
             interrupt_on["start_project_batch_run"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Start the proposed Batch Run?",
@@ -495,19 +496,98 @@ class PostgresDeepAgentRunner:
 
     @staticmethod
     def _batch_tools(
-        batches: BatchExecutionModule, project_id: str, subject: str
+        batches: BatchExecutionModule, project_id: str, subject: str,
+        thread_id: str, agent_run_id: str,
     ) -> list[BaseTool]:
         access = ProjectAccess(subject=subject)
 
         @tool
-        async def start_project_batch_run(definition_id: str, record_id: str | None = None) -> str:
+        async def start_project_batch_run(
+            definition_id: str,
+            tool_call_id: Annotated[str, InjectedToolCallId],
+            record_id: str | None = None,
+        ) -> str:
             """Start one Record or all Records from a Batch Definition after user approval."""
+            key = hashlib.sha256(
+                f"agent-batch:{thread_id}:{tool_call_id}".encode()
+            ).hexdigest()
+            initiation = BatchInitiation(
+                kind="agentRun", approval="approved", thread_id=thread_id,
+                agent_run_id=agent_run_id, tool_call_id=tool_call_id,
+            )
             if record_id is None:
-                run = await batches.submit_all(access, project_id, definition_id)
+                run = await batches.submit_all(
+                    access, project_id, definition_id, key, initiation=initiation
+                )
             else:
-                run = await batches.submit_one(access, project_id, definition_id, record_id)
+                run = await batches.submit_one(
+                    access, project_id, definition_id, record_id, key,
+                    initiation=initiation,
+                )
             await batches.enqueue(access, project_id, run.id)
             return f"Started Batch Run {run.id}."
+
+        @tool
+        async def list_project_batch_runs(
+            definition_id: str | None = None, limit: int = 10, offset: int = 0,
+        ) -> str:
+            """List compact durable Batch Run summaries for the selected Project."""
+            if not 1 <= limit <= 20:
+                raise ValueError("Choose a Batch Run page size from 1 to 20.")
+            page = await batches.list(
+                access, project_id, definition_id=definition_id,
+                limit=limit, offset=offset,
+            )
+            return json.dumps({
+                "items": [{
+                    "id": run.id, "definitionId": run.definition_id,
+                    "status": run.status, "recordCount": len(run.records),
+                    "succeededCount": sum(
+                        record.structured_output is not None for record in run.records
+                    ),
+                    "failedCount": sum(record.error is not None for record in run.records),
+                    "archived": run.archived_at is not None,
+                } for run in page.items],
+                "nextOffset": page.next_offset,
+            })
+
+        @tool
+        async def inspect_project_batch_results(
+            run_id: str, limit: int = 20, offset: int = 0,
+            filter_path: str | None = None,
+            equals: str | int | float | bool | None = None,
+            minimum: float | None = None, maximum: float | None = None,
+            sort_path: str | None = None, descending: bool = False,
+            aggregate_path: str | None = None,
+        ) -> str:
+            """Read a bounded Result Set page with optional scalar query and summary."""
+            if not 1 <= limit <= 20:
+                raise ValueError("Choose a Result Set page size from 1 to 20.")
+            page = await batches.inspect_results(
+                access, project_id, run_id, limit=limit, offset=offset,
+                filter_path=filter_path, equals=equals, minimum=minimum,
+                maximum=maximum, sort_path=sort_path, descending=descending,
+                aggregate_path=aggregate_path,
+            )
+            return json.dumps({
+                "items": [{
+                    "datasetRecordId": record.dataset_record_id,
+                    "input": record.input,
+                    "structuredOutput": record.structured_output,
+                    "error": record.error,
+                } for record in page.items],
+                "nextOffset": page.next_offset,
+                "summary": {
+                    "totalCount": page.summary.total_count,
+                    "succeededCount": page.summary.succeeded_count,
+                    "failedCount": page.summary.failed_count,
+                    "numericCount": page.summary.numeric_count,
+                    "numericSum": page.summary.numeric_sum,
+                    "numericMin": page.summary.numeric_min,
+                    "numericMax": page.summary.numeric_max,
+                    "numericAverage": page.summary.numeric_average,
+                },
+            })
 
         @tool
         async def create_project_transform_batch_definition(
@@ -519,7 +599,10 @@ class PostgresDeepAgentRunner:
             )
             return f"Created Batch Definition {definition.name} ({definition.id})."
 
-        return [start_project_batch_run, create_project_transform_batch_definition]
+        return [
+            start_project_batch_run, list_project_batch_runs,
+            inspect_project_batch_results, create_project_transform_batch_definition,
+        ]
 
     @staticmethod
     def _transform_tools(
