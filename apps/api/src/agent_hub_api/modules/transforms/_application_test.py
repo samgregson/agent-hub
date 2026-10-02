@@ -1,5 +1,10 @@
 import pytest
 
+from agent_hub_api.modules.artifacts import (
+    ArtifactAccess,
+    ArtifactUserActionAccess,
+    create_memory_artifact_module,
+)
 from agent_hub_api.modules.datasets import DatasetModule, MemoryDatasetStore
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
@@ -14,6 +19,87 @@ from agent_hub_api.modules.transforms import (
 class _PinnedRunner:
     async def identity(self) -> TransformRuntimeIdentity:
         return TransformRuntimeIdentity("deno:2.9.7;pyodide:314.0.7", "a" * 64)
+
+
+@pytest.mark.asyncio
+async def test_successful_run_can_be_explicitly_saved_as_project_artifact() -> None:
+    from agent_hub_api.modules.transforms import MemoryTransformRunStore
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
+
+    artifacts = create_memory_artifact_module(projects)
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(),
+        artifacts=artifacts,
+    )
+    definition = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"}, {"type": "object"},
+    )
+    run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
+    assert await artifacts.discover(ArtifactAccess(subject="sam"), project.id) == ()
+
+    document = await transforms.save_run_as_artifact(
+        ArtifactUserActionAccess(subject="sam", user_action_id="save-1"),
+        project.id, run.id, "Checked loads",
+    )
+
+    assert document.artifact.title == "Checked loads"
+    assert document.payload["output"] == {"value": 6}
+    assert document.payload["transformRunId"] == run.id
+    assert document.payload["sourceHash"] == run.source_hash
+    assert document.artifact.provenance.created_by.user_action_id is not None
+    assert document.artifact.provenance.created_by.user_action_id.root == "save-1"
+    assert (await artifacts.load(
+        ArtifactAccess(subject="sam"), project.id, document.artifact.id.root
+    )) == document
+
+
+@pytest.mark.asyncio
+async def test_failed_run_cannot_create_artifact_and_other_project_user_cannot_save() -> None:
+    from agent_hub_api.modules.transforms import MemoryTransformRunStore
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"wrong": 1}, "deno:2.9.7;pyodide:314.0.7"
+
+    artifacts = create_memory_artifact_module(projects)
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(),
+        artifacts=artifacts,
+    )
+    definition = await transforms.define(
+        owner, project.id, "Invalid", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"}, {"type": "object", "required": ["value"]},
+    )
+    run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
+    assert run.status == "failed"
+
+    with pytest.raises(TransformValidationError, match="successful"):
+        await transforms.save_run_as_artifact(
+            ArtifactUserActionAccess(subject="sam", user_action_id="save-1"),
+            project.id, run.id, "Wrong",
+        )
+    with pytest.raises(TransformNotFound):
+        await transforms.save_run_as_artifact(
+            ArtifactUserActionAccess(subject="alex", user_action_id="save-2"),
+            project.id, run.id, "Wrong",
+        )
+    assert await artifacts.discover(ArtifactAccess(subject="sam"), project.id) == ()
 
 
 @pytest.mark.asyncio

@@ -296,7 +296,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
 
   async function saveDataset() {
     if (!selectedRun) return;
-    setBusy("save");
+    setBusy("save-dataset");
     setError(null);
     try {
       const response = await fetch(
@@ -321,6 +321,36 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Output could not be saved.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveArtifact() {
+    if (!selectedRun) return;
+    setBusy("save-artifact");
+    setError(null);
+    try {
+      const response = await fetch(
+        `${root}/runs/${encodeURIComponent(selectedRun.id)}/save-artifact`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: saveName }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          await responseError(response, "Artifact could not be saved."),
+        );
+      const document = (await response.json()) as { artifact: { id: string } };
+      setNotice(
+        `Saved Artifact ${shortId(document.artifact.id)} in Project Work.`,
+      );
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Artifact could not be saved.",
       );
     } finally {
       setBusy(null);
@@ -630,7 +660,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
               </p>
               {selectedRun.status === "succeeded" ? (
                 <div className={styles.saveRow}>
-                  <Field label="Dataset name">
+                  <Field label="Output name">
                     <input
                       onChange={(event) => setSaveName(event.target.value)}
                       value={saveName}
@@ -641,7 +671,13 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                     onClick={() => void saveDataset()}
                     variant="primary"
                   >
-                    {busy === "save" ? "Saving…" : "Save output as Dataset"}
+                    {busy === "save-dataset" ? "Saving…" : "Save as Dataset"}
+                  </Button>
+                  <Button
+                    disabled={busy !== null || !saveName.trim()}
+                    onClick={() => void saveArtifact()}
+                  >
+                    {busy === "save-artifact" ? "Saving…" : "Save as Artifact"}
                   </Button>
                 </div>
               ) : null}

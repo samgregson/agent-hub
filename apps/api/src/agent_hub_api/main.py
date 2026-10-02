@@ -73,7 +73,8 @@ def create_app(
         resolved_settings, resolved_projects, resolved_plugin_gateway
     )
     resolved_transforms = create_postgres_transform_module(
-        resolved_settings, resolved_projects, datasets=resolved_datasets
+        resolved_settings, resolved_projects, datasets=resolved_datasets,
+        artifacts=resolved_artifacts,
     )
     resolved_batches = create_postgres_batch_execution_module(
         resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway,

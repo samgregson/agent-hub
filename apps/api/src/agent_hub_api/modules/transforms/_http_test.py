@@ -2,6 +2,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
+from agent_hub_api.modules.artifacts import create_memory_artifact_module
 from agent_hub_api.modules.datasets import DatasetModule, MemoryDatasetStore
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
@@ -18,6 +19,47 @@ from agent_hub_api.settings import Settings
 class _PinnedRunner:
     async def identity(self) -> TransformRuntimeIdentity:
         return TransformRuntimeIdentity("deno:2.9.7;pyodide:314.0.7", "a" * 64)
+
+
+@pytest.mark.asyncio
+async def test_direct_user_explicitly_saves_run_output_as_artifact() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(),
+        artifacts=create_memory_artifact_module(projects),
+    )
+    definition = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"}, {"type": "object"},
+    )
+    run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
+    app = FastAPI()
+    app.include_router(
+        create_transform_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            transforms,
+        ),
+        prefix="/api",
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        saved = await client.post(
+            f"/api/projects/{project.id}/transforms/runs/{run.id}/save-artifact",
+            json={"title": "Checked loads"},
+        )
+
+    assert saved.status_code == 201
+    assert saved.json()["artifact"]["title"] == "Checked loads"
+    assert saved.json()["artifact"]["provenance"]["createdBy"]["kind"] == "userAction"
+    assert saved.json()["payload"]["transformRunId"] == run.id
 
 
 @pytest.mark.asyncio

@@ -186,7 +186,9 @@ class PostgresDeepAgentRunner:
             tools.extend(self._batch_tools(batches, project_id, subject))
         transforms = getattr(self, "_transforms", None)
         if transforms is not None and subject is not None:
-            tools.extend(self._transform_tools(transforms, project_id, subject))
+            tools.extend(self._transform_tools(
+                transforms, project_id, subject, thread_id, run_id
+            ))
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -258,6 +260,11 @@ class PostgresDeepAgentRunner:
                     "description": "Save this Transform Run output as a Dataset?",
                 },
             })
+            if thread_id is not None and run_id is not None:
+                interrupt_on["save_project_transform_run_as_artifact"] = {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Save this Transform Run output as an Artifact?",
+                }
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
@@ -516,7 +523,8 @@ class PostgresDeepAgentRunner:
 
     @staticmethod
     def _transform_tools(
-        transforms: TransformModule, project_id: str, subject: str
+        transforms: TransformModule, project_id: str, subject: str,
+        thread_id: str | None = None, agent_run_id: str | None = None,
     ) -> list[BaseTool]:
         access = ProjectAccess(subject=subject)
 
@@ -615,12 +623,31 @@ class PostgresDeepAgentRunner:
             dataset = await transforms.save_run_as_dataset(access, project_id, run_id, name)
             return f"Saved Dataset {dataset.name} ({dataset.id}) from Transform Run {run_id}."
 
-        return [
+        tools = [
             discover_project_transforms, load_project_transform,
             list_project_transform_runs, load_project_transform_run,
             create_project_transform, update_project_transform, delete_project_transform,
             start_project_transform_run, save_project_transform_run_as_dataset,
         ]
+        if thread_id is not None and agent_run_id is not None:
+            @tool
+            async def save_project_transform_run_as_artifact(
+                run_id: str, title: str
+            ) -> str:
+                """Save a successful Transform Run output as an Artifact after approval."""
+                document = await transforms.save_run_as_artifact(
+                    ArtifactMutationAccess(
+                        subject=subject, thread_id=thread_id, run_id=agent_run_id
+                    ),
+                    project_id, run_id, title,
+                )
+                return (
+                    f"Saved Artifact {document.artifact.title} "
+                    f"({document.artifact.id.root}) from Transform Run {run_id}."
+                )
+
+            tools.append(save_project_transform_run_as_artifact)
+        return tools
 
     async def close(self) -> None:
         if self._stack is not None:

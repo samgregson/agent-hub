@@ -15,6 +15,7 @@ from agent_hub_api.modules.agent_execution._deep_agent import (
     _project_change_notice_middleware,
     _project_file_permissions,
 )
+from agent_hub_api.modules.artifacts import ArtifactMutationAccess
 from agent_hub_api.modules.datasets import (
     DatasetModule,
     DatasetRecordInput,
@@ -336,6 +337,33 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
     assert transforms.started == ("definition-1", {"load": 3}, {"factor": 2})
     assert saved == "Saved Dataset Saved (dataset-1) from Transform Run run-1."
     assert transforms.saved == ("run-1", "Saved")
+
+
+@pytest.mark.asyncio
+async def test_agent_artifact_save_carries_agent_run_provenance() -> None:
+    class Transforms:
+        async def save_run_as_artifact(
+            self, access: ArtifactMutationAccess, project_id: str, run_id: str, title: str
+        ) -> object:
+            assert (access.subject, access.thread_id, access.run_id) == (
+                "sam", "thread-1", "agent-run-1"
+            )
+            assert (project_id, run_id, title) == ("project-1", "transform-run-1", "Checked")
+            return SimpleNamespace(
+                artifact=SimpleNamespace(title=title, id=SimpleNamespace(root="artifact-1"))
+            )
+
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._transform_tools(
+            cast(Any, Transforms()), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    result = await tools["save_project_transform_run_as_artifact"].ainvoke({
+        "run_id": "transform-run-1", "title": "Checked"
+    })
+
+    assert result == "Saved Artifact Checked (artifact-1) from Transform Run transform-run-1."
 
 
 @pytest.mark.asyncio

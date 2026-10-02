@@ -1,9 +1,11 @@
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from agent_hub_api.modules.artifacts import ArtifactDocument, ArtifactUserActionAccess
 from agent_hub_api.modules.datasets import DatasetValidationError
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
@@ -84,6 +86,10 @@ class RunPageResponse(_Model):
 
 class SaveDatasetRequest(_Model):
     name: str
+
+
+class SaveArtifactRequest(_Model):
+    title: str
 
 
 class SaveDatasetResponse(_Model):
@@ -273,6 +279,24 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
             TransformNotFound, TransformValidationError, TransformExecutionError,
             DatasetValidationError,
         ) as error:
+            raise failure(error) from error
+
+    @router.post(
+        "/runs/{run_id}/save-artifact", response_model=ArtifactDocument,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def save_artifact(
+        project_id: str, run_id: str, body: SaveArtifactRequest,
+        request_context: Context,
+    ) -> ArtifactDocument:
+        try:
+            return await transforms.save_run_as_artifact(
+                ArtifactUserActionAccess(
+                    subject=request_context.subject, user_action_id=str(uuid4())
+                ),
+                project_id, run_id, body.title,
+            )
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error
 
     @router.put("/{definition_id}", response_model=DefinitionResponse)

@@ -13,6 +13,13 @@ from jsonschema import Draft202012Validator, SchemaError  # type: ignore[import-
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from agent_hub_api.modules.artifacts import (
+    ArtifactDocument,
+    ArtifactDraft,
+    ArtifactModule,
+    ArtifactMutationAccess,
+    ArtifactUserActionAccess,
+)
 from agent_hub_api.modules.datasets import Dataset, DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.settings import Settings
@@ -124,12 +131,14 @@ class TransformModule:
         runner: TransformRunner | None = None,
         run_store: TransformRunStore | None = None,
         datasets: DatasetModule | None = None,
+        artifacts: ArtifactModule | None = None,
     ) -> None:
         self._projects = projects
         self._store = store
         self._runner = runner
         self._run_store = run_store
         self._datasets = datasets
+        self._artifacts = artifacts
 
     async def define(
         self,
@@ -385,6 +394,39 @@ class TransformModule:
                 )
                 for index, value in enumerate(values)
             ],
+        )
+
+    async def save_run_as_artifact(
+        self, access: ArtifactMutationAccess | ArtifactUserActionAccess,
+        project_id: str, run_id: str, title: str,
+    ) -> ArtifactDocument:
+        run = await self.load_run(ProjectAccess(subject=access.subject), project_id, run_id)
+        if self._artifacts is None:
+            raise TransformExecutionError("artifact_save_unavailable")
+        if run.status != "succeeded":
+            raise TransformValidationError("Only successful Transform Run output can be saved.")
+        clean_title = title.strip()
+        if not clean_title or len(clean_title) > 240:
+            raise TransformValidationError("Artifact title must contain 1 to 240 characters.")
+        return await self._artifacts.create(
+            access, project_id,
+            ArtifactDraft(
+                type="agent-hub.transform-result", title=clean_title,
+                plugin_id="agent-hub.transforms", plugin_version="1",
+                schema_id="agent-hub.transform-result", schema_version="1.0",
+                payload={
+                    "transformRunId": run.id,
+                    "inputs": dict(run.inputs),
+                    "parameters": dict(run.parameters),
+                    "output": run.output,
+                    "inputHash": run.input_hash,
+                    "sourceHash": run.source_hash,
+                    "runtime": run.runtime,
+                    "packageHash": run.package_hash,
+                    "outputManifest": dict(run.output_manifest),
+                },
+                summary=f"Saved output from Transform Run {run.id}.",
+            ),
         )
 
     async def recover(self) -> int:
@@ -647,6 +689,7 @@ def create_postgres_transform_module(
     settings: Settings, projects: ProjectModule,
     runner: TransformRunner | None = None,
     datasets: DatasetModule | None = None,
+    artifacts: ArtifactModule | None = None,
 ) -> TransformModule:
     from agent_hub_api.modules.transforms._run_store import PostgresTransformRunStore
     from agent_hub_api.modules.transforms._runner import DenoTransformRunner
@@ -657,5 +700,5 @@ def create_postgres_transform_module(
     )
     return TransformModule(
         projects, PostgresTransformStore(settings), resolved_runner,
-        PostgresTransformRunStore(settings), datasets,
+        PostgresTransformRunStore(settings), datasets, artifacts,
     )
