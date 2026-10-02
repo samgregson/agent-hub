@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 class ThreadHistoryResponse(BaseModel):
     messages: list[dict[str, object]]
     interrupts: list[dict[str, object]]
+    approvals: list[dict[str, object]]
 
 
 class SaveScratchFileRequest(BaseModel):
@@ -119,7 +120,11 @@ def create_agent_transport_router(
             interrupt.model_dump(mode="json", by_alias=True, exclude_none=True)
             for interrupt in thread_state.interrupts
         ]
-        return ThreadHistoryResponse(messages=messages, interrupts=interrupts)
+        runs = await agent_transport.list_runs(access(project_id, thread_id, context))
+        approvals = [
+            decision.as_json() for run in reversed(runs) for decision in run.approval_decisions
+        ]
+        return ThreadHistoryResponse(messages=messages, interrupts=interrupts, approvals=approvals)
 
     @router.get("/scratch", response_model=ScratchFilePreview)
     async def preview_scratch_file(

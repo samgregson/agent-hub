@@ -140,7 +140,11 @@ class ResumableRunner(ScratchlessRunner):
         del thread_id, project_id
         return AgentThreadState(
             messages=(),
-            interrupts=((Interrupt(id="approval-1", reason="tool_call"),) if self.pending else ()),
+            interrupts=(
+                (Interrupt(id="approval-1", reason="tool_call", tool_call_id="tool-1"),)
+                if self.pending
+                else ()
+            ),
         )
 
     async def run(
@@ -150,6 +154,27 @@ class ResumableRunner(ScratchlessRunner):
         self.run_count += 1
         self.pending = False
         yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+        yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+
+
+class ApprovalLifecycleRunner(ResumableRunner):
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        del project_id, subject
+        yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+        if not input_data.resume:
+            yield RunFinishedEvent(
+                thread_id=input_data.thread_id,
+                run_id=input_data.run_id,
+                outcome=RunFinishedInterruptOutcome(
+                    interrupts=[
+                        Interrupt(id="approval-1", reason="tool_call", tool_call_id="tool-1")
+                    ]
+                ),
+            )
+            return
+        self.pending = False
         yield RunFinishedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
 
 
@@ -189,7 +214,6 @@ async def test_duplicate_run_id_is_rejected() -> None:
             input_data, project_id="project", request_id="request-1"
         )
     ]
-
     with pytest.raises(DuplicateAgentRun):
         await execution.start(input_data, project_id="project", request_id="request-2")
 
@@ -321,11 +345,56 @@ async def test_resume_must_answer_current_interrupts_and_cannot_be_replayed() ->
             first_input, project_id="project", request_id="request-1"
         )
     ]
+    [run] = await execution.list_runs("a")
+    assert [decision.as_json() for decision in run.approval_decisions] == [
+        {
+            "interruptId": "approval-1",
+            "toolCallId": "tool-1",
+            "approved": True,
+            "resolution": None,
+            "sourceRunId": None,
+            "decisionRunId": "resume-1",
+        }
+    ]
 
     replay_input = input_for("a", "resume-2").model_copy(update={"resume": resume})
     with pytest.raises(InvalidAgentRunResume):
         await execution.start(replay_input, project_id="project", request_id="request-2")
     assert runner.run_count == 1
+
+
+@pytest.mark.asyncio
+async def test_approval_decision_retains_request_and_resume_run_provenance() -> None:
+    execution = create_memory_agent_execution(ApprovalLifecycleRunner())
+    _ = [
+        event
+        async for event in await execution.start(
+            input_for("a", "request-run"), project_id="project", request_id="request-1"
+        )
+    ]
+    resume = input_for("a", "decision-run").model_copy(
+        update={
+            "resume": [
+                ResumeEntry(
+                    interrupt_id="approval-1",
+                    status="resolved",
+                    payload={"approved": False},
+                )
+            ]
+        }
+    )
+    _ = [
+        event
+        async for event in await execution.start(
+            resume, project_id="project", request_id="request-2"
+        )
+    ]
+
+    runs = await execution.list_runs("a")
+    decision = next(run for run in runs if run.id == "decision-run").approval_decisions[0]
+    assert decision.source_run_id == "request-run"
+    assert decision.decision_run_id == "decision-run"
+    assert decision.approved is False
 
 
 @pytest.mark.asyncio

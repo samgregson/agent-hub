@@ -161,10 +161,73 @@
   border: 1px solid var(--accent);
   border-radius: var(--radius-panel);
   background: var(--surface-card);
+  color: var(--text);
 }
 
 .approvalCard p {
-  margin: 6px 0 12px;
+  margin: 7px 0 12px;
+}
+
+.approvalHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.approvalStatus {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.approvalTarget {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+
+.approvalDetails {
+  margin: 12px 0;
+}
+
+.approvalDetails summary {
+  width: fit-content;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.approvalDetails pre {
+  max-height: 320px;
+  margin: 10px 0 0;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: #111210;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approvalProvenance {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.approvalProvenance dt {
+  color: var(--muted);
+}
+
+.approvalProvenance dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .toolCall pre {
@@ -193,6 +256,34 @@
   background: var(--accent);
   color: var(--accent-ink);
   font-weight: 750;
+}
+
+.approvalActions button:hover,
+.approvalLink:hover {
+  border-color: var(--accent);
+}
+
+.approvalActions button:focus-visible,
+.approvalLink:focus-visible,
+.approvalDetails summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.approvalActions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.approvalLink {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
 }
 
 .runError {

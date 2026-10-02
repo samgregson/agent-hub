@@ -733,6 +733,110 @@ test.describe("at phone width", () => {
   });
 });
 
+test("pending edit_file shows a diff and proposed file in the right preview", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "project-edit-preview",
+    name: "Design review",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "thread-edit-preview",
+    projectId: project.id,
+    title: "New Thread 1",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as { runId: string };
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "tool-edit",
+            toolCallName: "edit_file",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "tool-edit",
+            delta: JSON.stringify({
+              file_path: "/project/check.md",
+              old_string: "# Original",
+              new_string: "# Revised",
+            }),
+          },
+          { type: "TOOL_CALL_END", toolCallId: "tool-edit" },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-edit",
+                  reason: "tool_call",
+                  toolCallId: "tool-edit",
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    if (path.endsWith("/files"))
+      return route.fulfill({
+        json: {
+          content: "# Original\nKeep this line.\n",
+          path: "/project/check.md",
+          version: 3,
+        },
+      });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message Agent Hub").fill("Revise the check");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByRole("region", {
+    name: "Approve Project File change",
+  });
+  await expect(card).toContainText("/project/check.md");
+  await card.getByText("Review proposed change").click();
+  await expect(card.getByText(/-# Original/)).toBeVisible();
+  await expect(card.getByText(/\+# Revised/)).toBeVisible();
+  await card.getByRole("button", { name: "Open diff in preview" }).click();
+  const preview = page.getByRole("region", { name: "Proposed Project File" });
+  await expect(preview).toContainText("review snapshot");
+  await expect(preview.getByLabel("Proposed file diff")).toContainText(
+    "-# Original",
+  );
+  await preview.getByRole("button", { name: "Proposed file" }).click();
+  await expect(preview.getByLabel("Proposed file content")).toContainText(
+    "# Revised\nKeep this line.",
+  );
+  await expect(card.getByRole("button", { name: "Approve" })).toBeVisible();
+});
+
 test("approving a tool call resumes through the AG-UI transport contract", async ({
   page,
 }) => {
@@ -750,6 +854,7 @@ test("approving a tool call resumes through the AG-UI transport contract", async
     updatedAt: "2026-09-16T00:00:00.000Z",
   };
   const resumeRequests: unknown[] = [];
+  let approved = false;
 
   await page.route(
     `**/api/projects/${project.id}/threads/${thread.id}/agent`,
@@ -760,6 +865,7 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       };
       if (input.resume) {
         resumeRequests.push(input.resume);
+        approved = true;
         await route.fulfill({
           contentType: "text/event-stream",
           body: sse([
@@ -797,7 +903,10 @@ test("approving a tool call resumes through the AG-UI transport contract", async
           {
             type: "TOOL_CALL_ARGS",
             toolCallId: "tool-123",
-            delta: '{"file_path":"/project/example.md"}',
+            delta: JSON.stringify({
+              file_path: "/project/example.md",
+              content: "# Example\n",
+            }),
           },
           { type: "TOOL_CALL_END", toolCallId: "tool-123" },
           {
@@ -837,7 +946,49 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       return;
     }
     if (url.pathname.endsWith("/history")) {
-      await route.fulfill({ json: { interrupts: [], messages: [] } });
+      await route.fulfill({
+        json: approved
+          ? {
+              approvals: [
+                {
+                  approved: true,
+                  decisionRunId: "resume-run",
+                  interruptId: "interrupt-123",
+                  resolution: null,
+                  sourceRunId: "initial-run",
+                  toolCallId: "tool-123",
+                },
+              ],
+              interrupts: [],
+              messages: [
+                {
+                  content: null,
+                  id: "assistant-tool",
+                  role: "assistant",
+                  toolCalls: [
+                    {
+                      function: {
+                        arguments: JSON.stringify({
+                          file_path: "/project/example.md",
+                          content: "# Example\n",
+                        }),
+                        name: "write_file",
+                      },
+                      id: "tool-123",
+                      type: "function",
+                    },
+                  ],
+                },
+                {
+                  content: "Saved /project/example.md",
+                  id: "result-tool",
+                  role: "tool",
+                  toolCallId: "tool-123",
+                },
+              ],
+            }
+          : { approvals: [], interrupts: [], messages: [] },
+      });
       return;
     }
     if (url.pathname.endsWith("/runs")) {
@@ -845,6 +996,13 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       return;
     }
     if (url.pathname.endsWith("/files")) {
+      if (!approved) {
+        await route.fulfill({
+          json: { detail: "File not found" },
+          status: 404,
+        });
+        return;
+      }
       await route.fulfill({
         json: {
           content: "# Example\n",
@@ -861,6 +1019,8 @@ test("approving a tool call resumes through the AG-UI transport contract", async
   await page.getByLabel("Message Agent Hub").fill("Create the file");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Approve Project File change")).toBeVisible();
+  await page.getByText("Preview new file").click();
+  await expect(page.getByText("# Example", { exact: true })).toBeVisible();
   await expect(page.getByText("write_file", { exact: true })).toBeHidden();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText("write_file", { exact: true })).toBeHidden();
@@ -877,7 +1037,111 @@ test("approving a tool call resumes through the AG-UI transport contract", async
       ],
     ]);
   await page.getByRole("button", { name: "the file" }).click();
-  await expect(page.getByText("# Example")).toBeVisible();
+  await expect(
+    page.getByRole("complementary").getByText("# Example"),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "Approve Project File change" }),
+  ).toContainText("Approved");
+  await expect(
+    page.getByRole("button", { name: "Open Project File" }),
+  ).toBeVisible();
+  const restoredCard = page.getByRole("region", {
+    name: "Approve Project File change",
+  });
+  await restoredCard.getByText("Review proposed change").click();
+  await expect(
+    restoredCard.getByText("# Example", { exact: true }),
+  ).toBeVisible();
+  await restoredCard.getByText("Decision provenance").click();
+  await expect(restoredCard).toContainText("initial-run");
+  await expect(restoredCard).toContainText("resume-run");
+  await expect(
+    page.getByRole("button", { name: "Approve", exact: true }),
+  ).toBeHidden();
+});
+
+test("rejected Project File approval remains a resolved card after reload", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "project-rejected",
+    name: "Design review",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "thread-rejected",
+    projectId: project.id,
+    title: "Rejected change",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/threads")) {
+      await route.fulfill({ json: [thread] });
+    } else if (path.endsWith("/history")) {
+      await route.fulfill({
+        json: {
+          approvals: [
+            {
+              approved: false,
+              decisionRunId: "decision-run",
+              interruptId: "interrupt-rejected",
+              resolution: null,
+              sourceRunId: "source-run",
+              toolCallId: "tool-rejected",
+            },
+          ],
+          interrupts: [],
+          messages: [
+            {
+              content: null,
+              id: "assistant-rejected",
+              role: "assistant",
+              toolCalls: [
+                {
+                  function: {
+                    arguments: JSON.stringify({
+                      file_path: "/project/check.md",
+                      old_string: "old",
+                      new_string: "new",
+                    }),
+                    name: "edit_file",
+                  },
+                  id: "tool-rejected",
+                  type: "function",
+                },
+              ],
+            },
+          ],
+        },
+      });
+    } else if (path.endsWith("/runs")) {
+      await route.fulfill({ json: [] });
+    } else {
+      await route.fulfill({ json: {} });
+    }
+  });
+
+  await page.goto("/");
+  const card = page.getByRole("region", {
+    name: "Approve Project File change",
+  });
+  await expect(card).toContainText("Rejected");
+  await expect(card).toContainText("/project/check.md");
+  await card.getByText("Review proposed change").click();
+  await expect(card).toContainText("old");
+  await expect(card).toContainText("new");
+  await expect(card.getByRole("button", { name: "Approve" })).toBeHidden();
+  await expect(
+    card.getByRole("button", { name: "Open Project File" }),
+  ).toBeHidden();
 });
 
 function sse(events: object[]) {

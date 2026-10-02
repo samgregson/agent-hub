@@ -151,7 +151,7 @@ async def test_agent_stream_requires_owned_matching_thread() -> None:
     assert "RUN_STARTED" in streamed.text
     assert "RUN_FINISHED" in streamed.text
     assert runs.json()[0]["status"] == "succeeded"
-    assert history.json() == {"interrupts": [], "messages": []}
+    assert history.json() == {"interrupts": [], "messages": [], "approvals": []}
     assert unauthorized.status_code == 404
 
 
