@@ -138,7 +138,9 @@ class TransformModule:
     """Own validation and authorized lifecycle of Transform Definitions."""
 
     def __init__(
-        self, projects: ProjectModule, store: TransformStore,
+        self,
+        projects: ProjectModule,
+        store: TransformStore,
         runner: TransformRunner | None = None,
         run_store: TransformRunStore | None = None,
         datasets: DatasetModule | None = None,
@@ -168,10 +170,18 @@ class TransformModule:
         now = datetime.now(UTC)
         return await self._store.create(
             TransformDefinition(
-                str(uuid4()), project_id, clean_name, clean_source, selectors, schema,
+                str(uuid4()),
+                project_id,
+                clean_name,
+                clean_source,
+                selectors,
+                schema,
                 identity.runtime if identity else None,
                 identity.package_hash if identity else None,
-                hashlib.sha256(clean_source.encode()).hexdigest(), 1, now, now,
+                hashlib.sha256(clean_source.encode()).hexdigest(),
+                1,
+                now,
+                now,
             )
         )
 
@@ -184,9 +194,7 @@ class TransformModule:
             raise TransformNotFound
         return definition
 
-    async def list(
-        self, access: ProjectAccess, project_id: str
-    ) -> Sequence[TransformDefinition]:
+    async def list(self, access: ProjectAccess, project_id: str) -> Sequence[TransformDefinition]:
         await self._authorize(access, project_id)
         return await self._store.list(project_id)
 
@@ -227,16 +235,18 @@ class TransformModule:
             raise TransformNotFound
 
     async def preview(
-        self, access: ProjectAccess, project_id: str, definition_id: str,
-        record: Mapping[str, object], parameters: Mapping[str, object],
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        record: Mapping[str, object],
+        parameters: Mapping[str, object],
     ) -> TransformPreview:
         definition = await self.load(access, project_id, definition_id)
         if self._runner is None:
             raise TransformExecutionError("runner_unavailable")
         inputs, parameter_values = _inputs(definition, record, parameters)
-        output, runtime = await self._runner.execute(
-            definition.source, inputs, parameter_values
-        )
+        output, runtime = await self._runner.execute(definition.source, inputs, parameter_values)
         if not Draft202012Validator(definition.output_schema).is_valid(output):
             raise TransformValidationError("Transform output does not match its output schema.")
         return TransformPreview(output, runtime, definition.source_hash)
@@ -268,8 +278,11 @@ class TransformModule:
         }
 
     async def execute_batch_record(
-        self, access: ProjectAccess, project_id: str,
-        snapshot: Mapping[str, object], record: Mapping[str, object],
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        snapshot: Mapping[str, object],
+        record: Mapping[str, object],
     ) -> Mapping[str, object]:
         """Run one captured record without creating a second Transform Run."""
         await self._authorize(access, project_id)
@@ -285,9 +298,7 @@ class TransformModule:
         inputs = {name: _select(record, pointer) for name, pointer in selectors.items()}
         if len(_canonical(inputs)) > 64_000:
             raise TransformValidationError("Transform inputs exceed 64000 bytes.")
-        output, runtime = await self._runner.execute(
-            str(snapshot["source"]), inputs, {}
-        )
+        output, runtime = await self._runner.execute(str(snapshot["source"]), inputs, {})
         if runtime != identity.runtime:
             raise TransformExecutionError("runtime_mismatch")
         schema = cast(Mapping[str, object], snapshot["outputSchema"])
@@ -300,8 +311,12 @@ class TransformModule:
         return output
 
     async def start_run(
-        self, access: ProjectAccess, project_id: str, definition_id: str,
-        record: Mapping[str, object], parameters: Mapping[str, object],
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        record: Mapping[str, object],
+        parameters: Mapping[str, object],
         initiation: TransformInitiation | None = None,
     ) -> TransformRun:
         definition = await self.load(access, project_id, definition_id)
@@ -311,36 +326,50 @@ class TransformModule:
             raise TransformExecutionError("runner_unavailable")
         identity = await self._runner.identity()
         if definition.runtime and (
-            definition.runtime != identity.runtime or
-            definition.package_hash != identity.package_hash
+            definition.runtime != identity.runtime
+            or definition.package_hash != identity.package_hash
         ):
             raise TransformExecutionError("runtime_mismatch")
         inputs, parameter_values = _inputs(definition, record, parameters)
         input_bytes = _canonical({"inputs": inputs, "parameters": parameter_values})
         now = datetime.now(UTC)
         context = initiation or TransformInitiation("directUser", "notRequired")
-        run = await self._run_store.create(TransformRun(
-            id=str(uuid4()), project_id=project_id, definition_id=definition_id,
-            status="running", definition_snapshot={
-                "name": definition.name, "source": definition.source,
-                "input_selectors": dict(definition.input_selectors),
-                "output_schema": dict(definition.output_schema),
-                "revision": definition.revision,
-                "runtime": identity.runtime,
-                "package_hash": identity.package_hash,
-            },
-            inputs=inputs, parameters=parameter_values,
-            input_hash=hashlib.sha256(input_bytes).hexdigest(),
-            source_hash=definition.source_hash, runtime=identity.runtime,
-            package_hash=identity.package_hash, output=None,
-            output_manifest={}, error=None, initiator_subject=access.subject,
-            initiation={
-                "kind": context.kind, "approval": context.approval,
-                "threadId": context.thread_id, "agentRunId": context.agent_run_id,
-            },
-            limits=dict(identity.limits),
-            created_at=now, completed_at=None,
-        ))
+        run = await self._run_store.create(
+            TransformRun(
+                id=str(uuid4()),
+                project_id=project_id,
+                definition_id=definition_id,
+                status="running",
+                definition_snapshot={
+                    "name": definition.name,
+                    "source": definition.source,
+                    "input_selectors": dict(definition.input_selectors),
+                    "output_schema": dict(definition.output_schema),
+                    "revision": definition.revision,
+                    "runtime": identity.runtime,
+                    "package_hash": identity.package_hash,
+                },
+                inputs=inputs,
+                parameters=parameter_values,
+                input_hash=hashlib.sha256(input_bytes).hexdigest(),
+                source_hash=definition.source_hash,
+                runtime=identity.runtime,
+                package_hash=identity.package_hash,
+                output=None,
+                output_manifest={},
+                error=None,
+                initiator_subject=access.subject,
+                initiation={
+                    "kind": context.kind,
+                    "approval": context.approval,
+                    "threadId": context.thread_id,
+                    "agentRunId": context.agent_run_id,
+                },
+                limits=dict(identity.limits),
+                created_at=now,
+                completed_at=None,
+            )
+        )
         try:
             output, runtime = await self._runner.execute(
                 definition.source, inputs, parameter_values
@@ -353,9 +382,12 @@ class TransformModule:
             if len(output_bytes) > 128_000:
                 raise TransformExecutionError("output_limit")
             completed = replace(
-                run, status="succeeded", output=output,
+                run,
+                status="succeeded",
+                output=output,
                 output_manifest={
-                    "kind": "json", "bytes": len(output_bytes),
+                    "kind": "json",
+                    "bytes": len(output_bytes),
                     "sha256": hashlib.sha256(output_bytes).hexdigest(),
                 },
                 completed_at=datetime.now(UTC),
@@ -366,9 +398,7 @@ class TransformModule:
             )
         return await self._run_store.complete(completed)
 
-    async def load_run(
-        self, access: ProjectAccess, project_id: str, run_id: str
-    ) -> TransformRun:
+    async def load_run(self, access: ProjectAccess, project_id: str, run_id: str) -> TransformRun:
         await self._authorize(access, project_id)
         if self._run_store is None:
             raise TransformExecutionError("run_store_unavailable")
@@ -378,8 +408,12 @@ class TransformModule:
         return run
 
     async def list_runs(
-        self, access: ProjectAccess, project_id: str,
-        definition_id: str | None = None, limit: int = 20, offset: int = 0,
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
     ) -> TransformRunPage:
         await self._authorize(access, project_id)
         if self._run_store is None:
@@ -398,26 +432,33 @@ class TransformModule:
             raise TransformValidationError("Only successful Transform Run output can be saved.")
         output = run.output
         values = [output] if isinstance(output, dict) else output
-        if not isinstance(values, list) or not values or any(
-            not isinstance(value, dict) or not all(isinstance(key, str) for key in value)
-            for value in values
+        if (
+            not isinstance(values, list)
+            or not values
+            or any(
+                not isinstance(value, dict) or not all(isinstance(key, str) for key in value)
+                for value in values
+            )
         ):
             raise TransformValidationError(
                 "Dataset save requires an object or a nonempty array of objects."
             )
         return await self._datasets.create_dataset(
-            access, project_id, name,
+            access,
+            project_id,
+            name,
             [
-                DatasetRecordInput(
-                    value, source_key=f"transform-run:{run.id}:{index}"
-                )
+                DatasetRecordInput(value, source_key=f"transform-run:{run.id}:{index}")
                 for index, value in enumerate(values)
             ],
         )
 
     async def save_run_as_artifact(
-        self, access: ArtifactMutationAccess | ArtifactUserActionAccess,
-        project_id: str, run_id: str, title: str,
+        self,
+        access: ArtifactMutationAccess | ArtifactUserActionAccess,
+        project_id: str,
+        run_id: str,
+        title: str,
     ) -> ArtifactDocument:
         run = await self.load_run(ProjectAccess(subject=access.subject), project_id, run_id)
         if self._artifacts is None:
@@ -428,11 +469,15 @@ class TransformModule:
         if not clean_title or len(clean_title) > 240:
             raise TransformValidationError("Artifact title must contain 1 to 240 characters.")
         return await self._artifacts.create(
-            access, project_id,
+            access,
+            project_id,
             ArtifactDraft(
-                type="agent-hub.transform-result", title=clean_title,
-                plugin_id="agent-hub.transforms", plugin_version="1",
-                schema_id="agent-hub.transform-result", schema_version="1.0",
+                type="agent-hub.transform-result",
+                title=clean_title,
+                plugin_id="agent-hub.transforms",
+                plugin_version="1",
+                schema_id="agent-hub.transform-result",
+                schema_version="1.0",
                 payload={
                     "transformRunId": run.id,
                     "inputs": dict(run.inputs),
@@ -482,12 +527,12 @@ def _canonical(value: object) -> bytes:
 
 
 def _inputs(
-    definition: TransformDefinition, record: Mapping[str, object],
+    definition: TransformDefinition,
+    record: Mapping[str, object],
     parameters: Mapping[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
     inputs = {
-        name: _select(record, pointer)
-        for name, pointer in definition.input_selectors.items()
+        name: _select(record, pointer) for name, pointer in definition.input_selectors.items()
     }
     parameter_values = dict(parameters)
     try:
@@ -521,15 +566,15 @@ class MemoryTransformRunStore:
     ) -> TransformRunPage:
         matching = sorted(
             (
-                run for (stored_project, _), run in self._runs.items()
-                if stored_project == project_id and (
-                    definition_id is None or run.definition_id == definition_id
-                )
+                run
+                for (stored_project, _), run in self._runs.items()
+                if stored_project == project_id
+                and (definition_id is None or run.definition_id == definition_id)
             ),
             key=lambda run: (run.created_at, run.id),
             reverse=True,
         )
-        items = tuple(matching[offset:offset + limit])
+        items = tuple(matching[offset : offset + limit])
         next_offset = offset + limit if len(matching) > offset + limit else None
         return TransformRunPage(items, next_offset)
 
@@ -543,7 +588,9 @@ class MemoryTransformRunStore:
 
 
 def _validate_definition(
-    name: str, source: str, input_selectors: Mapping[str, str],
+    name: str,
+    source: str,
+    input_selectors: Mapping[str, str],
     output_schema: Mapping[str, object],
 ) -> tuple[str, str, dict[str, str], dict[str, object]]:
     clean_name = name.strip()
@@ -556,9 +603,13 @@ def _validate_definition(
     except SyntaxError as error:
         raise TransformValidationError("Transform source is not valid Python.") from error
     selectors = dict(input_selectors)
-    if not selectors or len(selectors) > 32 or any(
-        not key.isidentifier() or not isinstance(pointer, str) or not pointer.startswith("/")
-        for key, pointer in selectors.items()
+    if (
+        not selectors
+        or len(selectors) > 32
+        or any(
+            not key.isidentifier() or not isinstance(pointer, str) or not pointer.startswith("/")
+            for key, pointer in selectors.items()
+        )
     ):
         raise TransformValidationError("Each input selector needs a name and JSON pointer.")
     schema = dict(output_schema)
@@ -584,7 +635,8 @@ class MemoryTransformStore:
 
     async def list(self, project_id: str) -> Sequence[TransformDefinition]:
         return tuple(
-            item for (stored_project, _), item in self._definitions.items()
+            item
+            for (stored_project, _), item in self._definitions.items()
             if stored_project == project_id
         )
 
@@ -652,11 +704,18 @@ class PostgresTransformStore:
                 output_schema=%s,runtime=%s,package_hash=%s,source_hash=%s,revision=%s,updated_at=%s
                 WHERE project_id=%s AND transform_definition_id=%s AND revision=%s""",
                 (
-                    definition.name, definition.source, json.dumps(definition.input_selectors),
-                    json.dumps(definition.output_schema), definition.runtime,
+                    definition.name,
+                    definition.source,
+                    json.dumps(definition.input_selectors),
+                    json.dumps(definition.output_schema),
+                    definition.runtime,
                     definition.package_hash,
-                    definition.source_hash, definition.revision, definition.updated_at,
-                    definition.project_id, definition.id, definition.revision - 1,
+                    definition.source_hash,
+                    definition.revision,
+                    definition.updated_at,
+                    definition.project_id,
+                    definition.id,
+                    definition.revision - 1,
                 ),
             )
             return cursor.rowcount == 1
@@ -674,10 +733,18 @@ class PostgresTransformStore:
 
 def _values(definition: TransformDefinition) -> tuple[object, ...]:
     return (
-        definition.project_id, definition.id, definition.name, definition.source,
-        json.dumps(definition.input_selectors), json.dumps(definition.output_schema),
-        definition.runtime, definition.package_hash, definition.source_hash, definition.revision,
-        definition.created_at, definition.updated_at,
+        definition.project_id,
+        definition.id,
+        definition.name,
+        definition.source,
+        json.dumps(definition.input_selectors),
+        json.dumps(definition.output_schema),
+        definition.runtime,
+        definition.package_hash,
+        definition.source_hash,
+        definition.revision,
+        definition.created_at,
+        definition.updated_at,
     )
 
 
@@ -690,11 +757,13 @@ def _from_row(row: Mapping[str, object]) -> TransformDefinition:
         name=str(row["name"]),
         source=str(row["source"]),
         input_selectors=(
-            json.loads(selectors) if isinstance(selectors, str)
+            json.loads(selectors)
+            if isinstance(selectors, str)
             else dict(cast(Mapping[str, str], selectors))
         ),
         output_schema=(
-            json.loads(schema) if isinstance(schema, str)
+            json.loads(schema)
+            if isinstance(schema, str)
             else dict(cast(Mapping[str, object], schema))
         ),
         runtime=str(row["runtime"]) if row["runtime"] is not None else None,
@@ -707,7 +776,8 @@ def _from_row(row: Mapping[str, object]) -> TransformDefinition:
 
 
 def create_postgres_transform_module(
-    settings: Settings, projects: ProjectModule,
+    settings: Settings,
+    projects: ProjectModule,
     runner: TransformRunner | None = None,
     datasets: DatasetModule | None = None,
     artifacts: ArtifactModule | None = None,
@@ -717,9 +787,14 @@ def create_postgres_transform_module(
 
     resolved_runner = runner or (
         DenoTransformRunner(settings.transform_runner_url)
-        if settings.transform_runner_url else None
+        if settings.transform_runner_url
+        else None
     )
     return TransformModule(
-        projects, PostgresTransformStore(settings), resolved_runner,
-        PostgresTransformRunStore(settings), datasets, artifacts,
+        projects,
+        PostgresTransformStore(settings),
+        resolved_runner,
+        PostgresTransformRunStore(settings),
+        datasets,
+        artifacts,
     )

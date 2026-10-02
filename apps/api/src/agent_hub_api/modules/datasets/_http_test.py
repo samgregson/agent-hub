@@ -89,12 +89,19 @@ async def test_user_can_save_a_transform_targeted_batch_definition() -> None:
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     transform = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
     )
     batches = BatchExecutionModule(
-        projects, datasets, cast(PluginGatewayModule, object()),
-        MemoryBatchRunStore(), transforms=transforms,
+        projects,
+        datasets,
+        cast(PluginGatewayModule, object()),
+        MemoryBatchRunStore(),
+        transforms=transforms,
     )
     app = FastAPI()
     app.include_router(
@@ -105,7 +112,8 @@ async def test_user_can_save_a_transform_targeted_batch_definition() -> None:
         created = await client.post(
             f"/api/projects/{project.id}/batch-definitions",
             json={
-                "name": "Double loads", "datasetId": dataset.id,
+                "name": "Double loads",
+                "datasetId": dataset.id,
                 "transformDefinitionId": transform.id,
             },
         )

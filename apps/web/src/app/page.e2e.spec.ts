@@ -378,7 +378,10 @@ test("a Project file is deleted from its Work item action menu after confirmatio
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await dialog.getByRole("button", { name: "Delete" }).click();
 
-  await expect(page.getByText(path)).toBeHidden();
+  await expect(dialog).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: `${path} actions` }),
+  ).toHaveCount(0);
 });
 
 test("an Artifact changed by another Thread stays open until the user reloads it", async ({
@@ -727,9 +730,9 @@ test.describe("at phone width", () => {
     await expect(recordSelector).toBeVisible();
     await expect(recordSelector).toHaveCSS(
       "background-color",
-      "rgb(34, 34, 30)",
+      "rgb(27, 33, 26)",
     );
-    await expect(recordSelector).toHaveCSS("color", "rgb(240, 238, 232)");
+    await expect(recordSelector).toHaveCSS("color", "rgb(251, 253, 246)");
   });
 });
 

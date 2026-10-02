@@ -199,16 +199,27 @@ class DatasetModule:
         )
 
     async def create_transform_definition(
-        self, access: ProjectAccess, project_id: str, dataset_id: str,
-        name: str, transform_definition_id: str,
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        dataset_id: str,
+        name: str,
+        transform_definition_id: str,
     ) -> BatchDefinition:
         await self.load_dataset(access, project_id, dataset_id)
         now = datetime.now(UTC)
         return await self._store.create_definition(
             BatchDefinition(
-                id=str(uuid4()), project_id=project_id, dataset_id=dataset_id,
-                name=_name(name, "Batch Definition"), plugin_id=None, tool_name=None,
-                argument_mappings={}, input_schema={}, created_at=now, updated_at=now,
+                id=str(uuid4()),
+                project_id=project_id,
+                dataset_id=dataset_id,
+                name=_name(name, "Batch Definition"),
+                plugin_id=None,
+                tool_name=None,
+                argument_mappings={},
+                input_schema={},
+                created_at=now,
+                updated_at=now,
                 transform_definition_id=transform_definition_id,
             )
         )
@@ -551,7 +562,8 @@ def _definition_from_row(row: Mapping[str, object]) -> BatchDefinition:
         updated_at=row["updated_at"],  # type: ignore[arg-type]
         transform_definition_id=(
             str(row["transform_definition_id"])
-            if row.get("transform_definition_id") is not None else None
+            if row.get("transform_definition_id") is not None
+            else None
         ),
     )
 

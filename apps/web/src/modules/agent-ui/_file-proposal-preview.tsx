@@ -64,7 +64,9 @@ export function ProposedFilePreview({
           {proposal.proposed}
         </pre>
       )}
-      <footer>Open the Project file to inspect its current saved content.</footer>
+      <footer>
+        Open the Project file to inspect its current saved content.
+      </footer>
     </section>
   );
 }

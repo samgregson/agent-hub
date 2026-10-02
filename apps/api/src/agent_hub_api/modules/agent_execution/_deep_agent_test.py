@@ -175,9 +175,7 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
 
     monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
 
-    await runner._agent_for(
-        "project-1", thread_id="thread-1", run_id="agent-run-1", subject="sam"
-    )
+    await runner._agent_for("project-1", thread_id="thread-1", run_id="agent-run-1", subject="sam")
 
     names = {registered.name for registered in captured["tools"]}
     assert {"discover_project_datasets", "load_project_dataset"} <= names
@@ -253,8 +251,8 @@ async def test_agent_loads_a_batch_definition_on_demand(
         + definition.id
         + '", "name": "Beam checks", "datasetId": "'
         + dataset.id
-            + '", "pluginId": "reference-calculation", "toolName": "calculate_beam", '
-            '"transformDefinitionId": null, "argumentMappings": {"length_m": "/length"}}'
+        + '", "pluginId": "reference-calculation", "toolName": "calculate_beam", '
+        '"transformDefinitionId": null, "argumentMappings": {"length_m": "/length"}}'
     )
 
 
@@ -266,8 +264,13 @@ async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
             self.enqueued_run_id: str | None = None
 
         async def submit_all(
-            self, _access: object, project_id: str, definition_id: str,
-            idempotency_key: str, *, initiation: BatchInitiation,
+            self,
+            _access: object,
+            project_id: str,
+            definition_id: str,
+            idempotency_key: str,
+            *,
+            initiation: BatchInitiation,
         ) -> object:
             self.submissions.append((project_id, definition_id, idempotency_key, initiation))
             return SimpleNamespace(id="run-1")
@@ -281,8 +284,10 @@ async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
     )[0]
 
     call = {
-        "name": "start_project_batch_run", "type": "tool_call",
-        "args": {"definition_id": "definition-1"}, "id": "call-1",
+        "name": "start_project_batch_run",
+        "type": "tool_call",
+        "args": {"definition_id": "definition-1"},
+        "id": "call-1",
     }
     result = await tool.ainvoke(call)
     await tool.ainvoke(call)
@@ -311,11 +316,16 @@ async def test_agent_discovers_batch_runs_and_inspects_a_bounded_result_page() -
             assert project_id == "project-1"
             assert query["limit"] == 10
             return SimpleNamespace(
-                items=(SimpleNamespace(
-                    id="run-1", definition_id="definition-1", status="succeeded",
-                    records=(SimpleNamespace(structured_output={"result": 6}, error=None),),
-                    archived_at=None,
-                ),), next_offset=None,
+                items=(
+                    SimpleNamespace(
+                        id="run-1",
+                        definition_id="definition-1",
+                        status="succeeded",
+                        records=(SimpleNamespace(structured_output={"result": 6}, error=None),),
+                        archived_at=None,
+                    ),
+                ),
+                next_offset=None,
             )
 
         async def inspect_results(
@@ -324,38 +334,63 @@ async def test_agent_discovers_batch_runs_and_inspects_a_bounded_result_page() -
             assert (project_id, run_id) == ("project-1", "run-1")
             assert query["limit"] == 20
             return SimpleNamespace(
-                items=(SimpleNamespace(
-                    dataset_record_id="record-1", input={"load": 3},
-                    structured_output={"result": 6}, error=None,
-                ),),
+                items=(
+                    SimpleNamespace(
+                        dataset_record_id="record-1",
+                        input={"load": 3},
+                        structured_output={"result": 6},
+                        error=None,
+                    ),
+                ),
                 next_offset=None,
                 summary=SimpleNamespace(
-                    total_count=1, succeeded_count=1, failed_count=0,
-                    numeric_count=1, numeric_sum=6, numeric_min=6,
-                    numeric_max=6, numeric_average=6,
+                    total_count=1,
+                    succeeded_count=1,
+                    failed_count=0,
+                    numeric_count=1,
+                    numeric_sum=6,
+                    numeric_min=6,
+                    numeric_max=6,
+                    numeric_average=6,
                 ),
             )
 
     tools = {
-        item.name: item for item in PostgresDeepAgentRunner._batch_tools(
+        item.name: item
+        for item in PostgresDeepAgentRunner._batch_tools(
             cast(Any, Batches()), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
 
     listed = json.loads(await tools["list_project_batch_runs"].ainvoke({}))
-    inspected = json.loads(await tools["inspect_project_batch_results"].ainvoke({
-        "run_id": "run-1", "aggregate_path": "/structuredOutput/result",
-    }))
+    inspected = json.loads(
+        await tools["inspect_project_batch_results"].ainvoke(
+            {
+                "run_id": "run-1",
+                "aggregate_path": "/structuredOutput/result",
+            }
+        )
+    )
 
-    assert listed["items"] == [{
-        "id": "run-1", "definitionId": "definition-1", "status": "succeeded",
-        "recordCount": 1, "succeededCount": 1, "failedCount": 0,
-        "archived": False,
-    }]
-    assert inspected["items"] == [{
-        "datasetRecordId": "record-1", "input": {"load": 3},
-        "structuredOutput": {"result": 6}, "error": None,
-    }]
+    assert listed["items"] == [
+        {
+            "id": "run-1",
+            "definitionId": "definition-1",
+            "status": "succeeded",
+            "recordCount": 1,
+            "succeededCount": 1,
+            "failedCount": 0,
+            "archived": False,
+        }
+    ]
+    assert inspected["items"] == [
+        {
+            "datasetRecordId": "record-1",
+            "input": {"load": 3},
+            "structuredOutput": {"result": 6},
+            "error": None,
+        }
+    ]
     assert inspected["summary"]["numericSum"] == 6
 
 
@@ -363,11 +398,18 @@ async def test_agent_discovers_batch_runs_and_inspects_a_bounded_result_page() -
 async def test_agent_can_propose_transform_batch_definition_after_approval() -> None:
     class Batches:
         async def define_transform_batch(
-            self, _access: object, project_id: str, dataset_id: str,
-            name: str, transform_definition_id: str,
+            self,
+            _access: object,
+            project_id: str,
+            dataset_id: str,
+            name: str,
+            transform_definition_id: str,
         ) -> object:
             assert (project_id, dataset_id, name, transform_definition_id) == (
-                "project-1", "dataset-1", "Double loads", "transform-1"
+                "project-1",
+                "dataset-1",
+                "Double loads",
+                "transform-1",
             )
             return SimpleNamespace(id="definition-1", name=name)
 
@@ -377,10 +419,13 @@ async def test_agent_can_propose_transform_batch_definition_after_approval() -> 
             cast(Any, Batches()), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
-    result = await tools["create_project_transform_batch_definition"].ainvoke({
-        "dataset_id": "dataset-1", "name": "Double loads",
-        "transform_definition_id": "transform-1",
-    })
+    result = await tools["create_project_transform_batch_definition"].ainvoke(
+        {
+            "dataset_id": "dataset-1",
+            "name": "Double loads",
+            "transform_definition_id": "transform-1",
+        }
+    )
 
     assert result == "Created Batch Definition Double loads (definition-1)."
 
@@ -394,8 +439,12 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
             self.saved: tuple[str, str] | None = None
 
         async def start_run(
-            self, _access: object, _project_id: str, definition_id: str,
-            record: dict[str, object], parameters: dict[str, object],
+            self,
+            _access: object,
+            _project_id: str,
+            definition_id: str,
+            record: dict[str, object],
+            parameters: dict[str, object],
             initiation: TransformInitiation,
         ) -> object:
             self.started = definition_id, record, parameters
@@ -415,13 +464,19 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
             cast(Any, transforms), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
-    started = await tools["start_project_transform_run"].ainvoke({
-        "definition_id": "definition-1", "record_json": '{"load": 3}',
-        "parameters_json": '{"factor": 2}',
-    })
-    saved = await tools["save_project_transform_run_as_dataset"].ainvoke({
-        "run_id": "run-1", "name": "Saved",
-    })
+    started = await tools["start_project_transform_run"].ainvoke(
+        {
+            "definition_id": "definition-1",
+            "record_json": '{"load": 3}',
+            "parameters_json": '{"factor": 2}',
+        }
+    )
+    saved = await tools["save_project_transform_run_as_dataset"].ainvoke(
+        {
+            "run_id": "run-1",
+            "name": "Saved",
+        }
+    )
     assert started == "Transform Run run-1 succeeded."
     assert transforms.started == ("definition-1", {"load": 3}, {"factor": 2})
     assert transforms.initiation == TransformInitiation(
@@ -438,7 +493,9 @@ async def test_agent_artifact_save_carries_agent_run_provenance() -> None:
             self, access: ArtifactMutationAccess, project_id: str, run_id: str, title: str
         ) -> object:
             assert (access.subject, access.thread_id, access.run_id) == (
-                "sam", "thread-1", "agent-run-1"
+                "sam",
+                "thread-1",
+                "agent-run-1",
             )
             assert (project_id, run_id, title) == ("project-1", "transform-run-1", "Checked")
             return SimpleNamespace(
@@ -451,9 +508,9 @@ async def test_agent_artifact_save_carries_agent_run_provenance() -> None:
             cast(Any, Transforms()), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
-    result = await tools["save_project_transform_run_as_artifact"].ainvoke({
-        "run_id": "transform-run-1", "title": "Checked"
-    })
+    result = await tools["save_project_transform_run_as_artifact"].ainvoke(
+        {"run_id": "transform-run-1", "title": "Checked"}
+    )
 
     assert result == "Saved Artifact Checked (artifact-1) from Transform Run transform-run-1."
 

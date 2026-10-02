@@ -30,3 +30,71 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: uv sync --frozen --all-packages
       - run: make acceptance
+
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_DB: agent_hub
+          POSTGRES_PASSWORD: agent_hub
+          POSTGRES_USER: agent_hub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_hub -d agent_hub"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      AGENT_HUB_DATABASE_URL: postgresql://agent_hub:agent_hub@localhost:5432/agent_hub
+      AGENT_HUB_ENVIRONMENT: test
+      AGENT_HUB_IDENTITY_MODE: fixed
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.1
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.4"
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          version: "0.11.15"
+          enable-cache: true
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --frozen --all-packages
+      - run: pnpm --filter @agent-hub/web exec playwright install --with-deps chromium
+      - run: make migrate
+      - name: Start API
+        run: |
+          uv run --frozen --package agent-hub-api uvicorn agent_hub_api.main:app --host 127.0.0.1 --port 8000 --no-access-log > /tmp/agent-hub-api.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health/ready; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/agent-hub-api.log
+          exit 1
+      - run: pnpm --filter @agent-hub/web test:e2e
+      - name: Restore application and checkpoint data
+        run: |
+          uv run --frozen --package agent-hub-api python scripts/foundation-restore-drill.py seed
+          mkdir -p "$RUNNER_TEMP/agent-hub-restore"
+          docker run --rm --network host -e PGPASSWORD=agent_hub \
+            -v "$RUNNER_TEMP/agent-hub-restore:/backup" postgres:17.6-alpine \
+            pg_dump -h 127.0.0.1 -U agent_hub -d agent_hub -Fc -f /backup/agent-hub.dump
+          docker run --rm --network host -e PGPASSWORD=agent_hub postgres:17.6-alpine \
+            createdb -h 127.0.0.1 -U agent_hub agent_hub_restore
+          docker run --rm --network host -e PGPASSWORD=agent_hub \
+            -v "$RUNNER_TEMP/agent-hub-restore:/backup" postgres:17.6-alpine \
+            pg_restore -h 127.0.0.1 -U agent_hub -d agent_hub_restore \
+            --no-owner --exit-on-error /backup/agent-hub.dump
+          AGENT_HUB_DATABASE_URL=postgresql://agent_hub:agent_hub@localhost:5432/agent_hub_restore \
+            uv run --frozen --package agent-hub-api python scripts/foundation-restore-drill.py verify

@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
   --accent: #dcf56b;
+  --accent-hover: #edff9c;
   --accent-ink: #17200f;
   --background: #10130f;
   --surface: #181c17;

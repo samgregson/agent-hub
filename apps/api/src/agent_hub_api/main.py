@@ -25,6 +25,7 @@ from agent_hub_api.modules.batch_execution import (
 )
 from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
+from agent_hub_api.modules.observability import RequestLoggingMiddleware
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
     create_plugin_gateway_router,
@@ -73,11 +74,16 @@ def create_app(
         resolved_settings, resolved_projects, resolved_plugin_gateway
     )
     resolved_transforms = create_postgres_transform_module(
-        resolved_settings, resolved_projects, datasets=resolved_datasets,
+        resolved_settings,
+        resolved_projects,
+        datasets=resolved_datasets,
         artifacts=resolved_artifacts,
     )
     resolved_batches = create_postgres_batch_execution_module(
-        resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway,
+        resolved_settings,
+        resolved_projects,
+        resolved_datasets,
+        resolved_plugin_gateway,
         transforms=resolved_transforms,
     )
     deep_agent_runner = None
@@ -112,6 +118,7 @@ def create_app(
         version="0.0.0",
         lifespan=lifespan,
     )
+    application.add_middleware(RequestLoggingMiddleware)
     application.state.settings = resolved_settings
     application.state.readiness_check = readiness_check
     application.include_router(health_router)

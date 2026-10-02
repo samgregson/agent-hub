@@ -21,6 +21,7 @@ class IdentityEvidence:
     """Trusted transport evidence presented to the Identity Module."""
 
     headers: Mapping[str, str]
+    request_id: str | None = None
 
     def header(self, name: str) -> str:
         expected = name.casefold()
@@ -42,7 +43,7 @@ class IdentityModule:
     def resolve(self, evidence: IdentityEvidence) -> RequestContext:
         return RequestContext(
             subject=self._adapter.resolve_subject(evidence),
-            request_id=str(uuid4()),
+            request_id=evidence.request_id or str(uuid4()),
         )
 
 

@@ -6,7 +6,6 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:3001",
     browserName: "chromium",
-    channel: "chrome",
     headless: true,
   },
   webServer: {

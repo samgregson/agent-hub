@@ -1,0 +1,61 @@
+"""Request correlation and payload-free access logging for the API boundary."""
+
+import json
+import logging
+import sys
+from time import monotonic
+from uuid import uuid4
+
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+logger = logging.getLogger("agent_hub_api.requests")
+logger.setLevel(logging.INFO)
+logger.propagate = False
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.addHandler(handler)
+
+
+class RequestLoggingMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request_id = str(uuid4())
+        scope.setdefault("state", {})["request_id"] = request_id
+        started = monotonic()
+        status_code = 500
+
+        async def send_with_request_id(message: Message) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+                message["headers"] = [
+                    *message.get("headers", []),
+                    (b"x-request-id", request_id.encode("ascii")),
+                ]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_with_request_id)
+        finally:
+            route = scope.get("route")
+            route_path = getattr(route, "path", "unmatched")
+            logger.info(
+                json.dumps(
+                    {
+                        "event": "http_request",
+                        "request_id": request_id,
+                        "method": scope["method"],
+                        "route": route_path,
+                        "status": status_code,
+                        "duration_ms": round((monotonic() - started) * 1000),
+                    },
+                    separators=(",", ":"),
+                )
+            )

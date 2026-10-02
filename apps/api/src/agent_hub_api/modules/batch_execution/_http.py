@@ -100,7 +100,11 @@ def create_batch_execution_router(
 
     async def context(request: Request) -> RequestContext:
         try:
-            return identity.resolve(IdentityEvidence(headers=request.headers))
+            return identity.resolve(
+                IdentityEvidence(
+                    headers=request.headers, request_id=getattr(request.state, "request_id", None)
+                )
+            )
         except IdentityUnavailable as error:
             raise HTTPException(
                 status_code=401, detail="Authenticated platform identity is required"
@@ -232,13 +236,13 @@ def create_batch_execution_router(
         )
 
     @router.post("/{run_id}/archive", response_model=BatchRunResponse)
-    async def archive(
-        project_id: str, run_id: str, request_context: Context
-    ) -> BatchRunResponse:
+    async def archive(project_id: str, run_id: str, request_context: Context) -> BatchRunResponse:
         try:
-            return _response(await batches.archive(
-                ProjectAccess(subject=request_context.subject), project_id, run_id
-            ))
+            return _response(
+                await batches.archive(
+                    ProjectAccess(subject=request_context.subject), project_id, run_id
+                )
+            )
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run not found") from error
         except BatchRunNotArchivable as error:

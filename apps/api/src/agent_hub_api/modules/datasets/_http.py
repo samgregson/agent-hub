@@ -77,8 +77,12 @@ class BatchDefinitionResponse(_Model):
 
 class TransformBatchCreator(Protocol):
     async def define_transform_batch(
-        self, access: ProjectAccess, project_id: str, dataset_id: str,
-        name: str, transform_definition_id: str,
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        dataset_id: str,
+        name: str,
+        transform_definition_id: str,
     ) -> BatchDefinition: ...
 
 
@@ -121,14 +125,19 @@ async def _definition_response(
 
 
 def create_dataset_router(
-    identity: IdentityModule, datasets: DatasetModule,
+    identity: IdentityModule,
+    datasets: DatasetModule,
     transform_batches: TransformBatchCreator | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}", tags=["datasets"])
 
     async def context(request: Request) -> RequestContext:
         try:
-            return identity.resolve(IdentityEvidence(headers=request.headers))
+            return identity.resolve(
+                IdentityEvidence(
+                    headers=request.headers, request_id=getattr(request.state, "request_id", None)
+                )
+            )
         except IdentityUnavailable as error:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -240,15 +249,23 @@ def create_dataset_router(
                 if transform_batches is None:
                     raise DatasetValidationError("Transform execution is unavailable.")
                 definition = await transform_batches.define_transform_batch(
-                    request_access, project_id, body.dataset_id, body.name,
+                    request_access,
+                    project_id,
+                    body.dataset_id,
+                    body.name,
                     body.transform_definition_id,
                 )
             else:
                 if body.plugin_id is None or body.tool_name is None:
                     raise DatasetValidationError("An MCP tool target is required.")
                 definition = await datasets.create_definition(
-                    request_access, project_id, body.dataset_id, body.name,
-                    body.plugin_id, body.tool_name, body.argument_mappings,
+                    request_access,
+                    project_id,
+                    body.dataset_id,
+                    body.name,
+                    body.plugin_id,
+                    body.tool_name,
+                    body.argument_mappings,
                 )
         except (
             DatasetNotFound,

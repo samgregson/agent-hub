@@ -190,9 +190,7 @@ class ProjectFilesModule:
             raise ProjectFileNotFound
         return file
 
-    async def preview(
-        self, access: ProjectFileAccess, project_id: str, path: str
-    ) -> ProjectFile:
+    async def preview(self, access: ProjectFileAccess, project_id: str, path: str) -> ProjectFile:
         """Load a Project file only after confirming the caller can see its Project."""
         try:
             await self._projects.load(ProjectAccess(subject=access.subject), project_id)
@@ -230,13 +228,9 @@ class ProjectFilesModule:
         normalized = _normalize_file_path(path)
         _require_mutable(normalized)
         self._check_content(content)
-        return await self._store.create(
-            project_id, normalized, content, max_files=self._max_files
-        )
+        return await self._store.create(project_id, normalized, content, max_files=self._max_files)
 
-    async def delete_visible(
-        self, access: ProjectFileAccess, project_id: str, path: str
-    ) -> None:
+    async def delete_visible(self, access: ProjectFileAccess, project_id: str, path: str) -> None:
         """Delete one ordinary Project File after user authorization."""
         try:
             await self._projects.load(ProjectAccess(subject=access.subject), project_id)

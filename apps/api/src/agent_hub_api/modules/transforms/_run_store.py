@@ -48,9 +48,14 @@ class PostgresTransformRunStore:
                 output_manifest=%s,error=%s,completed_at=%s
                 WHERE project_id=%s AND transform_run_id=%s AND status='running'""",
                 (
-                    run.status, run.runtime, json.dumps(run.output),
-                    json.dumps(run.output_manifest), run.error, run.completed_at,
-                    run.project_id, run.id,
+                    run.status,
+                    run.runtime,
+                    json.dumps(run.output),
+                    json.dumps(run.output_manifest),
+                    run.error,
+                    run.completed_at,
+                    run.project_id,
+                    run.id,
                 ),
             )
             if cursor.rowcount != 1:
@@ -98,12 +103,25 @@ class PostgresTransformRunStore:
 
 def _values(run: TransformRun) -> tuple[object, ...]:
     return (
-        run.project_id, run.id, run.definition_id, run.status,
-        json.dumps(run.definition_snapshot), json.dumps(run.inputs),
-        json.dumps(run.parameters), run.input_hash, run.source_hash,
-        run.runtime, run.package_hash, json.dumps(run.output), json.dumps(run.output_manifest),
-        run.error, run.initiator_subject, json.dumps(run.initiation),
-        json.dumps(run.limits), run.created_at, run.completed_at,
+        run.project_id,
+        run.id,
+        run.definition_id,
+        run.status,
+        json.dumps(run.definition_snapshot),
+        json.dumps(run.inputs),
+        json.dumps(run.parameters),
+        run.input_hash,
+        run.source_hash,
+        run.runtime,
+        run.package_hash,
+        json.dumps(run.output),
+        json.dumps(run.output_manifest),
+        run.error,
+        run.initiator_subject,
+        json.dumps(run.initiation),
+        json.dumps(run.limits),
+        run.created_at,
+        run.completed_at,
     )
 
 

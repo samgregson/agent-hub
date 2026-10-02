@@ -41,14 +41,16 @@ async def test_transform_run_round_trips_through_postgres() -> None:
     access = ProjectAccess(subject="transform-postgres-integration")
     projects = create_postgres_project_module(settings)
     datasets = create_postgres_dataset_module(settings, projects, ToolSchemas())
-    transforms = create_postgres_transform_module(
-        settings, projects, Runner(), datasets
-    )
+    transforms = create_postgres_transform_module(settings, projects, Runner(), datasets)
     project = await projects.create(access, "Transform run integration")
     try:
         definition = await transforms.define(
-            access, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-            {"load": "/load"}, {"type": "object"},
+            access,
+            project.id,
+            "Double",
+            "def transform(inputs, parameters):\n    return {}\n",
+            {"load": "/load"},
+            {"type": "object"},
         )
         run = await transforms.start_run(
             access, project.id, definition.id, {"load": 3}, {"factor": 2}
@@ -97,17 +99,25 @@ async def test_transform_definition_round_trips_through_postgres() -> None:
     project = await projects.create(access, "Transform integration")
     try:
         definition = await transforms.define(
-            access, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-            {"load": "/load"}, {"type": "object"},
+            access,
+            project.id,
+            "Double",
+            "def transform(inputs, parameters):\n    return {}\n",
+            {"load": "/load"},
+            {"type": "object"},
         )
         loaded = await transforms.load(access, project.id, definition.id)
         assert loaded == definition
         assert (await transforms.list(access, project.id)) == (definition,)
 
         revised = await transforms.revise(
-            access, project.id, definition.id, "Triple",
+            access,
+            project.id,
+            definition.id,
+            "Triple",
             "def transform(inputs, parameters):\n    return {'triple': 3}\n",
-            {"load": "/load"}, {"type": "object"},
+            {"load": "/load"},
+            {"type": "object"},
         )
         assert revised.revision == 2
         assert await transforms.load(access, project.id, definition.id) == revised

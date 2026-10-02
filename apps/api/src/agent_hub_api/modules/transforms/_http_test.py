@@ -34,12 +34,19 @@ async def test_direct_user_explicitly_saves_run_output_as_artifact() -> None:
             return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
     transforms = TransformModule(
-        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(),
+        projects,
+        MemoryTransformStore(),
+        Runner(),
+        MemoryTransformRunStore(),
         artifacts=create_memory_artifact_module(projects),
     )
     definition = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
     )
     run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
     app = FastAPI()
@@ -113,9 +120,12 @@ async def test_preview_http_uses_definition_and_returns_transient_output() -> No
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     definition = await transforms.define(
-        ProjectAccess(subject="sam"), project.id, "Double",
+        ProjectAccess(subject="sam"),
+        project.id,
+        "Double",
         "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        {"load": "/load"},
+        {"type": "object"},
     )
     app = FastAPI()
     app.include_router(
@@ -132,7 +142,8 @@ async def test_preview_http_uses_definition_and_returns_transient_output() -> No
         )
     assert response.status_code == 200
     assert response.json() == {
-        "output": {"value": 6}, "runtime": "deno:2.9.7;pyodide:314.0.7",
+        "output": {"value": 6},
+        "runtime": "deno:2.9.7;pyodide:314.0.7",
         "sourceHash": definition.source_hash,
     }
 
@@ -160,8 +171,12 @@ async def test_durable_run_http_can_be_inspected_after_execution() -> None:
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(), datasets
     )
     definition = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
     )
     app = FastAPI()
     app.include_router(

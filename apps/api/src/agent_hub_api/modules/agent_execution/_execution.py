@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, Self
 
 from ag_ui.core import BaseEvent, Interrupt, Message, RunAgentInput, RunErrorEvent, RunFinishedEvent
 from psycopg import AsyncConnection
@@ -33,7 +33,7 @@ class ApprovalDecision:
     source_run_id: str | None
     decision_run_id: str
 
-    def as_json(self) -> dict[str, str | bool | None]:
+    def as_json(self) -> dict[str, object]:
         return {
             "interruptId": self.interrupt_id,
             "toolCallId": self.tool_call_id,
@@ -42,6 +42,40 @@ class ApprovalDecision:
             "sourceRunId": self.source_run_id,
             "decisionRunId": self.decision_run_id,
         }
+
+    @classmethod
+    def from_json(cls, value: object) -> Self:
+        if not isinstance(value, dict):
+            raise ValueError("Invalid stored approval decision")
+        interrupt_id = value.get("interruptId")
+        tool_call_id = value.get("toolCallId")
+        approved = value.get("approved")
+        resolution = value.get("resolution")
+        source_run_id = value.get("sourceRunId")
+        decision_run_id = value.get("decisionRunId")
+        if (
+            not isinstance(interrupt_id, str)
+            or not isinstance(tool_call_id, str)
+            or (approved is not None and not isinstance(approved, bool))
+            or (resolution is not None and not isinstance(resolution, str))
+            or (source_run_id is not None and not isinstance(source_run_id, str))
+            or not isinstance(decision_run_id, str)
+        ):
+            raise ValueError("Invalid stored approval decision")
+        return cls(
+            interrupt_id=interrupt_id,
+            tool_call_id=tool_call_id,
+            approved=approved,
+            resolution=resolution,
+            source_run_id=source_run_id,
+            decision_run_id=decision_run_id,
+        )
+
+
+def _approval_decisions_from_json(value: object) -> tuple[ApprovalDecision, ...]:
+    if not isinstance(value, list):
+        raise ValueError("Invalid stored approval decisions")
+    return tuple(ApprovalDecision.from_json(item) for item in value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,26 +178,28 @@ class AgentExecutionModule:
                 None,
             )
             responses = {entry.interrupt_id: entry for entry in input_data.resume}
-            approval_decisions = tuple(
-                ApprovalDecision(
-                    interrupt_id=interrupt.id,
-                    tool_call_id=interrupt.tool_call_id,
-                    approved=(
-                        responses[interrupt.id].payload.get("approved")
-                        if responses[interrupt.id].status == "resolved"
-                        and isinstance(responses[interrupt.id].payload, dict)
-                        and isinstance(responses[interrupt.id].payload.get("approved"), bool)
-                        else None
-                    ),
-                    resolution=(
-                        "cancelled" if responses[interrupt.id].status == "cancelled" else None
-                    ),
-                    source_run_id=source_run_id,
-                    decision_run_id=input_data.run_id,
+            decisions = []
+            for interrupt in thread_state.interrupts:
+                if interrupt.tool_call_id is None:
+                    continue
+                response = responses[interrupt.id]
+                payload = response.payload
+                approved = (
+                    payload.get("approved")
+                    if response.status == "resolved" and isinstance(payload, dict)
+                    else None
                 )
-                for interrupt in thread_state.interrupts
-                if interrupt.tool_call_id is not None
-            )
+                decisions.append(
+                    ApprovalDecision(
+                        interrupt_id=interrupt.id,
+                        tool_call_id=interrupt.tool_call_id,
+                        approved=approved if isinstance(approved, bool) else None,
+                        resolution="cancelled" if response.status == "cancelled" else None,
+                        source_run_id=source_run_id,
+                        decision_run_id=input_data.run_id,
+                    )
+                )
+            approval_decisions = tuple(decisions)
         now = datetime.now(UTC)
         run = AgentRun(
             id=input_data.run_id,
@@ -400,17 +436,7 @@ class PostgresAgentRunStore:
                     error=(
                         None if row["error"] is None else ErrorEnvelope.model_validate(row["error"])
                     ),
-                    approval_decisions=tuple(
-                        ApprovalDecision(
-                            interrupt_id=str(decision["interruptId"]),
-                            tool_call_id=str(decision["toolCallId"]),
-                            approved=decision["approved"],
-                            resolution=decision["resolution"],
-                            source_run_id=decision["sourceRunId"],
-                            decision_run_id=decision["decisionRunId"],
-                        )
-                        for decision in row["approval_decisions"]
-                    ),
+                    approval_decisions=_approval_decisions_from_json(row["approval_decisions"]),
                 )
                 for row in await cursor.fetchall()
             )

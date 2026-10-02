@@ -38,19 +38,28 @@ async def test_successful_run_can_be_explicitly_saved_as_project_artifact() -> N
 
     artifacts = create_memory_artifact_module(projects)
     transforms = TransformModule(
-        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(),
+        projects,
+        MemoryTransformStore(),
+        Runner(),
+        MemoryTransformRunStore(),
         artifacts=artifacts,
     )
     definition = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
     )
     run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
     assert await artifacts.discover(ArtifactAccess(subject="sam"), project.id) == ()
 
     document = await transforms.save_run_as_artifact(
         ArtifactUserActionAccess(subject="sam", user_action_id="save-1"),
-        project.id, run.id, "Checked loads",
+        project.id,
+        run.id,
+        "Checked loads",
     )
 
     assert document.artifact.title == "Checked loads"
@@ -59,9 +68,9 @@ async def test_successful_run_can_be_explicitly_saved_as_project_artifact() -> N
     assert document.payload["sourceHash"] == run.source_hash
     assert document.artifact.provenance.created_by.user_action_id is not None
     assert document.artifact.provenance.created_by.user_action_id.root == "save-1"
-    assert (await artifacts.load(
-        ArtifactAccess(subject="sam"), project.id, document.artifact.id.root
-    )) == document
+    assert (
+        await artifacts.load(ArtifactAccess(subject="sam"), project.id, document.artifact.id.root)
+    ) == document
 
 
 @pytest.mark.asyncio
@@ -80,12 +89,19 @@ async def test_failed_run_cannot_create_artifact_and_other_project_user_cannot_s
 
     artifacts = create_memory_artifact_module(projects)
     transforms = TransformModule(
-        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(),
+        projects,
+        MemoryTransformStore(),
+        Runner(),
+        MemoryTransformRunStore(),
         artifacts=artifacts,
     )
     definition = await transforms.define(
-        owner, project.id, "Invalid", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object", "required": ["value"]},
+        owner,
+        project.id,
+        "Invalid",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object", "required": ["value"]},
     )
     run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
     assert run.status == "failed"
@@ -93,12 +109,16 @@ async def test_failed_run_cannot_create_artifact_and_other_project_user_cannot_s
     with pytest.raises(TransformValidationError, match="successful"):
         await transforms.save_run_as_artifact(
             ArtifactUserActionAccess(subject="sam", user_action_id="save-1"),
-            project.id, run.id, "Wrong",
+            project.id,
+            run.id,
+            "Wrong",
         )
     with pytest.raises(TransformNotFound):
         await transforms.save_run_as_artifact(
             ArtifactUserActionAccess(subject="alex", user_action_id="save-2"),
-            project.id, run.id, "Wrong",
+            project.id,
+            run.id,
+            "Wrong",
         )
     assert await artifacts.discover(ArtifactAccess(subject="sam"), project.id) == ()
 
@@ -121,7 +141,10 @@ async def test_preview_resolves_selectors_and_validates_runner_output() -> None:
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     definition = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
         {"load": "/load~1value"},
         {"type": "object", "required": ["value"], "properties": {"value": {"type": "number"}}},
     )
@@ -151,7 +174,10 @@ async def test_preview_rejects_output_outside_declared_schema() -> None:
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     definition = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
         {"load": "/load"},
         {"type": "object", "properties": {"value": {"type": "number"}}},
     )
@@ -179,14 +205,14 @@ async def test_run_retains_immutable_snapshots_after_definition_revision() -> No
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
     )
     definition = await transforms.define(
-        owner, project.id, "Double",
+        owner,
+        project.id,
+        "Double",
         "def transform(inputs, parameters):\n    return {}\n",
         {"load": "/load"},
         {"type": "object", "required": ["value"]},
     )
-    run = await transforms.start_run(
-        owner, project.id, definition.id, {"load": 3}, {"factor": 2}
-    )
+    run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {"factor": 2})
     assert run.status == "succeeded"
     assert run.output == {"value": 6}
     assert run.initiator_subject == "sam"
@@ -195,9 +221,13 @@ async def test_run_retains_immutable_snapshots_after_definition_revision() -> No
     assert run.runtime == definition.runtime == "deno:2.9.7;pyodide:314.0.7"
     assert run.definition_snapshot["source"] == definition.source
     await transforms.revise(
-        owner, project.id, definition.id, "Triple",
+        owner,
+        project.id,
+        definition.id,
+        "Triple",
         "def transform(inputs, parameters):\n    return {'value': 3}\n",
-        {"load": "/load"}, {"type": "object"},
+        {"load": "/load"},
+        {"type": "object"},
     )
     loaded = await transforms.load_run(owner, project.id, run.id)
     assert loaded == run
@@ -228,7 +258,8 @@ async def test_run_retains_agent_approval_context_and_enforced_runner_limits() -
     class Runner(_PinnedRunner):
         async def identity(self) -> TransformRuntimeIdentity:
             return TransformRuntimeIdentity(
-                "deno:2.9.7;pyodide:314.0.7", "a" * 64,
+                "deno:2.9.7;pyodide:314.0.7",
+                "a" * 64,
                 {"timeoutMs": 10_000, "maxInputBytes": 128_000, "maxOutputBytes": 128_000},
             )
 
@@ -241,20 +272,32 @@ async def test_run_retains_agent_approval_context_and_enforced_runner_limits() -
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
     )
     definition = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
     )
     run = await transforms.start_run(
-        owner, project.id, definition.id, {"load": 3}, {},
+        owner,
+        project.id,
+        definition.id,
+        {"load": 3},
+        {},
         initiation=TransformInitiation(
-            kind="agentRun", approval="approved", thread_id="thread-1",
+            kind="agentRun",
+            approval="approved",
+            thread_id="thread-1",
             agent_run_id="agent-run-1",
         ),
     )
 
     assert run.initiation == {
-        "kind": "agentRun", "approval": "approved",
-        "threadId": "thread-1", "agentRunId": "agent-run-1",
+        "kind": "agentRun",
+        "approval": "approved",
+        "threadId": "thread-1",
+        "agentRunId": "agent-run-1",
     }
     assert run.limits["timeoutMs"] == 10_000
     assert (await transforms.load_run(owner, project.id, run.id)) == run
@@ -281,8 +324,12 @@ async def test_run_retains_failure_without_fabricating_output() -> None:
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
     )
     definition = await transforms.define(
-        owner, project.id, "Slow", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        owner,
+        project.id,
+        "Slow",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
     )
     run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
     assert run.status == "failed"
@@ -319,15 +366,20 @@ async def test_successful_run_output_is_saved_as_dataset_only_on_explicit_comman
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(), datasets
     )
     definition = await transforms.define(
-        owner, project.id, "Values", "def transform(inputs, parameters):\n    return []\n",
-        {"load": "/load"}, {"type": "array"},
+        owner,
+        project.id,
+        "Values",
+        "def transform(inputs, parameters):\n    return []\n",
+        {"load": "/load"},
+        {"type": "array"},
     )
     run = await transforms.start_run(owner, project.id, definition.id, {"load": 3}, {})
     assert await datasets.list_datasets(owner, project.id) == ()
     dataset = await transforms.save_run_as_dataset(owner, project.id, run.id, "Values")
     assert [record.value for record in dataset.records] == [{"value": 2}, {"value": 4}]
     assert [record.source_key for record in dataset.records] == [
-        f"transform-run:{run.id}:0", f"transform-run:{run.id}:1"
+        f"transform-run:{run.id}:0",
+        f"transform-run:{run.id}:1",
     ]
     assert (await transforms.load_run(owner, project.id, run.id)) == run
 

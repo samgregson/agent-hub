@@ -8,7 +8,9 @@
   font-size: var(--font-size-label);
   padding: 0 var(--space-4);
   font-weight: 650;
-  transition: background-color 160ms ease, border-color 160ms ease;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
 }
 
 .button:hover:not(:disabled) {
@@ -29,8 +31,8 @@
 }
 
 .primary:hover:not(:disabled) {
-  border-color: #edff9c;
-  background: #edff9c;
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
 }
 
 .danger {

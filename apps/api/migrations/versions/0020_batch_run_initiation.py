@@ -19,8 +19,10 @@ def upgrade() -> None:
     op.add_column(
         "batch_runs",
         sa.Column(
-            "initiation", sa.JSON(), nullable=False,
-            server_default=sa.text("'{\"kind\":\"legacy\",\"approval\":\"unknown\"}'::json"),
+            "initiation",
+            sa.JSON(),
+            nullable=False,
+            server_default=sa.text('\'{"kind":"legacy","approval":"unknown"}\'::json'),
         ),
     )
     op.alter_column("batch_runs", "initiation", server_default=None)

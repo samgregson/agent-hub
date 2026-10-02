@@ -35,25 +35,30 @@ class DenoTransformRunner:
             if not isinstance(payload, dict):
                 raise TransformExecutionError("runner_failed")
             deno, pyodide, package_hash, limits = (
-                payload.get("deno"), payload.get("pyodide"), payload.get("packageHash"),
+                payload.get("deno"),
+                payload.get("pyodide"),
+                payload.get("packageHash"),
                 payload.get("limits"),
             )
             if (
-                not isinstance(deno, str) or not isinstance(pyodide, str)
-                or not isinstance(package_hash, str) or len(package_hash) != 64
+                not isinstance(deno, str)
+                or not isinstance(pyodide, str)
+                or not isinstance(package_hash, str)
+                or len(package_hash) != 64
                 or not isinstance(limits, dict)
                 or any(
                     not isinstance(limits.get(key), int) or limits[key] < 1
                     for key in (
-                        "timeoutMs", "maxInputBytes", "maxOutputBytes",
-                        "maxSourceBytes", "maxConcurrent",
+                        "timeoutMs",
+                        "maxInputBytes",
+                        "maxOutputBytes",
+                        "maxSourceBytes",
+                        "maxConcurrent",
                     )
                 )
             ):
                 raise TransformExecutionError("runner_failed")
-            return TransformRuntimeIdentity(
-                f"deno:{deno};pyodide:{pyodide}", package_hash, limits
-            )
+            return TransformRuntimeIdentity(f"deno:{deno};pyodide:{pyodide}", package_hash, limits)
         except (OSError, TimeoutError, ValueError) as error:
             raise TransformExecutionError("runner_unavailable") from error
         finally:

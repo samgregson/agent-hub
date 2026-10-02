@@ -52,7 +52,11 @@ class Gateway:
         self.maximum_active = 0
 
     async def batch_call(
-        self, _access: ProjectAccess, _project_id: str, _plugin_id: str, _tool_name: str,
+        self,
+        _access: ProjectAccess,
+        _project_id: str,
+        _plugin_id: str,
+        _tool_name: str,
         arguments: Mapping[str, object],
     ) -> PluginToolResult:
         raw_load = arguments["load"]
@@ -84,7 +88,9 @@ async def test_transform_batch_uses_captured_definition_and_first_record_guard()
     project = await projects.create(owner, "Bridge")
     datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
     dataset = await datasets.create_dataset(
-        owner, project.id, "Loads",
+        owner,
+        project.id,
+        "Loads",
         [DatasetRecordInput({"load": value}) for value in (2, 3, 4)],
     )
 
@@ -106,22 +112,36 @@ async def test_transform_batch_uses_captured_definition_and_first_record_guard()
     runner = Runner()
     transforms = TransformModule(projects, MemoryTransformStore(), runner)
     transform = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
         {"load": "/load"},
         {"type": "object", "required": ["result"], "properties": {"result": {"type": "number"}}},
     )
     batches = BatchExecutionModule(
-        projects, datasets, cast(PluginGatewayModule, Gateway()), MemoryBatchRunStore(),
+        projects,
+        datasets,
+        cast(PluginGatewayModule, Gateway()),
+        MemoryBatchRunStore(),
         transforms=transforms,
     )
     definition = await batches.define_transform_batch(
-        owner, project.id, dataset.id, "Double loads", transform.id,
+        owner,
+        project.id,
+        dataset.id,
+        "Double loads",
+        transform.id,
     )
     queued = await batches.submit_all(owner, project.id, definition.id)
     await transforms.revise(
-        owner, project.id, transform.id, "Changed",
+        owner,
+        project.id,
+        transform.id,
+        "Changed",
         "def transform(inputs, parameters):\n    return {'result': 999}\n",
-        {"load": "/load"}, {"type": "object"},
+        {"load": "/load"},
+        {"type": "object"},
     )
     run = await batches.execute(owner, project.id, queued.id)
     page = await batches.inspect_results(owner, project.id, run.id, limit=2)
@@ -129,7 +149,8 @@ async def test_transform_batch_uses_captured_definition_and_first_record_guard()
     assert run.status is BatchRunStatus.succeeded
     assert runner.calls == [2, 3, 4]
     assert [item.structured_output for item in page.items] == [
-        {"result": 4}, {"result": 6},
+        {"result": 4},
+        {"result": 6},
     ]
     assert run.definition_snapshot["transformDefinitionId"] == transform.id
     assert run.definition_snapshot["sourceHash"] == transform.source_hash
@@ -143,7 +164,9 @@ async def test_transform_batch_stops_when_first_output_breaks_contract() -> None
     project = await projects.create(owner, "Bridge")
     datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
     dataset = await datasets.create_dataset(
-        owner, project.id, "Loads",
+        owner,
+        project.id,
+        "Loads",
         [DatasetRecordInput({"load": value}) for value in (1, 2, 3)],
     )
 
@@ -162,16 +185,26 @@ async def test_transform_batch_stops_when_first_output_breaks_contract() -> None
     runner = Runner()
     transforms = TransformModule(projects, MemoryTransformStore(), runner)
     transform = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
         {"load": "/load"},
         {"type": "object", "required": ["result"]},
     )
     batches = BatchExecutionModule(
-        projects, datasets, cast(PluginGatewayModule, Gateway()), MemoryBatchRunStore(),
+        projects,
+        datasets,
+        cast(PluginGatewayModule, Gateway()),
+        MemoryBatchRunStore(),
         transforms=transforms,
     )
     definition = await batches.define_transform_batch(
-        owner, project.id, dataset.id, "Double loads", transform.id,
+        owner,
+        project.id,
+        dataset.id,
+        "Double loads",
+        transform.id,
     )
 
     run = await batches.start_all(owner, project.id, definition.id)
@@ -207,7 +240,10 @@ async def create_module(
         access,
         project.id,
         BatchExecutionModule(
-            projects, datasets, cast(PluginGatewayModule, gateway), MemoryBatchRunStore(),
+            projects,
+            datasets,
+            cast(PluginGatewayModule, gateway),
+            MemoryBatchRunStore(),
             max_concurrency=max_concurrency,
         ),
         definition.id,
@@ -272,9 +308,7 @@ async def test_run_inspection_pages_filters_and_orders_persisted_runs() -> None:
         order=BatchRunOrder.oldest,
         limit=1,
     )
-    failed = await batches.list(
-        access, project_id, definition_id, status=BatchRunStatus.failed
-    )
+    failed = await batches.list(access, project_id, definition_id, status=BatchRunStatus.failed)
 
     assert newest.items == (second,)
     assert newest.next_offset == 1
@@ -303,13 +337,20 @@ async def test_result_set_filters_then_sorts_before_pagination() -> None:
     run = await batches.start_all(access, project_id, definition_id)
 
     page = await batches.inspect_results(
-        access, project_id, run.id, limit=2,
-        filter_path="/structuredOutput/result", minimum=4, maximum=10,
-        sort_path="/structuredOutput/result", descending=True,
+        access,
+        project_id,
+        run.id,
+        limit=2,
+        filter_path="/structuredOutput/result",
+        minimum=4,
+        maximum=10,
+        sort_path="/structuredOutput/result",
+        descending=True,
     )
 
     assert [record.structured_output for record in page.items] == [
-        {"result": 10}, {"result": 8},
+        {"result": 10},
+        {"result": 8},
     ]
     assert page.next_offset == 2
 
@@ -320,12 +361,20 @@ async def test_result_set_equality_and_numeric_summary_use_all_matching_records(
     run = await batches.start_all(access, project_id, definition_id)
 
     page = await batches.inspect_results(
-        access, project_id, run.id, limit=1,
-        filter_path="/input/load", minimum=2,
+        access,
+        project_id,
+        run.id,
+        limit=1,
+        filter_path="/input/load",
+        minimum=2,
         aggregate_path="/structuredOutput/result",
     )
     equal = await batches.inspect_results(
-        access, project_id, run.id, filter_path="/input/load", equals=3,
+        access,
+        project_id,
+        run.id,
+        filter_path="/input/load",
+        equals=3,
     )
 
     assert page.summary.total_count == 4
@@ -357,8 +406,11 @@ async def test_result_set_http_query_returns_a_filtered_page_and_summary() -> No
         response = await client.get(
             f"/api/projects/{project_id}/batch-runs/{run.id}/results",
             params={
-                "filter_path": "/input/load", "minimum": 2, "limit": 1,
-                "sort_path": "/structuredOutput/result", "descending": "true",
+                "filter_path": "/input/load",
+                "minimum": 2,
+                "limit": 1,
+                "sort_path": "/structuredOutput/result",
+                "descending": "true",
                 "aggregate_path": "/structuredOutput/result",
             },
         )
@@ -370,8 +422,11 @@ async def test_result_set_http_query_returns_a_filtered_page_and_summary() -> No
     assert run_response.json()["succeededCount"] == 5
     assert run_response.json()["initiatorSubject"] == "sam"
     assert run_response.json()["initiation"] == {
-        "kind": "directUser", "approval": "notRequired", "threadId": None,
-        "agentRunId": None, "toolCallId": None,
+        "kind": "directUser",
+        "approval": "notRequired",
+        "threadId": None,
+        "agentRunId": None,
+        "toolCallId": None,
     }
     assert response.json()["items"][0]["structuredOutput"] == {"result": 10}
     assert response.json()["nextOffset"] == 1
@@ -394,8 +449,11 @@ async def test_repeated_idempotency_key_returns_the_original_run_without_reexecu
 async def test_approved_agent_batch_replay_retains_one_run_and_its_initiation() -> None:
     access, project_id, batches, definition_id = await create_module(Gateway())
     initiation = BatchInitiation(
-        kind="agentRun", approval="approved", thread_id="thread-1",
-        agent_run_id="agent-run-1", tool_call_id="call-1",
+        kind="agentRun",
+        approval="approved",
+        thread_id="thread-1",
+        agent_run_id="agent-run-1",
+        tool_call_id="call-1",
     )
 
     first = await batches.submit_all(
@@ -407,8 +465,11 @@ async def test_approved_agent_batch_replay_retains_one_run_and_its_initiation() 
 
     assert replayed.id == first.id
     assert first.initiation == {
-        "kind": "agentRun", "approval": "approved", "threadId": "thread-1",
-        "agentRunId": "agent-run-1", "toolCallId": "call-1",
+        "kind": "agentRun",
+        "approval": "approved",
+        "threadId": "thread-1",
+        "agentRunId": "agent-run-1",
+        "toolCallId": "call-1",
     }
     assert (await batches.list(access, project_id)).items == (first,)
 
@@ -455,9 +516,7 @@ async def test_restart_reconciliation_fails_non_terminal_batch_runs() -> None:
     access, project_id, batches, definition_id = await create_module(gateway)
     now = datetime.now(UTC)
     await batches._store.create_or_load(
-        BatchRun(
-            "queued-run", project_id, definition_id, BatchRunStatus.queued, {}, (), now, now
-        )
+        BatchRun("queued-run", project_id, definition_id, BatchRunStatus.queued, {}, (), now, now)
     )
 
     assert await batches.reconcile_non_terminal() == 1
