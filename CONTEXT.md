@@ -41,8 +41,8 @@ A durable project-owned declaration of a user-authored data transformation, incl
 _Avoid_: Binding expression, Plugin-owned state, notebook session
 
 **Transform Run**:
-One bounded host-orchestrated execution of a Transform Definition against immutable selected input snapshots. It records its runtime, inputs, outputs, provenance, and outcome. A per-record Transform Run is a Batch Run and produces a Result Set.
-_Avoid_: Browser preview, Project File, Artifact
+One bounded host-orchestrated execution of a Transform Definition against immutable selected input snapshots. It records its runtime, inputs, outputs, provenance, and outcome. It may use one selected input or, when supported, one captured Dataset as its input. Applying a Transform separately to Dataset Records is a Batch Run and produces a Result Set.
+_Avoid_: Browser preview, Project File, Artifact, per-record Batch Run
 
 **Project File**:
 A durable file in the project's virtual filesystem used as agent working material. It may be linked from chat and previewed without becoming an artifact. Elevation to an artifact is explicit: an agent-initiated elevation requires human approval, while a user-initiated plugin save is direct authorization.
