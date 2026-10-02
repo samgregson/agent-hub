@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -58,9 +58,10 @@ class DatasetResponse(_Model):
 class BatchDefinitionRequest(_Model):
     dataset_id: str
     name: str
-    plugin_id: str
-    tool_name: str
-    argument_mappings: dict[str, str]
+    plugin_id: str | None = None
+    tool_name: str | None = None
+    transform_definition_id: str | None = None
+    argument_mappings: dict[str, str] = Field(default_factory=dict)
 
 
 class BatchDefinitionResponse(_Model):
@@ -68,9 +69,17 @@ class BatchDefinitionResponse(_Model):
     dataset_id: str
     dataset_available: bool
     name: str
-    plugin_id: str
-    tool_name: str
+    plugin_id: str | None
+    tool_name: str | None
+    transform_definition_id: str | None
     argument_mappings: dict[str, str]
+
+
+class TransformBatchCreator(Protocol):
+    async def define_transform_batch(
+        self, access: ProjectAccess, project_id: str, dataset_id: str,
+        name: str, transform_definition_id: str,
+    ) -> BatchDefinition: ...
 
 
 def _record_response(record: DatasetRecord) -> DatasetRecordResponse:
@@ -106,11 +115,15 @@ async def _definition_response(
         name=definition.name,
         plugin_id=definition.plugin_id,
         tool_name=definition.tool_name,
+        transform_definition_id=definition.transform_definition_id,
         argument_mappings=dict(definition.argument_mappings),
     )
 
 
-def create_dataset_router(identity: IdentityModule, datasets: DatasetModule) -> APIRouter:
+def create_dataset_router(
+    identity: IdentityModule, datasets: DatasetModule,
+    transform_batches: TransformBatchCreator | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}", tags=["datasets"])
 
     async def context(request: Request) -> RequestContext:
@@ -217,15 +230,26 @@ def create_dataset_router(identity: IdentityModule, datasets: DatasetModule) -> 
     ) -> BatchDefinitionResponse:
         request_access = access(request_context)
         try:
-            definition = await datasets.create_definition(
-                request_access,
-                project_id,
-                body.dataset_id,
-                body.name,
-                body.plugin_id,
-                body.tool_name,
-                body.argument_mappings,
-            )
+            if body.transform_definition_id is not None:
+                if (
+                    body.plugin_id is not None
+                    or body.tool_name is not None
+                    or body.argument_mappings
+                ):
+                    raise DatasetValidationError("Choose one Batch Definition target.")
+                if transform_batches is None:
+                    raise DatasetValidationError("Transform execution is unavailable.")
+                definition = await transform_batches.define_transform_batch(
+                    request_access, project_id, body.dataset_id, body.name,
+                    body.transform_definition_id,
+                )
+            else:
+                if body.plugin_id is None or body.tool_name is None:
+                    raise DatasetValidationError("An MCP tool target is required.")
+                definition = await datasets.create_definition(
+                    request_access, project_id, body.dataset_id, body.name,
+                    body.plugin_id, body.tool_name, body.argument_mappings,
+                )
         except (
             DatasetNotFound,
             DatasetValidationError,
@@ -245,6 +269,10 @@ def create_dataset_router(identity: IdentityModule, datasets: DatasetModule) -> 
     ) -> BatchDefinitionResponse:
         request_access = access(request_context)
         try:
+            if body.transform_definition_id is not None:
+                raise DatasetValidationError("Create a new Transform Batch Definition instead.")
+            if body.plugin_id is None or body.tool_name is None:
+                raise DatasetValidationError("An MCP tool target is required.")
             definition = await datasets.update_definition(
                 request_access,
                 project_id,

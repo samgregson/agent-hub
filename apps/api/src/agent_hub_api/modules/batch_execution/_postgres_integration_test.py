@@ -12,6 +12,10 @@ from agent_hub_api.modules.batch_execution import (
 from agent_hub_api.modules.datasets import DatasetRecordInput, create_postgres_dataset_module
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolResult
 from agent_hub_api.modules.projects import ProjectAccess, create_postgres_project_module
+from agent_hub_api.modules.transforms import (
+    TransformRuntimeIdentity,
+    create_postgres_transform_module,
+)
 from agent_hub_api.settings import Settings
 
 
@@ -31,6 +35,66 @@ class Gateway:
         _tool_name: str, arguments: Mapping[str, object],
     ) -> PluginToolResult:
         return PluginToolResult((), {"result": arguments["load"]})
+
+
+@pytest.mark.asyncio
+async def test_postgres_transform_batch_definition_retains_result_set() -> None:
+    settings = Settings(
+        environment="test",
+        database_url=PostgresDsn("postgresql://agent_hub:agent_hub@127.0.0.1:5432/agent_hub"),
+    )
+    try:
+        connection = await AsyncConnection.connect(str(settings.database_url))
+    except OperationalError:
+        pytest.skip("Local PostgreSQL is unavailable")
+    await connection.close()
+
+    class Runner:
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:test;pyodide:test", "a" * 64)
+
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"result": cast(int, inputs["load"]) * 2}, "deno:test;pyodide:test"
+
+    access = ProjectAccess(subject="transform-batch-postgres-integration")
+    projects = create_postgres_project_module(settings)
+    gateway = Gateway()
+    datasets = create_postgres_dataset_module(settings, projects, gateway)
+    transforms = create_postgres_transform_module(settings, projects, Runner())
+    batches = create_postgres_batch_execution_module(
+        settings, projects, datasets, cast(PluginGatewayModule, gateway), transforms
+    )
+    project = await projects.create(access, "Transform Batch integration")
+    try:
+        dataset = await datasets.create_dataset(
+            access, project.id, "Loads",
+            [DatasetRecordInput({"load": value}) for value in (2, 3)],
+        )
+        transform = await transforms.define(
+            access, project.id, "Double",
+            "def transform(inputs, parameters):\n    return {}\n",
+            {"load": "/load"},
+            {"type": "object", "required": ["result"]},
+        )
+        definition = await batches.define_transform_batch(
+            access, project.id, dataset.id, "Double loads", transform.id
+        )
+        loaded_definition = await datasets.load_definition(access, project.id, definition.id)
+        run = await batches.start_all(access, project.id, definition.id)
+        page = await batches.inspect_results(access, project.id, run.id)
+
+        assert loaded_definition.transform_definition_id == transform.id
+        assert loaded_definition.plugin_id is None
+        assert run.status is BatchRunStatus.succeeded
+        assert [item.structured_output for item in page.items] == [
+            {"result": 4}, {"result": 6},
+        ]
+    finally:
+        connection = await AsyncConnection.connect(str(settings.database_url))
+        async with connection:
+            await connection.execute("DELETE FROM projects WHERE id=%s", (project.id,))
 
 
 @pytest.mark.asyncio

@@ -72,11 +72,12 @@ def create_app(
     resolved_datasets = create_postgres_dataset_module(
         resolved_settings, resolved_projects, resolved_plugin_gateway
     )
-    resolved_batches = create_postgres_batch_execution_module(
-        resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway
-    )
     resolved_transforms = create_postgres_transform_module(
         resolved_settings, resolved_projects, datasets=resolved_datasets
+    )
+    resolved_batches = create_postgres_batch_execution_module(
+        resolved_settings, resolved_projects, resolved_datasets, resolved_plugin_gateway,
+        transforms=resolved_transforms,
     )
     deep_agent_runner = None
     if agent_execution is None:
@@ -124,7 +125,7 @@ def create_app(
         create_artifact_router(resolved_identity, resolved_artifacts), prefix="/api"
     )
     application.include_router(
-        create_dataset_router(resolved_identity, resolved_datasets), prefix="/api"
+        create_dataset_router(resolved_identity, resolved_datasets, resolved_batches), prefix="/api"
     )
     application.include_router(
         create_batch_execution_router(resolved_identity, resolved_batches),

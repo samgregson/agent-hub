@@ -214,8 +214,8 @@ The application does not claim a cross-library transaction spanning a Run and ev
 ### Dataset batch execution
 
 1. A user directly starts a saved Batch Definition, or an agent proposes the same action and pauses for approval.
-2. Batch Execution captures Dataset-record IDs and values, the Batch Definition, Plugin tool/schema identity, initiator provenance, and an idempotency key in a new Batch Run.
-3. The executor makes the first real MCP invocation and validates its structured output before bounded fan-out.
+2. Batch Execution captures Dataset-record IDs and values, the Batch Definition, its MCP tool/schema or Transform source/runtime/package identity, initiator provenance, and an idempotency key in a new Batch Run.
+3. The executor invokes the first real MCP tool or isolated Transform and validates its structured output before bounded fan-out. Transform-backed definitions use the same Result Set and retain the captured source even if the Transform Definition changes later.
 4. It persists Result Records and compact progress independently of the initiating browser or Agent Run.
 5. The workspace and later agent tools inspect native summaries or paginated/filterable results; an explicit save may create a curated Artifact.
 

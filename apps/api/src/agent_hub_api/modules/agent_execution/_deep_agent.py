@@ -231,6 +231,10 @@ class PostgresDeepAgentRunner:
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Start the proposed Batch Run?",
             }
+            interrupt_on["create_project_transform_batch_definition"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Create the proposed Transform Batch Definition?",
+            }
         if transforms is not None and subject is not None:
             interrupt_on.update({
                 "create_project_transform": {
@@ -390,6 +394,7 @@ class PostgresDeepAgentRunner:
                     "datasetId": definition.dataset_id,
                     "pluginId": definition.plugin_id,
                     "toolName": definition.tool_name,
+                    "transformDefinitionId": definition.transform_definition_id,
                     "argumentMappings": definition.argument_mappings,
                 }
             )
@@ -497,7 +502,17 @@ class PostgresDeepAgentRunner:
             await batches.enqueue(access, project_id, run.id)
             return f"Started Batch Run {run.id}."
 
-        return [start_project_batch_run]
+        @tool
+        async def create_project_transform_batch_definition(
+            dataset_id: str, name: str, transform_definition_id: str
+        ) -> str:
+            """Create a per-record Transform Batch Definition after user approval."""
+            definition = await batches.define_transform_batch(
+                access, project_id, dataset_id, name, transform_definition_id
+            )
+            return f"Created Batch Definition {definition.name} ({definition.id})."
+
+        return [start_project_batch_run, create_project_transform_batch_definition]
 
     @staticmethod
     def _transform_tools(

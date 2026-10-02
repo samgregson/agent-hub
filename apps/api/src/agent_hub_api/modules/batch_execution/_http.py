@@ -20,6 +20,7 @@ from agent_hub_api.modules.identity import (
     RequestContext,
 )
 from agent_hub_api.modules.projects import ProjectAccess
+from agent_hub_api.modules.transforms import TransformExecutionError
 
 
 class _Model(BaseModel):
@@ -150,6 +151,8 @@ def create_batch_execution_router(
             return _response(run)
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
+        except TransformExecutionError as error:
+            raise HTTPException(status_code=422, detail=error.code) from error
 
     @router.get("/{run_id}", response_model=BatchRunResponse)
     async def load(project_id: str, run_id: str, request_context: Context) -> BatchRunResponse:
@@ -250,5 +253,7 @@ def create_batch_execution_router(
             return _response(run)
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
+        except TransformExecutionError as error:
+            raise HTTPException(status_code=422, detail=error.code) from error
 
     return router

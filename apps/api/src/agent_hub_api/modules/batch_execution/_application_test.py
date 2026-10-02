@@ -23,6 +23,11 @@ from agent_hub_api.modules.datasets import (
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolResult
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
+from agent_hub_api.modules.transforms import (
+    MemoryTransformStore,
+    TransformModule,
+    TransformRuntimeIdentity,
+)
 from agent_hub_api.settings import Settings
 
 
@@ -69,6 +74,110 @@ class Gateway:
             "required": ["result"],
             "properties": {"result": {"type": "number"}},
         }
+
+
+@pytest.mark.asyncio
+async def test_transform_batch_uses_captured_definition_and_first_record_guard() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner, project.id, "Loads",
+        [DatasetRecordInput({"load": value}) for value in (2, 3, 4)],
+    )
+
+    class Runner:
+        calls: list[int] = []
+
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:test;pyodide:test", "a" * 64)
+
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert parameters == {}
+            assert "return {}" in source
+            load = cast(int, inputs["load"])
+            self.calls.append(load)
+            return {"result": load * 2}, "deno:test;pyodide:test"
+
+    runner = Runner()
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
+    transform = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object", "required": ["result"], "properties": {"result": {"type": "number"}}},
+    )
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, Gateway()), MemoryBatchRunStore(),
+        transforms=transforms,
+    )
+    definition = await batches.define_transform_batch(
+        owner, project.id, dataset.id, "Double loads", transform.id,
+    )
+    queued = await batches.submit_all(owner, project.id, definition.id)
+    await transforms.revise(
+        owner, project.id, transform.id, "Changed",
+        "def transform(inputs, parameters):\n    return {'result': 999}\n",
+        {"load": "/load"}, {"type": "object"},
+    )
+    run = await batches.execute(owner, project.id, queued.id)
+    page = await batches.inspect_results(owner, project.id, run.id, limit=2)
+
+    assert run.status is BatchRunStatus.succeeded
+    assert runner.calls == [2, 3, 4]
+    assert [item.structured_output for item in page.items] == [
+        {"result": 4}, {"result": 6},
+    ]
+    assert run.definition_snapshot["transformDefinitionId"] == transform.id
+    assert run.definition_snapshot["sourceHash"] == transform.source_hash
+    assert run.definition_snapshot["packageHash"] == transform.package_hash
+
+
+@pytest.mark.asyncio
+async def test_transform_batch_stops_when_first_output_breaks_contract() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Bridge")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner, project.id, "Loads",
+        [DatasetRecordInput({"load": value}) for value in (1, 2, 3)],
+    )
+
+    class Runner:
+        calls: list[int] = []
+
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:test;pyodide:test", "a" * 64)
+
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            self.calls.append(cast(int, inputs["load"]))
+            return {"unexpected": 1}, "deno:test;pyodide:test"
+
+    runner = Runner()
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
+    transform = await transforms.define(
+        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object", "required": ["result"]},
+    )
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, Gateway()), MemoryBatchRunStore(),
+        transforms=transforms,
+    )
+    definition = await batches.define_transform_batch(
+        owner, project.id, dataset.id, "Double loads", transform.id,
+    )
+
+    run = await batches.start_all(owner, project.id, definition.id)
+
+    assert run.status is BatchRunStatus.failed
+    assert runner.calls == [1]
+    assert run.records[0].error == "Transform output does not match its output schema."
 
 
 async def create_module(

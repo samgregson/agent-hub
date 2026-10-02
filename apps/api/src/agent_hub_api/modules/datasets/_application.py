@@ -44,12 +44,13 @@ class BatchDefinition:
     project_id: str
     dataset_id: str
     name: str
-    plugin_id: str
-    tool_name: str
+    plugin_id: str | None
+    tool_name: str | None
     argument_mappings: Mapping[str, str]
     input_schema: Mapping[str, object]
     created_at: datetime
     updated_at: datetime
+    transform_definition_id: str | None = None
 
 
 class DatasetNotFound(Exception):
@@ -194,6 +195,21 @@ class DatasetModule:
                 input_schema=dict(schema),
                 created_at=now,
                 updated_at=now,
+            )
+        )
+
+    async def create_transform_definition(
+        self, access: ProjectAccess, project_id: str, dataset_id: str,
+        name: str, transform_definition_id: str,
+    ) -> BatchDefinition:
+        await self.load_dataset(access, project_id, dataset_id)
+        now = datetime.now(UTC)
+        return await self._store.create_definition(
+            BatchDefinition(
+                id=str(uuid4()), project_id=project_id, dataset_id=dataset_id,
+                name=_name(name, "Batch Definition"), plugin_id=None, tool_name=None,
+                argument_mappings={}, input_schema={}, created_at=now, updated_at=now,
+                transform_definition_id=transform_definition_id,
             )
         )
 
@@ -371,8 +387,8 @@ class PostgresDatasetStore:
             await connection.execute(
                 """INSERT INTO batch_definitions
                 (project_id, batch_definition_id, dataset_id, name, plugin_id, tool_name,
-                 argument_mappings, input_schema, created_at, updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                 argument_mappings, input_schema, created_at, updated_at, transform_definition_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 _definition_values(definition),
             )
         return definition
@@ -401,7 +417,8 @@ class PostgresDatasetStore:
         async with connection:
             cursor = await connection.execute(
                 """UPDATE batch_definitions SET dataset_id=%s, name=%s, plugin_id=%s,
-                tool_name=%s, argument_mappings=%s, input_schema=%s, updated_at=%s
+                tool_name=%s, argument_mappings=%s, input_schema=%s, updated_at=%s,
+                transform_definition_id=%s
                 WHERE project_id=%s AND batch_definition_id=%s RETURNING batch_definition_id""",
                 (
                     definition.dataset_id,
@@ -411,6 +428,7 @@ class PostgresDatasetStore:
                     json.dumps(definition.argument_mappings),
                     json.dumps(definition.input_schema),
                     definition.updated_at,
+                    definition.transform_definition_id,
                     definition.project_id,
                     definition.id,
                 ),
@@ -513,6 +531,7 @@ def _definition_values(definition: BatchDefinition) -> tuple[object, ...]:
         json.dumps(definition.input_schema),
         definition.created_at,
         definition.updated_at,
+        definition.transform_definition_id,
     )
 
 
@@ -522,14 +541,18 @@ def _definition_from_row(row: Mapping[str, object]) -> BatchDefinition:
         project_id=str(row["project_id"]),
         dataset_id=str(row["dataset_id"]),
         name=str(row["name"]),
-        plugin_id=str(row["plugin_id"]),
-        tool_name=str(row["tool_name"]),
+        plugin_id=str(row["plugin_id"]) if row["plugin_id"] is not None else None,
+        tool_name=str(row["tool_name"]) if row["tool_name"] is not None else None,
         argument_mappings={
             str(key): str(value) for key, value in _json_object(row["argument_mappings"]).items()
         },
         input_schema=_json_object(row["input_schema"]),
         created_at=row["created_at"],  # type: ignore[arg-type]
         updated_at=row["updated_at"],  # type: ignore[arg-type]
+        transform_definition_id=(
+            str(row["transform_definition_id"])
+            if row.get("transform_definition_id") is not None else None
+        ),
     )
 
 

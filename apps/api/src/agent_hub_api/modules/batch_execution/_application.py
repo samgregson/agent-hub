@@ -11,9 +11,14 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from agent_hub_api.modules.datasets import BatchDefinition, DatasetModule
+from agent_hub_api.modules.datasets import BatchDefinition, DatasetModule, DatasetValidationError
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
+from agent_hub_api.modules.transforms import (
+    TransformExecutionError,
+    TransformModule,
+    TransformNotFound,
+)
 from agent_hub_api.settings import Settings
 
 
@@ -114,6 +119,7 @@ class BatchExecutionModule:
         gateway: PluginGatewayModule,
         store: BatchRunStore,
         max_concurrency: int = 4,
+        transforms: TransformModule | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least one")
@@ -124,7 +130,22 @@ class BatchExecutionModule:
             store,
         )
         self._max_concurrency = max_concurrency
+        self._transforms = transforms
         self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
+
+    async def define_transform_batch(
+        self, access: ProjectAccess, project_id: str, dataset_id: str,
+        name: str, transform_definition_id: str,
+    ) -> BatchDefinition:
+        if self._transforms is None:
+            raise DatasetValidationError("Transform execution is unavailable.")
+        try:
+            await self._transforms.batch_snapshot(access, project_id, transform_definition_id)
+        except (TransformNotFound, TransformExecutionError) as error:
+            raise DatasetValidationError("Transform Definition is unavailable.") from error
+        return await self._datasets.create_transform_definition(
+            access, project_id, dataset_id, name, transform_definition_id
+        )
 
     async def start_one(
         self,
@@ -147,24 +168,22 @@ class BatchExecutionModule:
     ) -> BatchRun:
         await self._authorize(access, project_id)
         definition = await self._datasets.load_definition(access, project_id, definition_id)
-        output_schema = await self._gateway.output_schema(
-            access, project_id, definition.plugin_id, definition.tool_name
-        )
+        snapshot = await self._definition_snapshot(access, project_id, definition)
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         record = next((item for item in dataset.records if item.id == record_id), None)
         if record is None:
             raise BatchRunNotFound
-        arguments = {
-            name: _select(record.value, pointer)
-            for name, pointer in definition.argument_mappings.items()
-        }
+        arguments = (
+            dict(record.value) if definition.transform_definition_id
+            else _arguments(record.value, definition)
+        )
         now = datetime.now(UTC)
         run = BatchRun(
             str(uuid4()),
             project_id,
             definition.id,
             BatchRunStatus.queued,
-            _snapshot(definition, output_schema),
+            snapshot,
             (ResultRecord(record.id, arguments),),
             now,
             now,
@@ -194,15 +213,17 @@ class BatchExecutionModule:
         """Execute a captured Dataset after its first record succeeds."""
         await self._authorize(access, project_id)
         definition = await self._datasets.load_definition(access, project_id, definition_id)
-        output_schema = await self._gateway.output_schema(
-            access, project_id, definition.plugin_id, definition.tool_name
-        )
+        snapshot = await self._definition_snapshot(access, project_id, definition)
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         if not dataset.records:
             raise BatchRunNotFound
         now = datetime.now(UTC)
         captured = tuple(
-            (record.id, _arguments(record.value, definition)) for record in dataset.records
+            (
+                record.id,
+                dict(record.value) if definition.transform_definition_id
+                else _arguments(record.value, definition),
+            ) for record in dataset.records
         )
         run = BatchRun(
             str(uuid4()),
@@ -210,7 +231,7 @@ class BatchExecutionModule:
             definition.id,
             BatchRunStatus.queued,
             {
-                **_snapshot(definition, output_schema),
+                **snapshot,
                 "maxConcurrency": self._max_concurrency,
                 "recordIds": [record_id for record_id, _ in captured],
             },
@@ -288,11 +309,22 @@ class BatchExecutionModule:
         self, access: ProjectAccess, project_id: str, run: BatchRun, record: ResultRecord
     ) -> ResultRecord:
         try:
+            if "transformDefinitionId" in run.definition_snapshot:
+                if self._transforms is None:
+                    raise ValueError("The Transform runner is unavailable.")
+                output = await self._transforms.execute_batch_record(
+                    access, project_id, run.definition_snapshot, record.input
+                )
+                return ResultRecord(record.dataset_record_id, record.input, output)
+            plugin_id = run.definition_snapshot.get("pluginId")
+            tool_name = run.definition_snapshot.get("toolName")
+            if not isinstance(plugin_id, str) or not isinstance(tool_name, str):
+                raise ValueError("The Batch Run has no MCP tool target.")
             result = await self._gateway.batch_call(
                 access,
                 project_id,
-                str(run.definition_snapshot["pluginId"]),
-                str(run.definition_snapshot["toolName"]),
+                plugin_id,
+                tool_name,
                 record.input,
             )
             if result.structured_content is None:
@@ -314,6 +346,8 @@ class BatchExecutionModule:
         arguments: Mapping[str, object],
     ) -> ResultRecord:
         try:
+            if definition.plugin_id is None or definition.tool_name is None:
+                raise ValueError("The Batch Definition has no MCP tool target.")
             result = await self._gateway.batch_call(
                 access, project_id, definition.plugin_id, definition.tool_name, arguments
             )
@@ -448,6 +482,29 @@ class BatchExecutionModule:
             await self._projects.load(access, project_id)
         except ProjectNotFound as error:
             raise BatchRunNotFound from error
+
+    async def _definition_snapshot(
+        self, access: ProjectAccess, project_id: str, definition: BatchDefinition
+    ) -> Mapping[str, object]:
+        if definition.transform_definition_id is not None:
+            if self._transforms is None:
+                raise BatchRunNotFound
+            try:
+                transform_snapshot = await self._transforms.batch_snapshot(
+                    access, project_id, definition.transform_definition_id
+                )
+            except TransformNotFound as error:
+                raise BatchRunNotFound from error
+            return {
+                "datasetId": definition.dataset_id,
+                **transform_snapshot,
+            }
+        if definition.plugin_id is None or definition.tool_name is None:
+            raise BatchRunNotFound
+        schema = await self._gateway.output_schema(
+            access, project_id, definition.plugin_id, definition.tool_name
+        )
+        return _snapshot(definition, schema)
 
 
 class MemoryBatchRunStore:
@@ -849,5 +906,8 @@ def create_postgres_batch_execution_module(
     projects: ProjectModule,
     datasets: DatasetModule,
     gateway: PluginGatewayModule,
+    transforms: TransformModule | None = None,
 ) -> BatchExecutionModule:
-    return BatchExecutionModule(projects, datasets, gateway, PostgresBatchRunStore(settings))
+    return BatchExecutionModule(
+        projects, datasets, gateway, PostgresBatchRunStore(settings), transforms=transforms
+    )

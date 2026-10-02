@@ -25,12 +25,12 @@ A durable, queryable collection of machine-scale outcomes produced by one Batch 
 _Avoid_: Artifact, chat transcript, plugin-owned database
 
 **Batch Run**:
-One bounded host-orchestrated execution of a Plugin tool over a Dataset or explicitly supplied collection of inputs. Agent-proposed execution requires approval; a directly authorized user action does not. It records its completion state and Result Set. A completed Batch Run is immutable and may be archived, rather than erased, from normal workspace views.
-_Avoid_: Plugin, Artifact, retry button, disposable job
+One bounded host-orchestrated execution of a Batch Definition over captured Dataset Records. It owns progress, initiator provenance, idempotency, and an immutable input and target snapshot independently of a browser or Agent Run. Agent-proposed execution requires approval; a directly authorized user action does not. Its completed Result Set is retained even when the Run is explicitly archived from normal workspace views.
+_Avoid_: Agent Run, Plugin job, Artifact, disposable job
 
 **Batch Definition**:
-A durable project-owned execution setup that maps Dataset values to the JSON arguments of one Plugin tool. It may be reused to start Batch Runs, but a Batch Run captures the definition it actually used.
-_Avoid_: Plugin protocol, run result, Artifact
+A durable Project-owned setup that targets either one catalogue-approved MCP tool or one Transform Definition for each Dataset Record. It may be reused to start Batch Runs, but each Run captures the definition and target it actually used.
+_Avoid_: Workflow, pipeline, Plugin protocol, run result
 
 **Binding**:
 A durable host-owned Project rule that maps an explicitly selected structured value to a declared argument of a target operation. Its mapping and execution policy are inspectable; it is not Plugin-owned code or an iframe-to-iframe connection.
@@ -71,14 +71,6 @@ _Avoid_: Spreadsheet, artifact, file
 **Dataset Record**:
 One host-identified JSON-object entry in a Dataset. A source key may be retained for user traceability but does not replace the host-issued ID.
 _Avoid_: Row, artifact, file
-
-**Batch Definition**:
-A durable Project-owned mapping from values in one Dataset Record to the ordinary JSON arguments of one catalogue-approved MCP tool. It is reusable configuration, not a Batch Run or a Plugin protocol.
-_Avoid_: Workflow, pipeline, plugin port
-
-**Batch Run**:
-One bounded execution of a Batch Definition over a captured Dataset selection. It owns progress, policy, initiator provenance, idempotency, and the immutable input snapshot independently of a browser or agent connection.
-_Avoid_: Agent Run, workflow, plugin job
 
 **Result Set**:
 The durable, queryable collection of outcomes produced by one Batch Run. It may be incomplete when one or more invocations fail.

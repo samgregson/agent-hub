@@ -23,8 +23,14 @@ interface BatchDefinition {
   datasetAvailable: boolean;
   id: string;
   name: string;
-  pluginId: string;
-  toolName: string;
+  pluginId: string | null;
+  toolName: string | null;
+  transformDefinitionId: string | null;
+}
+
+interface TransformDefinitionOption {
+  id: string;
+  name: string;
 }
 
 interface BatchRun {
@@ -76,6 +82,12 @@ export function DatasetCatalog({
   const [definitions, setDefinitions] = useState<BatchDefinition[] | null>(
     null,
   );
+  const [transformDefinitions, setTransformDefinitions] = useState<
+    TransformDefinitionOption[]
+  >([]);
+  const [definitionTarget, setDefinitionTarget] = useState<
+    "plugin" | "transform"
+  >("plugin");
   const [error, setError] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [runs, setRuns] = useState<BatchRun[] | null>(null);
@@ -84,10 +96,13 @@ export function DatasetCatalog({
   const [runOrder, setRunOrder] = useState("newest");
   const [runStatus, setRunStatus] = useState("all");
   const [selectedRun, setSelectedRun] = useState<BatchRun | null>(null);
-  const [resultPage, setResultPage] = useState<(ResultPage & { runId: string }) | null>(null);
+  const [resultPage, setResultPage] = useState<
+    (ResultPage & { runId: string }) | null
+  >(null);
   const selectedRunId = selectedRun?.id;
   const selectedRunStatus = selectedRun?.status;
-  const visibleResults = resultPage?.runId === selectedRunId ? resultPage : null;
+  const visibleResults =
+    resultPage?.runId === selectedRunId ? resultPage : null;
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
 
   useEffect(() => {
@@ -112,6 +127,18 @@ export function DatasetCatalog({
           setError("This Project catalog is temporarily unavailable."),
       );
     if (mode === "definitions") {
+      void fetch(`/api/projects/${encodeURIComponent(projectId)}/transforms`, {
+        cache: "no-store",
+      })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("Transforms unavailable");
+          return response.json() as Promise<TransformDefinitionOption[]>;
+        })
+        .then((items) => active && setTransformDefinitions(items))
+        .catch(
+          () =>
+            active && setError("Transform Definitions could not be loaded."),
+        );
       void fetch(`/api/projects/${encodeURIComponent(projectId)}/datasets`, {
         cache: "no-store",
       })
@@ -156,17 +183,23 @@ export function DatasetCatalog({
   }, [mode, projectId, runDefinition, runOrder, runStatus]);
 
   useEffect(() => {
-    if (!selectedRun || !["queued", "running"].includes(selectedRun.status)) return;
+    if (!selectedRun || !["queued", "running"].includes(selectedRun.status))
+      return;
     const interval = window.setInterval(() => {
       void fetch(
         `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRun.id)}`,
         { cache: "no-store" },
       )
-        .then((response) => response.ok ? response.json() as Promise<BatchRun> : null)
+        .then((response) =>
+          response.ok ? (response.json() as Promise<BatchRun>) : null,
+        )
         .then((run) => {
           if (!run) return;
           setSelectedRun(run);
-          setRuns((current) => current?.map((item) => item.id === run.id ? run : item) ?? []);
+          setRuns(
+            (current) =>
+              current?.map((item) => (item.id === run.id ? run : item)) ?? [],
+          );
         });
     }, 750);
     return () => window.clearInterval(interval);
@@ -189,7 +222,9 @@ export function DatasetCatalog({
       .catch(() => {
         if (active) setError("Result Set could not be loaded.");
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [projectId, selectedRunId, selectedRunStatus]);
 
   async function loadMoreResults() {
@@ -203,11 +238,15 @@ export function DatasetCatalog({
       return;
     }
     const page = (await response.json()) as ResultPage;
-    setResultPage((current) => current?.runId === selectedRun.id ? {
-      ...page,
-      items: [...current.items, ...page.items],
-      runId: selectedRun.id,
-    } : { ...page, runId: selectedRun.id });
+    setResultPage((current) =>
+      current?.runId === selectedRun.id
+        ? {
+            ...page,
+            items: [...current.items, ...page.items],
+            runId: selectedRun.id,
+          }
+        : { ...page, runId: selectedRun.id },
+    );
   }
 
   async function createDataset(event: FormEvent<HTMLFormElement>) {
@@ -263,13 +302,23 @@ export function DatasetCatalog({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            argumentMappings: JSON.parse(String(form.get("argumentMappings"))),
-            datasetId: form.get("datasetId"),
-            name: form.get("name"),
-            pluginId: form.get("pluginId"),
-            toolName: form.get("toolName"),
-          }),
+          body: JSON.stringify(
+            definitionTarget === "transform"
+              ? {
+                  datasetId: form.get("datasetId"),
+                  name: form.get("name"),
+                  transformDefinitionId: form.get("transformDefinitionId"),
+                }
+              : {
+                  argumentMappings: JSON.parse(
+                    String(form.get("argumentMappings")),
+                  ),
+                  datasetId: form.get("datasetId"),
+                  name: form.get("name"),
+                  pluginId: form.get("pluginId"),
+                  toolName: form.get("toolName"),
+                },
+          ),
         },
       );
       if (!response.ok)
@@ -505,28 +554,58 @@ export function DatasetCatalog({
                   ))}
                 </select>
               </Field>
-              <Field label="Plugin ID">
-                <input
-                  defaultValue="reference-calculation"
-                  name="pluginId"
-                  required
-                />
+              <Field label="Execution target">
+                <select
+                  onChange={(event) =>
+                    setDefinitionTarget(
+                      event.target.value as "plugin" | "transform",
+                    )
+                  }
+                  value={definitionTarget}
+                >
+                  <option value="plugin">MCP tool</option>
+                  <option value="transform">Transform Definition</option>
+                </select>
               </Field>
-              <Field label="Tool name">
-                <input
-                  defaultValue="calculate_cantilever_tip_load"
-                  name="toolName"
-                  required
-                />
-              </Field>
-              <Field label="Argument mappings (JSON object)">
-                <textarea
-                  defaultValue={'{"length_m":"/length","tip_load_kn":"/load"}'}
-                  name="argumentMappings"
-                  required
-                  rows={4}
-                />
-              </Field>
+              {definitionTarget === "transform" ? (
+                <Field label="Transform Definition">
+                  <select name="transformDefinitionId" required>
+                    <option value="">Choose a Transform…</option>
+                    {transformDefinitions.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              ) : (
+                <>
+                  <Field label="Plugin ID">
+                    <input
+                      defaultValue="reference-calculation"
+                      name="pluginId"
+                      required
+                    />
+                  </Field>
+                  <Field label="Tool name">
+                    <input
+                      defaultValue="calculate_cantilever_tip_load"
+                      name="toolName"
+                      required
+                    />
+                  </Field>
+                  <Field label="Argument mappings (JSON object)">
+                    <textarea
+                      defaultValue={
+                        '{"length_m":"/length","tip_load_kn":"/load"}'
+                      }
+                      name="argumentMappings"
+                      required
+                      rows={4}
+                    />
+                  </Field>
+                </>
+              )}
               <div className={styles.formActions}>
                 <Button onClick={() => setIsAdding(false)} type="button">
                   Cancel
@@ -574,7 +653,14 @@ export function DatasetCatalog({
                     </select>
                   </>
                 }
-                details={`${displayTool(definition.pluginId, definition.toolName)}${definition.datasetAvailable ? "" : " · Dataset unavailable"}`}
+                details={`${
+                  definition.transformDefinitionId
+                    ? `Transform · ${transformDefinitions.find((item) => item.id === definition.transformDefinitionId)?.name ?? definition.transformDefinitionId.slice(0, 8)}`
+                    : displayTool(
+                        definition.pluginId ?? "",
+                        definition.toolName ?? "",
+                      )
+                }${definition.datasetAvailable ? "" : " · Dataset unavailable"}`}
                 id={`batch-definition-${definition.id}`}
                 key={definition.id}
                 title={definition.name}
@@ -630,9 +716,7 @@ export function DatasetCatalog({
                 {runs.map((run) => (
                   <CollectionItem
                     actions={
-                      <Button
-                        onClick={() => void archiveRun(run)}
-                      >
+                      <Button onClick={() => void archiveRun(run)}>
                         Archive run
                       </Button>
                     }
@@ -658,7 +742,13 @@ export function DatasetCatalog({
             <section aria-label="Batch Run results" className={styles.detail}>
               <h2>Batch Run results</h2>
               <p>{runSummary(selectedRun)}</p>
-              {visibleResults ? <p>{visibleResults.summary.totalCount} results · {visibleResults.summary.succeededCount} succeeded · {visibleResults.summary.failedCount} failed</p> : null}
+              {visibleResults ? (
+                <p>
+                  {visibleResults.summary.totalCount} results ·{" "}
+                  {visibleResults.summary.succeededCount} succeeded ·{" "}
+                  {visibleResults.summary.failedCount} failed
+                </p>
+              ) : null}
               {visibleResults?.items.map((record) => (
                 <article className={styles.record} key={record.datasetRecordId}>
                   <strong>Record {record.datasetRecordId.slice(0, 8)}</strong>
@@ -680,7 +770,9 @@ export function DatasetCatalog({
                 </article>
               ))}
               {visibleResults?.nextOffset != null ? (
-                <Button onClick={() => void loadMoreResults()}>Load more results</Button>
+                <Button onClick={() => void loadMoreResults()}>
+                  Load more results
+                </Button>
               ) : null}
             </section>
           ) : null}

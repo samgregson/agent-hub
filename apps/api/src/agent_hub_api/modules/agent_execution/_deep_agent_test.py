@@ -179,6 +179,8 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "create_project_batch_definition" in captured["interrupt_on"]
     assert "start_project_batch_run" in captured["interrupt_on"]
     assert "start_project_batch_run" in names
+    assert "create_project_transform_batch_definition" in captured["interrupt_on"]
+    assert "create_project_transform_batch_definition" in names
     assert {"discover_project_transforms", "load_project_transform"} <= names
     assert "create_project_transform" in captured["interrupt_on"]
     assert "update_project_transform" in captured["interrupt_on"]
@@ -243,8 +245,8 @@ async def test_agent_loads_a_batch_definition_on_demand(
         + definition.id
         + '", "name": "Beam checks", "datasetId": "'
         + dataset.id
-        + '", "pluginId": "reference-calculation", "toolName": "calculate_beam", '
-        '"argumentMappings": {"length_m": "/length"}}'
+            + '", "pluginId": "reference-calculation", "toolName": "calculate_beam", '
+            '"transformDefinitionId": null, "argumentMappings": {"length_m": "/length"}}'
     )
 
 
@@ -270,6 +272,30 @@ async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
     assert result == "Started Batch Run run-1."
     assert batches.submission == ("project-1", "definition-1")
     assert batches.enqueued_run_id == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_agent_can_propose_transform_batch_definition_after_approval() -> None:
+    class Batches:
+        async def define_transform_batch(
+            self, _access: object, project_id: str, dataset_id: str,
+            name: str, transform_definition_id: str,
+        ) -> object:
+            assert (project_id, dataset_id, name, transform_definition_id) == (
+                "project-1", "dataset-1", "Double loads", "transform-1"
+            )
+            return SimpleNamespace(id="definition-1", name=name)
+
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._batch_tools(cast(Any, Batches()), "project-1", "sam")
+    }
+    result = await tools["create_project_transform_batch_definition"].ainvoke({
+        "dataset_id": "dataset-1", "name": "Double loads",
+        "transform_definition_id": "transform-1",
+    })
+
+    assert result == "Created Batch Definition Double loads (definition-1)."
 
 
 @pytest.mark.asyncio

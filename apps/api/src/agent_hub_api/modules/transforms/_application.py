@@ -221,6 +221,63 @@ class TransformModule:
             raise TransformValidationError("Transform output does not match its output schema.")
         return TransformPreview(output, runtime, definition.source_hash)
 
+    async def batch_snapshot(
+        self, access: ProjectAccess, project_id: str, definition_id: str
+    ) -> Mapping[str, object]:
+        """Capture the reviewed Transform contract for a durable per-record Batch Run."""
+        definition = await self.load(access, project_id, definition_id)
+        if self._runner is None:
+            raise TransformExecutionError("runner_unavailable")
+        identity = await self._runner.identity()
+        if (
+            definition.runtime != identity.runtime
+            or definition.package_hash != identity.package_hash
+        ):
+            raise TransformExecutionError("runtime_mismatch")
+        return {
+            "transformDefinitionId": definition.id,
+            "name": definition.name,
+            "revision": definition.revision,
+            "source": definition.source,
+            "sourceHash": definition.source_hash,
+            "inputSelectors": dict(definition.input_selectors),
+            "outputSchema": dict(definition.output_schema),
+            "runtime": identity.runtime,
+            "packageHash": identity.package_hash,
+        }
+
+    async def execute_batch_record(
+        self, access: ProjectAccess, project_id: str,
+        snapshot: Mapping[str, object], record: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        """Run one captured record without creating a second Transform Run."""
+        await self._authorize(access, project_id)
+        if self._runner is None:
+            raise TransformExecutionError("runner_unavailable")
+        identity = await self._runner.identity()
+        if (
+            snapshot["runtime"] != identity.runtime
+            or snapshot["packageHash"] != identity.package_hash
+        ):
+            raise TransformExecutionError("runtime_mismatch")
+        selectors = cast(Mapping[str, str], snapshot["inputSelectors"])
+        inputs = {name: _select(record, pointer) for name, pointer in selectors.items()}
+        if len(_canonical(inputs)) > 64_000:
+            raise TransformValidationError("Transform inputs exceed 64000 bytes.")
+        output, runtime = await self._runner.execute(
+            str(snapshot["source"]), inputs, {}
+        )
+        if runtime != identity.runtime:
+            raise TransformExecutionError("runtime_mismatch")
+        schema = cast(Mapping[str, object], snapshot["outputSchema"])
+        if not Draft202012Validator(schema).is_valid(output):
+            raise TransformValidationError("Transform output does not match its output schema.")
+        if not isinstance(output, dict) or not all(isinstance(key, str) for key in output):
+            raise TransformValidationError("Per-record Transform output must be a JSON object.")
+        if len(_canonical(output)) > 128_000:
+            raise TransformExecutionError("output_limit")
+        return output
+
     async def start_run(
         self, access: ProjectAccess, project_id: str, definition_id: str,
         record: Mapping[str, object], parameters: Mapping[str, object],
