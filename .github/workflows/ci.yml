@@ -71,10 +71,10 @@ jobs:
       - run: uv sync --frozen --all-packages
       - run: pnpm --filter @agent-hub/web exec playwright install --with-deps chromium
       - run: make migrate
-      - name: Verify PostgreSQL Run reconciliation
+      - name: Verify PostgreSQL Run reconciliation and Artifact audit
         env:
           AGENT_HUB_ISOLATED_TEST_DATABASE_URL: postgresql://agent_hub:agent_hub@localhost:5432/agent_hub
-        run: uv run --frozen --package agent-hub-api pytest -q apps/api/src/agent_hub_api/modules/agent_execution/_postgres_integration_test.py
+        run: uv run --frozen --package agent-hub-api pytest -q apps/api/src/agent_hub_api/modules/agent_execution/_postgres_integration_test.py apps/api/src/agent_hub_api/modules/artifacts/_postgres_integration_test.py
       - name: Start API
         run: |
           uv run --frozen --package agent-hub-api uvicorn agent_hub_api.main:app --host 127.0.0.1 --port 8000 --no-access-log > /tmp/agent-hub-api.log 2>&1 &
@@ -88,6 +88,8 @@ jobs:
           exit 1
       - run: pnpm --filter @agent-hub/web test:e2e
       - name: Restore application and checkpoint data
+        env:
+          AGENT_HUB_ALLOW_RESTORE_DRILL: "1"
         run: |
           uv run --frozen --package agent-hub-api python scripts/foundation-restore-drill.py seed
           mkdir -p "$RUNNER_TEMP/agent-hub-restore"

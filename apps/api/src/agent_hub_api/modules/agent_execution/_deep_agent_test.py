@@ -146,7 +146,14 @@ async def test_agent_can_discover_and_load_project_artifacts(
     await runner._agent_for("project-1", thread_id="thread-1", run_id="run-1", subject="sam")
 
     names = {registered.name for registered in captured["tools"]}
-    assert {"discover_project_artifacts", "load_project_artifact"} <= names
+    assert {
+        "discover_project_artifacts",
+        "load_project_artifact",
+        "create_project_artifact",
+        "edit_project_artifact",
+    } <= names
+    assert "create_project_artifact" in captured["interrupt_on"]
+    assert "edit_project_artifact" in captured["interrupt_on"]
     assert "create_foundation_status_artifact" not in names
     assert "set_foundation_status_artifact_status" not in names
 

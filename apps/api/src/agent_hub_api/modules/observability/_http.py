@@ -11,6 +11,7 @@ from fastapi.responses import PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from agent_hub_api.modules.observability._metrics import MetricsRegistry
+from agent_hub_api.modules.observability._trace import begin_request_trace, end_request_trace
 
 logger = logging.getLogger("agent_hub_api.requests")
 logger.setLevel(logging.INFO)
@@ -32,6 +33,7 @@ class RequestLoggingMiddleware:
             return
 
         request_id = str(uuid4())
+        trace_token, span_id = begin_request_trace(request_id)
         scope.setdefault("state", {})["request_id"] = request_id
         started = monotonic()
         status_code = 500
@@ -54,6 +56,15 @@ class RequestLoggingMiddleware:
             duration_seconds = monotonic() - started
             if self.metrics is not None and route_path != "/metrics":
                 self.metrics.observe(scope["method"], route_path, status_code, duration_seconds)
+            end_request_trace(
+                trace_token,
+                request_id=request_id,
+                span_id=span_id,
+                route=route_path,
+                method=scope["method"],
+                status=status_code,
+                duration_seconds=duration_seconds,
+            )
             logger.info(
                 json.dumps(
                     {

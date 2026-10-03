@@ -178,7 +178,7 @@ class PostgresDeepAgentRunner:
         if has_artifact_context:
             assert artifacts is not None
             assert subject is not None
-            tools.extend(self._artifact_tools(artifacts, project_id, subject))
+            tools.extend(self._artifact_tools(artifacts, project_id, subject, thread_id, run_id))
         datasets = getattr(self, "_datasets", None)
         if datasets is not None and subject is not None:
             tools.extend(self._dataset_tools(datasets, project_id, subject))
@@ -196,6 +196,19 @@ class PostgresDeepAgentRunner:
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Run the harmless foundation approval test action?",
                     }
+                }
+            )
+        if has_artifact_context and thread_id is not None and run_id is not None:
+            interrupt_on.update(
+                {
+                    "create_project_artifact": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Create the proposed Project Artifact?",
+                    },
+                    "edit_project_artifact": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Apply the proposed Plugin edit to this Artifact?",
+                    },
                 }
             )
         if datasets is not None and subject is not None:
@@ -317,7 +330,13 @@ class PostgresDeepAgentRunner:
         return record
 
     @staticmethod
-    def _artifact_tools(artifacts: ArtifactModule, project_id: str, subject: str) -> list[BaseTool]:
+    def _artifact_tools(
+        artifacts: ArtifactModule,
+        project_id: str,
+        subject: str,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+    ) -> list[BaseTool]:
         @tool
         async def discover_project_artifacts() -> str:
             """List compact summaries of Artifacts in this Project on demand."""
@@ -342,7 +361,48 @@ class PostgresDeepAgentRunner:
             )
             return document.model_dump_json(by_alias=True)
 
-        return [discover_project_artifacts, load_project_artifact]
+        tools: list[BaseTool] = [discover_project_artifacts, load_project_artifact]
+        if thread_id is None or run_id is None:
+            return tools
+
+        access = ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id)
+
+        @tool
+        async def create_project_artifact(
+            plugin_id: str, tool_name: str, arguments_json: str
+        ) -> str:
+            """Create an Artifact with an enabled Plugin tool after user approval."""
+            document = await artifacts.create_from_plugin(
+                access,
+                project_id,
+                plugin_id=plugin_id,
+                tool_name=tool_name,
+                arguments=_artifact_arguments(arguments_json),
+            )
+            return (
+                f"Created Artifact {document.artifact.title} "
+                f"({document.artifact.id.root}, v{document.artifact.document_version})."
+            )
+
+        @tool
+        async def edit_project_artifact(
+            artifact_id: str, expected_version: int, tool_name: str, arguments_json: str
+        ) -> str:
+            """Apply a semantic Plugin edit to a current Artifact after user approval."""
+            document = await artifacts.apply_plugin_operation(
+                access,
+                project_id,
+                artifact_id,
+                expected_version=expected_version,
+                tool_name=tool_name,
+                arguments=_artifact_arguments(arguments_json),
+            )
+            return (
+                f"Updated Artifact {document.artifact.title} "
+                f"({document.artifact.id.root}, v{document.artifact.document_version})."
+            )
+
+        return [*tools, create_project_artifact, edit_project_artifact]
 
     @staticmethod
     def _dataset_tools(datasets: DatasetModule, project_id: str, subject: str) -> list[BaseTool]:
@@ -938,4 +998,16 @@ def _argument_mappings(value: str) -> dict[str, str]:
         isinstance(key, str) and isinstance(item, str) for key, item in parsed.items()
     ):
         raise ValueError("Argument mappings must map argument names to JSON Pointers.")
+    return parsed
+
+
+def _artifact_arguments(value: str) -> dict[str, object]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError("Plugin arguments must be a JSON object.") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("Plugin arguments must be a JSON object.")
+    if "document" in parsed:
+        raise ValueError("The current Artifact document is supplied by Agent Hub.")
     return parsed

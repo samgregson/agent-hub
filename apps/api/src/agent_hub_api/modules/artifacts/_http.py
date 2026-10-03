@@ -1,5 +1,4 @@
 from typing import Annotated
-from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict
@@ -21,6 +20,7 @@ from agent_hub_api.modules.identity import (
     IdentityUnavailable,
     RequestContext,
 )
+from agent_hub_api.modules.plugin_gateway import PluginCallLimitExceeded
 
 
 def create_artifact_router(identity: IdentityModule, artifacts: ArtifactModule) -> APIRouter:
@@ -114,6 +114,11 @@ def create_artifact_router(identity: IdentityModule, artifacts: ArtifactModule) 
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="A compatible Artifact App is unavailable",
             ) from error
+        except PluginCallLimitExceeded as error:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="The Plugin is busy; retry later.",
+            ) from error
         return Response(
             content=resource.html,
             media_type="text/html",
@@ -141,7 +146,7 @@ def create_artifact_router(identity: IdentityModule, artifacts: ArtifactModule) 
             return await artifacts.apply_app_operation(
                 ArtifactUserActionAccess(
                     subject=context.subject,
-                    user_action_id=str(uuid4()),
+                    user_action_id=context.request_id,
                 ),
                 project_id,
                 artifact_id,
@@ -157,6 +162,11 @@ def create_artifact_router(identity: IdentityModule, artifacts: ArtifactModule) 
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="The Artifact changed; reload before editing.",
+            ) from error
+        except PluginCallLimitExceeded as error:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="The Plugin is busy; retry later.",
             ) from error
         except (ArtifactAppUnavailable, ArtifactPluginReplacementInvalid) as error:
             raise HTTPException(

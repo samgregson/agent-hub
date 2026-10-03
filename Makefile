@@ -1,4 +1,4 @@
-.PHONY: acceptance architecture-check build contracts contracts-check dev down format format-check lint migrate setup test test-runner typecheck
+.PHONY: acceptance architecture-check build contracts contracts-check dev down format format-check lint migrate setup test test-fixture test-runner typecheck
 
 export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export npm_config_cache := $(CURDIR)/.cache/npm
@@ -42,6 +42,9 @@ typecheck:
 test:
 	$(PNPM) test
 
+test-fixture:
+	uv run --project plugins/test-fixture --frozen pytest -q plugins/test-fixture/src/agent_hub_foundation_fixture/_server_test.py
+
 test-runner:
 	docker build --target test -f apps/transform-runner/Dockerfile .
 
@@ -54,5 +57,6 @@ acceptance:
 	$(MAKE) lint
 	$(MAKE) typecheck
 	$(MAKE) test
+	$(MAKE) test-fixture
 	$(MAKE) test-runner
 	$(MAKE) build

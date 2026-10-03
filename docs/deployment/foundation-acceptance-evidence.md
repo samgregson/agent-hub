@@ -1,0 +1,22 @@
+# Foundation acceptance evidence
+
+This is the evidence map for `docs/architecture/foundation-acceptance.md`. The contract requires one deployed vertical slice; passing separate seam tests is useful evidence but does not by itself close that gate.
+
+| Item                                 | Automated evidence                                                                                                    | Remaining check                                                                                   |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| 1. Project and two Threads           | Project API tests; restore drill seeds and restores two Threads                                                       | Exercise through the deployed browser with platform identity                                      |
+| 2. Persisted Deep Agent Runs         | Agent Run lifecycle tests; PostgreSQL reconciliation drill; LangGraph checkpoint restore                              | Run multiple real Deep Agent invocations in each Thread and verify their checkpoints after reload |
+| 3. Streaming and approval UI         | AG-UI contract tests; browser approval, rejection, and reload journeys                                                | Observe text, tool calls/results, error, cancellation, and one approval in one deployed flow      |
+| 4. Shared Virtual Filesystem         | Project Files module tests and path boundary tests                                                                    | Verify both deployed Threads can read the same Project file, without host filesystem access       |
+| 5. Curated MCP tool and App          | Portable fixture MCP client test; fixture App browser test                                                            | Verify the deployed Plugin endpoint is reachable from the API                                     |
+| 6. Portable Artifact operations      | Fixture MCP client create/validate/edit test and browser renderer test                                                | Exercise these operations through the deployed gateway                                            |
+| 7. Saved Artifact and provenance     | Artifact Module tests; PostgreSQL restore drill verifies document, provenance, and audit record                       | Reopen through the deployed browser after reload                                                  |
+| 8. Second Thread discovers and edits | Deterministic two Thread Artifact flow test; Agent tool registration and approval policy tests                        | Execute the same flow through a real Deep Agent Run                                               |
+| 9. First Thread notices change       | Project change notice middleware test; stale browser view and explicit reload test                                    | Observe a later deployed Run in the first Thread                                                  |
+| 10. Standard MCP portability         | Fixture's ordinary FastMCP client test accepts an inline document and returns a complete replacement                  | None beyond the deployed Plugin version matching the tested image                                 |
+| 11. Explicit failure outcomes        | Stale edit, malformed MCP result, Project authorization, interrupted Run, unavailable Plugin, and request limit tests | Include failures in the deployed walkthrough                                                      |
+| 12. Deterministic tests for seams    | `make acceptance`, fixture client tests, PostgreSQL drills, and Playwright journeys                                   | Add one continuous deterministic browser/API flow spanning the preceding items                    |
+
+The CI browser job runs against a fresh PostgreSQL service. It also runs Run reconciliation, Artifact audit, and whole-database restore drills. The local acceptance target runs contracts, formatting, lint, type checks, unit tests, the fixture client test, the Transform Runner image test, and the production web build. Operational rules and dashboard files are under `ops/`.
+
+The deployed check requires a reachable Agent Hub environment with the fixture Plugin image and a model credential or a deterministic model adapter. The hosting platform supplies sign-in and ingress; Agent Hub's acceptance begins with the identity delivered to its private API.

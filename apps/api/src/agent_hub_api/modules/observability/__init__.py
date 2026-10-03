@@ -3,5 +3,11 @@ from agent_hub_api.modules.observability._http import (
     create_metrics_router,
 )
 from agent_hub_api.modules.observability._metrics import MetricsRegistry
+from agent_hub_api.modules.observability._trace import trace_plugin_operation
 
-__all__ = ["MetricsRegistry", "RequestLoggingMiddleware", "create_metrics_router"]
+__all__ = [
+    "MetricsRegistry",
+    "RequestLoggingMiddleware",
+    "create_metrics_router",
+    "trace_plugin_operation",
+]

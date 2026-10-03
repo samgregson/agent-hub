@@ -1,5 +1,7 @@
+import asyncio
 import json
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -9,6 +11,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 from pydantic import BaseModel, create_model
 
+from agent_hub_api.modules.observability import trace_plugin_operation
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule
 from agent_hub_api.settings import Settings
 
@@ -84,6 +87,33 @@ class PluginToolNotAllowed(Exception):
     """The Plugin did not declare the requested tool."""
 
 
+class PluginCallLimitExceeded(Exception):
+    """A Plugin's process-local rate or concurrent call budget is exhausted."""
+
+
+class _PluginCallBudget:
+    def __init__(self, *, max_concurrent: int, max_per_minute: int) -> None:
+        self._max_concurrent = max_concurrent
+        self._max_per_minute = max_per_minute
+        self._active = 0
+        self._starts: deque[float] = deque()
+        self._lock = asyncio.Lock()
+
+    async def reserve(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            while self._starts and now - self._starts[0] >= 60:
+                self._starts.popleft()
+            if self._active >= self._max_concurrent or len(self._starts) >= self._max_per_minute:
+                raise PluginCallLimitExceeded("The Plugin call limit was reached; retry later.")
+            self._active += 1
+            self._starts.append(now)
+
+    async def release(self) -> None:
+        async with self._lock:
+            self._active -= 1
+
+
 class PluginEnablementStore(Protocol):
     async def enabled_plugin_ids(self, project_id: str) -> Sequence[str]: ...
 
@@ -118,13 +148,23 @@ class PluginGatewayModule:
         clients: Mapping[str, PluginClient],
         *,
         discovery_cache_seconds: float = 300,
+        max_concurrent_calls: int = 8,
+        max_calls_per_minute: int = 120,
     ) -> None:
+        if max_concurrent_calls < 1 or max_calls_per_minute < 1:
+            raise ValueError("Plugin call budgets must be positive")
         self._projects = projects
         self._catalog = {manifest.id: manifest for manifest in catalog}
         self._enablements = enablements
         self._clients = dict(clients)
         self._discovery_cache_seconds = discovery_cache_seconds
         self._discoveries: dict[str, tuple[float, tuple[PluginDiscoveredTool, ...]]] = {}
+        self._budgets = {
+            plugin_id: _PluginCallBudget(
+                max_concurrent=max_concurrent_calls, max_per_minute=max_calls_per_minute
+            )
+            for plugin_id in self._catalog
+        }
 
     async def enable(self, access: ProjectAccess, project_id: str, plugin_id: str) -> None:
         await self._projects.load(access, project_id)
@@ -252,7 +292,13 @@ class PluginGatewayModule:
         client = self._clients.get(plugin_id)
         if client is None:
             raise PluginNotAvailable
-        return await client.read_ui_resource(resource_uri)
+        budget = self._budgets[plugin_id]
+        await budget.reserve()
+        try:
+            async with trace_plugin_operation("mcp.app_resource", plugin_id):
+                return await client.read_ui_resource(resource_uri)
+        finally:
+            await budget.release()
 
     async def _call_enabled(
         self,
@@ -271,7 +317,13 @@ class PluginGatewayModule:
         client = self._clients.get(plugin_id)
         if client is None:
             raise PluginNotAvailable
-        return await client.call_tool(tool_name, arguments)
+        budget = self._budgets[plugin_id]
+        await budget.reserve()
+        try:
+            async with trace_plugin_operation("mcp.tool", plugin_id):
+                return await client.call_tool(tool_name, arguments)
+        finally:
+            await budget.release()
 
     async def agent_tools(
         self, project_id: str, *, on_success: PluginResultRecorder | None = None
@@ -310,7 +362,15 @@ class PluginGatewayModule:
         if client is None:
             raise PluginNotAvailable
         allowed = {tool.name: tool for tool in manifest.tools}
-        discovered = tuple(tool for tool in await client.discover_tools() if tool.name in allowed)
+        budget = self._budgets[manifest.id]
+        await budget.reserve()
+        try:
+            async with trace_plugin_operation("mcp.discovery", manifest.id):
+                discovered = tuple(
+                    tool for tool in await client.discover_tools() if tool.name in allowed
+                )
+        finally:
+            await budget.release()
         self._discoveries[manifest.id] = (now, discovered)
         return discovered
 
@@ -394,9 +454,14 @@ def create_postgres_plugin_gateway(
         name="Foundation fixture",
         version="0.1.0",
         endpoint="http://foundation-fixture:8000/mcp",
-        tools=(PluginTool(name="foundation_status", read_only=True),),
+        tools=(
+            PluginTool(name="foundation_status", read_only=True),
+            PluginTool(name="create_status_artifact", read_only=False, agent_visible=False),
+            PluginTool(name="validate_status_artifact", read_only=True, agent_visible=False),
+            PluginTool(name="set_status_artifact_status", read_only=False, agent_visible=False),
+        ),
         app_resource_uri="ui://agent-hub-foundation/status.html",
-        app_tool_names=(),
+        app_tool_names=("set_status_artifact_status",),
     )
     reference_calculation = PluginManifest(
         id="reference-calculation",
@@ -430,6 +495,8 @@ def create_postgres_plugin_gateway(
             ),
         },
         discovery_cache_seconds=settings.plugin_discovery_cache_seconds,
+        max_concurrent_calls=settings.plugin_max_concurrent_calls,
+        max_calls_per_minute=settings.plugin_max_calls_per_minute,
     )
 
 

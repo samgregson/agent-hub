@@ -1,15 +1,15 @@
 # Test fixture Plugin
 
 A deliberately small portable FastMCP 4 server used to verify Agent Hub's Plugin
-Gateway. It exposes one read-only `foundation_status` tool with concise text
-and structured output, plus a standards-compatible `ui://` MCP App resource.
-The App only verifies discovery and sandboxed rendering. It has no Artifact
-operations or domain/calculation behaviour; the separate reference-calculation
-Plugin is the teaching example.
+Gateway. It exposes a read-only `foundation_status` tool, tools to create,
+validate, and edit a status Artifact Document, and a standards-compatible
+`ui://` MCP App resource. The App renders the current document's status.
+The separate reference-calculation Plugin remains the calculation example.
 
-It has no Agent Hub-specific inputs or persistence, so it remains useful in a
-generic MCP client. Clients without MCP Apps support still receive the normal
-tool result.
+Its tools accept and return inline JSON, with no Agent Hub-specific inputs or
+persistence. Clients without MCP Apps support still receive ordinary tool
+results. Agent Hub supplies identity, provenance, version checks, and Project
+persistence when the same tools are used through its Artifact Module.
 
 The server runs over Streamable HTTP at `/mcp`; it does not use Agent Hub's API
 or database. Its optional app is a static resource packaged into the same

@@ -9,6 +9,7 @@ from psycopg.rows import dict_row
 
 from agent_hub_api.contracts import ArtifactDocument, ArtifactProvenanceActor
 from agent_hub_api.modules.plugin_gateway import (
+    PluginCallLimitExceeded,
     PluginSelection,
     PluginToolResult,
     PluginUiResource,
@@ -121,7 +122,7 @@ class ArtifactStore(Protocol):
         self, project_id: str, artifact_id: str, document: ArtifactDocument
     ) -> ArtifactRecord | None: ...
 
-    async def delete(self, project_id: str, artifact_id: str) -> bool: ...
+    async def delete(self, project_id: str, artifact_id: str, subject: str) -> bool: ...
 
 
 class ArtifactModule:
@@ -280,6 +281,8 @@ class ArtifactModule:
                 selection.manifest.id,
                 selection.manifest.app_resource_uri,
             )
+        except PluginCallLimitExceeded:
+            raise
         except Exception as error:
             raise ArtifactAppUnavailable from error
 
@@ -324,7 +327,7 @@ class ArtifactModule:
 
     async def delete(self, access: ArtifactAccess, project_id: str, artifact_id: str) -> None:
         await self._authorize(access, project_id)
-        if not await self._store.delete(project_id, artifact_id):
+        if not await self._store.delete(project_id, artifact_id, access.subject):
             raise ArtifactNotFound
 
     async def replace(
@@ -416,6 +419,14 @@ def _catalog_actor_values(actor: Any) -> tuple[str, str | None, str | None, str 
     )
 
 
+def _audit_actor(actor: ArtifactProvenanceActor) -> tuple[str, str]:
+    if actor.kind == "agentRun" and actor.run_id is not None:
+        return actor.kind, actor.run_id.root
+    if actor.kind == "userAction" and actor.user_action_id is not None:
+        return actor.kind, actor.user_action_id.root
+    raise ArtifactAuthorityError("Artifact provenance has no auditable actor.")
+
+
 def _draft_from_plugin_result(
     result: PluginToolResult, plugin_id: str, plugin_version: str
 ) -> ArtifactDraft:
@@ -481,7 +492,8 @@ class MemoryArtifactStore:
         self._records[key] = record
         return record
 
-    async def delete(self, project_id: str, artifact_id: str) -> bool:
+    async def delete(self, project_id: str, artifact_id: str, subject: str) -> bool:
+        del subject
         return self._records.pop((project_id, artifact_id), None) is not None
 
 
@@ -500,6 +512,34 @@ class PostgresArtifactStore:
             str(self._settings.database_url),
             connect_timeout=self._settings.database_connect_timeout_seconds,
             row_factory=dict_row,
+        )
+
+    @staticmethod
+    async def _append_audit(
+        connection: AsyncConnection[dict[str, object]],
+        *,
+        project_id: str,
+        artifact_id: str,
+        action: str,
+        document_version: int,
+        actor_kind: str,
+        actor_id: str,
+    ) -> None:
+        await connection.execute(
+            """
+            INSERT INTO artifact_audit_events
+                (id, project_id, artifact_id, action, document_version, actor_kind, actor_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                str(uuid4()),
+                project_id,
+                artifact_id,
+                action,
+                document_version,
+                actor_kind,
+                actor_id,
+            ),
         )
 
     async def create(self, record: ArtifactRecord) -> ArtifactRecord:
@@ -551,16 +591,26 @@ class PostgresArtifactStore:
                     *last_changed_by,
                 ),
             )
+            actor_kind, actor_id = _audit_actor(artifact.provenance.created_by)
+            await self._append_audit(
+                connection,
+                project_id=record.project_id,
+                artifact_id=artifact.id.root,
+                action="created",
+                document_version=artifact.document_version,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
+            )
         return record
 
-    async def delete(self, project_id: str, artifact_id: str) -> bool:
+    async def delete(self, project_id: str, artifact_id: str, subject: str) -> bool:
         connection = await self._connect()
         async with connection:
             cursor = await connection.execute(
                 """
                 DELETE FROM artifact_catalog
                 WHERE project_id = %s AND artifact_id = %s
-                RETURNING path
+                RETURNING path, document_version
                 """,
                 (project_id, artifact_id),
             )
@@ -572,6 +622,17 @@ class PostgresArtifactStore:
             await connection.execute(
                 "DELETE FROM project_files WHERE project_id = %s AND path = %s",
                 (project_id, path),
+            )
+            version = row["document_version"]
+            assert isinstance(version, int)
+            await self._append_audit(
+                connection,
+                project_id=project_id,
+                artifact_id=artifact_id,
+                action="deleted",
+                document_version=version,
+                actor_kind="subject",
+                actor_id=subject,
             )
             return True
 
@@ -655,6 +716,16 @@ class PostgresArtifactStore:
                     project_id,
                     path,
                 ),
+            )
+            actor_kind, actor_id = _audit_actor(artifact.provenance.last_changed_by)
+            await self._append_audit(
+                connection,
+                project_id=project_id,
+                artifact_id=artifact_id,
+                action="replaced",
+                document_version=artifact.document_version,
+                actor_kind=actor_kind,
+                actor_id=actor_id,
             )
         return ArtifactRecord(project_id, document)
 

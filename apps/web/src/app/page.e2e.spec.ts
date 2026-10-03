@@ -571,6 +571,89 @@ test("an Artifact App receives its saved tool result through the MCP App bridge"
   await expect(preview.locator("#result")).toHaveText("81.3 kN·m");
 });
 
+test("the foundation fixture App renders a portable status Artifact", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-22T00:00:00.000Z",
+    id: "project-fixture",
+    name: "Foundation",
+    updatedAt: "2026-09-22T00:00:00.000Z",
+  };
+  const artifactId = "artifact-fixture";
+  const artifact = {
+    artifact: {
+      documentVersion: 1,
+      id: artifactId,
+      plugin: { id: "foundation-fixture", version: "0.1.0" },
+      provenance: {
+        createdBy: { kind: "agentRun", runId: "run-a", threadId: "thread-a" },
+        lastChangedBy: {
+          kind: "agentRun",
+          runId: "run-a",
+          threadId: "thread-a",
+        },
+      },
+      relations: [],
+      schema: { id: "agent-hub.fixture.status", version: "1.0" },
+      title: "Bridge status",
+      type: "agent-hub.fixture.status",
+    },
+    payload: { status: "available" },
+  };
+  const app = readFileSync(
+    "../../plugins/test-fixture/app/foundation-status-view.html",
+    "utf8",
+  );
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({
+      json: {
+        artifacts: [
+          {
+            documentVersion: 1,
+            id: artifactId,
+            pluginId: "foundation-fixture",
+            pluginVersion: "0.1.0",
+            title: artifact.artifact.title,
+            type: artifact.artifact.type,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+    async (route) => {
+      await route.fulfill({ json: artifact });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}/app`,
+    async (route) => {
+      await route.fulfill({ body: app, contentType: "text/html" });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Work" }).click();
+  await page
+    .getByRole("button", { exact: true, name: "Bridge status" })
+    .click();
+  await expect(
+    page.frameLocator('iframe[title="Artifact App"]').locator("#status"),
+  ).toHaveText("available");
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 
