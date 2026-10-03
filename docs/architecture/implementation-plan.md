@@ -46,7 +46,7 @@ All slices belong to the [Agent Hub foundation milestone](https://github.com/sam
 - Add Project persistence/migrations and Project-scoped request context.
 - Implement Project create/list/load commands and authorization tests.
 - Build the top-level Project selector and project-scoped activity rail with placeholder Chats, Artifacts, Sources, and Plugins views.
-- Ensure the ingress/proxy configuration strips client-supplied identity headers.
+- Verify Agent Hub treats only the platform-supplied identity as authority and rejects missing production identity.
 
 **Acceptance:** two development subjects cannot access each other's Project by listing or guessing IDs; switching Project clears/restores scoped workspace selection; forged browser headers do not become authority.
 
@@ -170,13 +170,13 @@ Plugin direct Project storage access.
 
 **Work:**
 
-- Finalize production Docker images, migrations, startup/shutdown, health checks, backup/restore instructions, and Nginx integration contract.
+- Finalize production Docker images, migrations, startup/shutdown, health checks, and backup/restore instructions.
 - Add structured logging, metrics, trace correlation, redaction, audit records, and operational dashboards/alerts.
 - Exercise rate, concurrency, retry/idempotency, payload, and resource limits.
 - Run hostile MCP/UI security cases and restore/reconciliation drills.
 - Automate the complete `foundation-acceptance.md` scenario in CI and a deployed environment.
 
-**Acceptance:** every foundation acceptance item passes; a PostgreSQL backup restores application and checkpoint state; an API restart reconciles Runs; remote Plugin failure does not fail core readiness; logs/traces contain correlations but no test secrets or unredacted fixture payloads.
+**Acceptance:** every foundation acceptance item passes; a PostgreSQL backup restores application and checkpoint state; an API restart reconciles Runs; remote Plugin failure does not fail core readiness; logs/traces contain correlations but no test secrets or unredacted fixture payloads. Platform sign-in and ingress configuration are provided by the host and are outside this slice.
 
 ## Ticket conversion
 

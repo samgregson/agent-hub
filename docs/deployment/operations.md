@@ -1,12 +1,12 @@
 # Foundation operations
 
-This runbook applies to the hosted foundation described in [identity.md](identity.md). The platform provides sign-in and Nginx; Agent Hub serves the private API and web containers. Keep the API and PostgreSQL off public networks. Use `AGENT_HUB_ENVIRONMENT=production` and `AGENT_HUB_IDENTITY_MODE=trusted_header` for the API, and configure the same private API URL for Next.js.
+This runbook covers the Agent Hub API, web app, and database. The hosting platform owns sign-in and ingress. Keep the API and PostgreSQL off public networks. Use `AGENT_HUB_ENVIRONMENT=production` and `AGENT_HUB_IDENTITY_MODE=trusted_header` for the API, and configure the same private API URL for Next.js.
 
 ## Start and health
 
 Run database migrations (`alembic -c apps/api/alembic.ini upgrade head`) before routing traffic to a new API image. The current API image runs migrations before Uvicorn starts, so deploy one API replica at a time until migration coordination is externalized. The API startup reconciles unfinished Agent, Batch, and Transform Runs. A Run that was interrupted for approval remains available for a decision; abandoned running work receives an explicit failure.
 
-Probe `/health/live` to check that the API process responds and `/health/ready` to check its PostgreSQL connection. The web container exposes `/api/health/live` and `/api/health/ready`, with readiness forwarded to the API. A remote MCP server is optional and must not gate core readiness. Route traffic through the platform Nginx authentication boundary only after web and API readiness succeed. The ingress must overwrite `X-Agent-Hub-Subject` from the authenticated session as shown in `deploy/nginx/agent-hub.conf.template`.
+Probe `/health/live` to check that the API process responds and `/health/ready` to check its PostgreSQL connection. The web container exposes `/api/health/live` and `/api/health/ready`, with readiness forwarded to the API. A remote MCP server is optional and must not gate core readiness.
 
 On shutdown, stop accepting new requests, let in-flight requests finish within the hosting platform's grace period, then stop the API. The API closes its Deep Agent/checkpointer resources during application shutdown. A restart may turn an unfinished Run into an explicit abandoned failure; users can start a new Run from the persisted Thread.
 
@@ -29,10 +29,10 @@ pg_restore --host=restore-postgres --username=agent_hub \
   --dbname=agent_hub_restore --no-owner --exit-on-error agent-hub.dump
 ```
 
-Point a test API instance at the restored database, using the recorded image revision. Check `/health/ready`, list a known Project and its Threads and Artifacts through the authenticated web path, and resume or inspect a known checkpointed Thread. Check that a Run left active at backup time is reconciled on API startup. Verify the migration revision before attempting an upgrade. Keep the restore isolated until those checks pass. For production recovery, stop writes, restore into a new database, verify it, then switch the private API connection to the restored database and reopen ingress traffic.
+Point a test API instance at the restored database, using the recorded image revision. Check `/health/ready`, list a known Project and its Threads and Artifacts, and resume or inspect a known checkpointed Thread. Check that a Run left active at backup time is reconciled on API startup. Verify the migration revision before attempting an upgrade. Keep the restore isolated until those checks pass. For production recovery, stop writes, restore into a new database, verify it, then switch the private API connection to the restored database.
 
 ## Incident signals
 
 Alert when API or web readiness fails, migrations fail, PostgreSQL storage or connection capacity approaches its limit, Run failure rates rise, or MCP calls repeatedly time out. Review abandoned Runs after restarts, failed approval resumes, and failed backup or restore checks. Do not place model prompts, tool arguments, Artifact payloads, credentials, or raw identity headers in logs or metrics labels.
 
-The API emits one JSON access record per request with a server-generated `request_id`, route template, method, status, and elapsed milliseconds. It returns that identifier in `X-Request-Id` and uses it for application error context where a Project identity is resolved. Access records omit request paths, query strings, headers, and bodies. Run Uvicorn with `--no-access-log` so its default logger does not reintroduce raw paths and query strings. Preserve the structured fields when collecting logs; do not add payload capture at the ingress or collector.
+The API emits one JSON access record per request with a server-generated `request_id`, route template, method, status, and elapsed milliseconds. It returns that identifier in `X-Request-Id` and uses it for application error context where a Project identity is resolved. Access records omit request paths, query strings, headers, and bodies. Run Uvicorn with `--no-access-log` so its default logger does not reintroduce raw paths and query strings. Preserve the structured fields when collecting logs; do not add payload capture.
