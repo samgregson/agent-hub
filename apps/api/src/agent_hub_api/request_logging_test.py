@@ -64,3 +64,40 @@ async def test_correlation_header_does_not_buffer_streamed_response() -> None:
     assert response.status_code == 200
     assert response.text == "first\nsecond\n"
     assert str(UUID(response.headers["X-Request-Id"])) == response.headers["X-Request-Id"]
+
+
+@pytest.mark.asyncio
+async def test_rejected_oversized_request_keeps_a_correlation_id() -> None:
+    app = create_app(settings=Settings(environment="test", request_body_max_bytes=1_024))
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/projects", content=b"x" * 1_025)
+
+    assert response.status_code == 413
+    assert str(UUID(response.headers["X-Request-Id"])) == response.headers["X-Request-Id"]
+
+
+@pytest.mark.asyncio
+async def test_metrics_expose_route_counts_without_request_data() -> None:
+    async def ready(_: Settings) -> None:
+        return None
+
+    app = create_app(settings=Settings(environment="test"), readiness_check=ready)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.get(
+            "/health/ready?secret=do-not-export",
+            headers={"Authorization": "Bearer hidden"},
+        )
+        response = await client.get("/metrics")
+
+    assert response.status_code == 200
+    assert (
+        'agent_hub_http_requests_total{method="GET",route="/health/ready",status="200"} 1'
+        in response.text
+    )
+    assert (
+        "agent_hub_http_request_duration_seconds_bucket"
+        '{method="GET",route="/health/ready",status="200",le="+Inf"} 1' in response.text
+    )
+    assert "do-not-export" not in response.text
+    assert "hidden" not in response.text
+    assert 'route="/metrics"' not in response.text

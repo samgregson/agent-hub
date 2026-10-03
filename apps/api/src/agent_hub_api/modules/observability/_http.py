@@ -6,7 +6,11 @@ import sys
 from time import monotonic
 from uuid import uuid4
 
+from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from agent_hub_api.modules.observability._metrics import MetricsRegistry
 
 logger = logging.getLogger("agent_hub_api.requests")
 logger.setLevel(logging.INFO)
@@ -18,8 +22,9 @@ if not logger.handlers:
 
 
 class RequestLoggingMiddleware:
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, metrics: MetricsRegistry | None = None) -> None:
         self.app = app
+        self.metrics = metrics
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -46,6 +51,9 @@ class RequestLoggingMiddleware:
         finally:
             route = scope.get("route")
             route_path = getattr(route, "path", "unmatched")
+            duration_seconds = monotonic() - started
+            if self.metrics is not None and route_path != "/metrics":
+                self.metrics.observe(scope["method"], route_path, status_code, duration_seconds)
             logger.info(
                 json.dumps(
                     {
@@ -54,8 +62,18 @@ class RequestLoggingMiddleware:
                         "method": scope["method"],
                         "route": route_path,
                         "status": status_code,
-                        "duration_ms": round((monotonic() - started) * 1000),
+                        "duration_ms": round(duration_seconds * 1000),
                     },
                     separators=(",", ":"),
                 )
             )
+
+
+def create_metrics_router(metrics: MetricsRegistry) -> APIRouter:
+    router = APIRouter()
+
+    @router.get("/metrics", include_in_schema=False)
+    async def scrape() -> PlainTextResponse:
+        return PlainTextResponse(metrics.render(), media_type="text/plain; version=0.0.4")
+
+    return router

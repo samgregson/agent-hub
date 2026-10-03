@@ -43,16 +43,34 @@ class McpPluginClient:
             raise PluginTransportError(
                 "The Plugin server is unavailable or did not respond."
             ) from error
-        return tuple(
-            PluginDiscoveredTool(
-                name=tool.name,
-                description=tool.description or "",
-                read_only=bool(tool.annotations and tool.annotations.read_only_hint),
-                input_schema=dict(tool.input_schema),
-                output_schema=dict(tool.output_schema) if tool.output_schema else None,
+        try:
+            discovered = tuple(
+                PluginDiscoveredTool(
+                    name=tool.name,
+                    description=tool.description or "",
+                    read_only=bool(tool.annotations and tool.annotations.read_only_hint),
+                    input_schema=dict(tool.input_schema),
+                    output_schema=dict(tool.output_schema) if tool.output_schema else None,
+                )
+                for tool in result.tools
             )
-            for tool in result.tools
-        )
+            metadata = json.dumps(
+                [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "inputSchema": tool.input_schema,
+                        "outputSchema": tool.output_schema,
+                    }
+                    for tool in discovered
+                ],
+                separators=(",", ":"),
+            ).encode("utf-8")
+        except (AttributeError, TypeError, ValueError, UnicodeError) as error:
+            raise PluginTransportError("The Plugin returned malformed tool metadata.") from error
+        if len(metadata) > self.max_result_bytes:
+            raise PluginTransportError("The Plugin tool metadata exceeded the size limit.")
+        return discovered
 
     async def call_tool(self, tool_name: str, arguments: Mapping[str, object]) -> PluginToolResult:
         self._validate_endpoint()
@@ -68,17 +86,19 @@ class McpPluginClient:
                 "The Plugin server is unavailable or did not respond."
             ) from error
 
-        if response.is_error:
-            raise PluginTransportError("The Plugin rejected the tool call.")
-
-        content = tuple(_content_text(item) for item in response.content)
-        structured_content = _structured_content(response.structured_content)
-        serialized_size = len(
-            json.dumps(
-                {"content": content, "structuredContent": structured_content},
-                separators=(",", ":"),
-            ).encode("utf-8")
-        )
+        try:
+            if response.is_error:
+                raise PluginTransportError("The Plugin rejected the tool call.")
+            content = tuple(_content_text(item) for item in response.content)
+            structured_content = _structured_content(response.structured_content)
+            serialized_size = len(
+                json.dumps(
+                    {"content": content, "structuredContent": structured_content},
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            )
+        except (AttributeError, TypeError, ValueError, UnicodeError) as error:
+            raise PluginTransportError("The Plugin returned malformed tool content.") from error
         if serialized_size > self.max_result_bytes:
             raise PluginTransportError("The Plugin result exceeded the configured size limit.")
         return PluginToolResult(content=content, structured_content=structured_content)
@@ -105,9 +125,10 @@ class McpPluginClient:
                 "The Plugin App resource is unavailable or did not respond."
             ) from error
 
-        if len(response.contents) != 1:
+        contents = getattr(response, "contents", None)
+        if not isinstance(contents, list) or len(contents) != 1:
             raise PluginTransportError("The Plugin App resource returned an invalid response.")
-        content = response.contents[0]
+        content = contents[0]
         html = getattr(content, "text", None)
         if (
             getattr(content, "uri", None) != resource_uri

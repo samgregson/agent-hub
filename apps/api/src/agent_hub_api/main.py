@@ -25,7 +25,11 @@ from agent_hub_api.modules.batch_execution import (
 )
 from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
-from agent_hub_api.modules.observability import RequestLoggingMiddleware
+from agent_hub_api.modules.observability import (
+    MetricsRegistry,
+    RequestLoggingMiddleware,
+    create_metrics_router,
+)
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
     create_plugin_gateway_router,
@@ -40,6 +44,7 @@ from agent_hub_api.modules.projects import (
     create_postgres_project_module,
     create_project_router,
 )
+from agent_hub_api.modules.request_limits import RequestBodyLimitMiddleware
 from agent_hub_api.modules.transforms import (
     create_postgres_transform_module,
     create_transform_router,
@@ -118,10 +123,15 @@ def create_app(
         version="0.0.0",
         lifespan=lifespan,
     )
-    application.add_middleware(RequestLoggingMiddleware)
+    application.add_middleware(
+        RequestBodyLimitMiddleware, max_bytes=resolved_settings.request_body_max_bytes
+    )
+    metrics = MetricsRegistry()
+    application.add_middleware(RequestLoggingMiddleware, metrics=metrics)
     application.state.settings = resolved_settings
     application.state.readiness_check = readiness_check
     application.include_router(health_router)
+    application.include_router(create_metrics_router(metrics))
     application.include_router(
         create_project_router(resolved_identity, resolved_projects), prefix="/api"
     )
