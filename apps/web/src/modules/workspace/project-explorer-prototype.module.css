@@ -108,6 +108,12 @@
 .variantC {
   grid-template-columns: minmax(340px, 1.2fr) minmax(360px, 1fr);
 }
+.variantD {
+  display: grid;
+  grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
+  gap: 20px;
+  min-height: 560px;
+}
 .navigator,
 .overview,
 .detail {
@@ -115,6 +121,13 @@
 }
 .navigator {
   padding: 8px 0;
+}
+.navigatorNote {
+  max-width: 32ch;
+  margin: 20px 14px;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.5;
 }
 .collectionSwitcher {
   display: grid;
@@ -266,6 +279,126 @@
 .related .recordButton {
   margin: 7px 0;
 }
+.operationSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 48px;
+  padding: 22px 0;
+}
+.operationSummary div {
+  display: grid;
+  gap: 5px;
+}
+.operationSummary strong {
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+}
+.operationSummary span,
+.operationSummary button {
+  color: var(--text-strong);
+  font-size: var(--font-size-body);
+}
+.operationSummary button {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.previewPanel {
+  margin: 6px 0 0;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface-card);
+}
+.previewHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: start;
+}
+.previewHeading h3,
+.savedFlow h3 {
+  margin: 0;
+  font-size: 1.12rem;
+}
+.previewHeading p,
+.savedFlow p {
+  max-width: 65ch;
+  margin: 7px 0 0;
+}
+.previewHeading > span {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+  white-space: nowrap;
+}
+.previewControls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.6fr) repeat(3, minmax(125px, 1fr));
+  gap: 12px;
+  margin-top: 22px;
+}
+.previewControls label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+.previewControls select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+.previewOutput {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: baseline;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+.previewOutput span {
+  color: var(--text-subtle);
+}
+.savedFlow {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
+  gap: 24px;
+  align-items: start;
+  padding: 26px 0 22px;
+  border-bottom: 1px solid var(--line);
+}
+.flowPath {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.flowPath button {
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.flowPath button:hover {
+  border-color: var(--accent);
+}
+.flowPath span {
+  color: var(--text-muted);
+}
 .overview {
   display: grid;
   align-content: start;
@@ -411,7 +544,8 @@
   }
   .variantA,
   .variantB,
-  .variantC {
+  .variantC,
+  .variantD {
     display: block;
     min-height: 0;
   }
@@ -503,7 +637,7 @@
   }
   .variantBar {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
     margin-bottom: 18px;
     padding: 9px;
@@ -513,8 +647,35 @@
     margin: 0 0 3px;
   }
   .variantBar button {
-    min-height: 58px;
+    min-height: 48px;
     padding: 8px;
     font-size: 0.72rem;
+  }
+  .navigatorNote {
+    margin-bottom: 24px;
+  }
+  .previewHeading,
+  .savedFlow {
+    display: block;
+  }
+  .previewHeading > span {
+    display: block;
+    margin-top: 10px;
+  }
+  .previewControls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .previewControls label:first-child {
+    grid-column: 1 / -1;
+  }
+  .flowPath {
+    justify-content: flex-start;
+    margin-top: 16px;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1120px) {
+  .previewControls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

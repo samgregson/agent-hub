@@ -4,11 +4,12 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 
 import styles from "./project-explorer-prototype.module.css";
 
-// Throwaway issue #37 prototype: compare three navigation structures using the
+// Throwaway issue #37 prototype: compare navigation structures using the
 // same illustrative Project records. Nothing here reads or writes Project data.
-type Variant = "A" | "B" | "C";
+type Variant = "A" | "B" | "C" | "D";
 type Destination = "Chats" | "Work" | "Data" | "Sources" | "Plugins";
-type Collection = "Datasets" | "Transform Definitions" | "Batch Definitions";
+type Collection =
+  "Datasets" | "Transform Definitions" | "Batch Definitions" | "Operations";
 type RecordKey =
   | "dataset"
   | "transform"
@@ -17,8 +18,44 @@ type RecordKey =
   | "batchRun"
   | "result"
   | "artifact";
+type OperationKey = "transform" | "batch";
+type PreviewSource = "dataset" | "result" | "tool";
+type PreviewDefaults = {
+  source: PreviewSource;
+  filter: "all" | "high";
+  sort: "source" | "load";
+  limit: "all" | "2";
+};
+
+const sampleValues: Record<
+  PreviewSource,
+  { sourceKey: string; load: number }[]
+> = {
+  dataset: [
+    { sourceKey: "B-12", load: 9 },
+    { sourceKey: "B-13", load: 7.5 },
+    { sourceKey: "B-14", load: 9 },
+  ],
+  result: [
+    { sourceKey: "B-12", load: 9 },
+    { sourceKey: "B-13", load: 7.5 },
+    { sourceKey: "B-14", load: 9 },
+  ],
+  tool: [
+    { sourceKey: "MCP-01", load: 11 },
+    { sourceKey: "MCP-02", load: 8 },
+    { sourceKey: "MCP-03", load: 10 },
+  ],
+};
+
+const sourceNames: Record<PreviewSource, string> = {
+  dataset: "Load cases · Dataset",
+  result: "Beam checks · Result Set",
+  tool: "Recent check · retained MCP output",
+};
 
 const variants: { key: Variant; label: string }[] = [
+  { key: "D", label: "Operations" },
   { key: "A", label: "Collection switcher" },
   { key: "B", label: "Expandable outline" },
   { key: "C", label: "Overview index" },
@@ -36,6 +73,7 @@ const collections: Collection[] = [
   "Transform Definitions",
   "Batch Definitions",
 ];
+const operationCollections: Collection[] = ["Datasets", "Operations"];
 
 const records: Record<
   RecordKey,
@@ -84,6 +122,7 @@ const primaryRecords: Record<Collection, RecordKey[]> = {
   Datasets: ["dataset"],
   "Transform Definitions": ["transform"],
   "Batch Definitions": ["batch"],
+  Operations: ["transform", "batch"],
 };
 
 const collectionOf: Record<RecordKey, Collection> = {
@@ -104,9 +143,9 @@ const linked: Partial<Record<RecordKey, { title: string; keys: RecordKey[] }>> =
   };
 
 function readVariant(): Variant {
-  if (typeof window === "undefined") return "A";
+  if (typeof window === "undefined") return "D";
   const value = new URLSearchParams(window.location.search).get("variant");
-  return value === "B" || value === "C" ? value : "A";
+  return value === "A" || value === "B" || value === "C" ? value : "D";
 }
 
 function subscribeVariant(callback: () => void) {
@@ -122,14 +161,25 @@ export function ProjectExplorerPrototype() {
   const variant = useSyncExternalStore(
     subscribeVariant,
     readVariant,
-    () => "A",
+    () => "D",
   );
   const [destination, setDestination] = useState<Destination>("Data");
-  const [collection, setCollection] = useState<Collection>("Datasets");
-  const [selected, setSelected] = useState<RecordKey | null>("dataset");
+  const [collection, setCollection] = useState<Collection>("Operations");
+  const [selected, setSelected] = useState<RecordKey | null>("transform");
   const [inspectingFlow, setInspectingFlow] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
+  const [previewDefaults, setPreviewDefaults] = useState<
+    Record<OperationKey, PreviewDefaults>
+  >({
+    transform: {
+      source: "result",
+      filter: "high",
+      sort: "source",
+      limit: "2",
+    },
+    batch: { source: "dataset", filter: "all", sort: "source", limit: "2" },
+  });
 
   function chooseVariant(next: Variant) {
     const url = new URL(window.location.href);
@@ -137,7 +187,10 @@ export function ProjectExplorerPrototype() {
     window.history.replaceState(null, "", url);
     window.dispatchEvent(new Event("prototype-variant-changed"));
     setDestination("Data");
-    if (selected === "artifact") setSelected(primaryRecords[collection][0]);
+    const nextCollection = next === "D" ? "Operations" : "Datasets";
+    setCollection(nextCollection);
+    setSelected(primaryRecords[nextCollection][0]);
+    setInspectingFlow(false);
     setDrawerOpen(false);
     setMobileDetail(false);
   }
@@ -166,7 +219,9 @@ export function ProjectExplorerPrototype() {
     setDestination(next);
     if (next === "Work") setSelected("artifact");
     if (next === "Data" && selected === "artifact")
-      setSelected(primaryRecords[collection][0]);
+      setSelected(
+        primaryRecords[variant === "D" ? "Operations" : collection][0],
+      );
     setDrawerOpen(false);
     setMobileDetail(false);
     setInspectingFlow(false);
@@ -182,7 +237,14 @@ export function ProjectExplorerPrototype() {
 
   function openRecord(key: RecordKey) {
     setDestination(key === "artifact" ? "Work" : "Data");
-    if (key !== "artifact") setCollection(collectionOf[key]);
+    if (key !== "artifact")
+      setCollection(
+        variant === "D"
+          ? key === "dataset"
+            ? "Datasets"
+            : "Operations"
+          : collectionOf[key],
+      );
     setSelected(key);
     setInspectingFlow(false);
     setDrawerOpen(false);
@@ -249,18 +311,20 @@ export function ProjectExplorerPrototype() {
             </nav>
             {destination === "Data" ? (
               <div className={styles.drawerCollections}>
-                {collections.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => {
-                      chooseCollection(item);
-                      setDrawerOpen(false);
-                    }}
-                  >
-                    {item}
-                  </button>
-                ))}
+                {(variant === "D" ? operationCollections : collections).map(
+                  (item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => {
+                        chooseCollection(item);
+                        setDrawerOpen(false);
+                      }}
+                    >
+                      {item}
+                    </button>
+                  ),
+                )}
               </div>
             ) : null}
           </aside>
@@ -279,7 +343,7 @@ export function ProjectExplorerPrototype() {
           role="group"
           aria-label="Prototype variants"
         >
-          <strong>Compare Data layouts</strong>
+          <strong>Compare Data navigation</strong>
           {variants.map((item) => (
             <button
               key={item.key}
@@ -302,6 +366,68 @@ export function ProjectExplorerPrototype() {
                 </p>
               </div>
             </div>
+            {variant === "D" ? (
+              <div className={styles.variantD}>
+                <aside
+                  className={styles.navigator}
+                  aria-label="Data collections"
+                >
+                  <div className={styles.collectionSwitcher}>
+                    {operationCollections.map((item) => (
+                      <button
+                        key={item}
+                        type="button"
+                        aria-current={collection === item ? "page" : undefined}
+                        onClick={() => chooseCollection(item)}
+                      >
+                        {item}
+                        <span>{primaryRecords[item].length}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className={styles.recordList}>
+                    {primaryRecords[
+                      collection === "Operations" ? "Operations" : "Datasets"
+                    ].map((key) => (
+                      <RecordButton
+                        key={key}
+                        recordKey={key}
+                        selected={selected === key}
+                        onOpen={openRecord}
+                      />
+                    ))}
+                  </div>
+                  <p className={styles.navigatorNote}>
+                    Definitions share one place here. Their Runs and outputs
+                    remain separate records.
+                  </p>
+                </aside>
+                {selected === "transform" || selected === "batch" ? (
+                  <OperationDetail
+                    operation={selected}
+                    defaults={previewDefaults[selected]}
+                    onDefaults={(next) =>
+                      setPreviewDefaults((current) => ({
+                        ...current,
+                        [selected]: next,
+                      }))
+                    }
+                    onOpen={openRecord}
+                    onBack={() => setMobileDetail(false)}
+                  />
+                ) : (
+                  <Detail
+                    keyName={selected}
+                    current={current}
+                    inspectingFlow={inspectingFlow}
+                    onFlow={() => setInspectingFlow(true)}
+                    onCloseFlow={() => setInspectingFlow(false)}
+                    onOpen={openRecord}
+                    onBack={() => setMobileDetail(false)}
+                  />
+                )}
+              </div>
+            ) : null}
             {variant === "A" ? (
               <div className={styles.variantA}>
                 <aside
@@ -479,6 +605,249 @@ export function ProjectExplorerPrototype() {
         )}
       </section>
     </main>
+  );
+}
+
+function OperationDetail({
+  operation,
+  defaults,
+  onDefaults,
+  onOpen,
+  onBack,
+}: {
+  operation: OperationKey;
+  defaults: PreviewDefaults;
+  onDefaults: (next: PreviewDefaults) => void;
+  onOpen: (key: RecordKey) => void;
+  onBack: () => void;
+}) {
+  const [showFlow, setShowFlow] = useState(false);
+  const record = records[operation];
+  const preview = sampleValues[defaults.source]
+    .filter((item) => defaults.filter === "all" || item.load >= 9)
+    .sort((left, right) =>
+      defaults.sort === "load"
+        ? right.load - left.load ||
+          left.sourceKey.localeCompare(right.sourceKey)
+        : left.sourceKey.localeCompare(right.sourceKey),
+    )
+    .slice(0, defaults.limit === "2" ? 2 : undefined);
+  const run = operation === "transform" ? "transformRun" : "batchRun";
+
+  function update<K extends keyof PreviewDefaults>(
+    key: K,
+    value: PreviewDefaults[K],
+  ) {
+    onDefaults({ ...defaults, [key]: value });
+  }
+
+  return (
+    <section className={styles.detail} aria-label="Selected Data record">
+      <button className={styles.mobileBack} type="button" onClick={onBack}>
+        Back to Data
+      </button>
+      <div className={styles.detailHead}>
+        <div>
+          <span className={styles.kind}>{record.kind}</span>
+          <h2>{record.name}</h2>
+          <p>{record.detail}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowFlow((current) => !current)}
+        >
+          {showFlow ? "Close dataflow" : "Inspect dataflow"}
+        </button>
+      </div>
+      {showFlow ? (
+        <div className={styles.dataflow}>
+          <h3>Dataflow</h3>
+          <p>
+            Read-only lineage for the saved operation and its completed Run.
+            Preview settings do not change these edges.
+          </p>
+          <ol>
+            <li>
+              <button
+                type="button"
+                onClick={() =>
+                  onOpen(operation === "batch" ? "dataset" : "result")
+                }
+              >
+                {operation === "batch"
+                  ? records.dataset.name
+                  : records.result.name}
+              </button>
+              <span>→ captured input →</span>
+              <button type="button" onClick={() => onOpen(run)}>
+                {records[run].name}
+              </button>
+            </li>
+            {operation === "batch" ? (
+              <li>
+                <button type="button" onClick={() => onOpen(run)}>
+                  {records[run].name}
+                </button>
+                <span>→ per-record outcomes →</span>
+                <button type="button" onClick={() => onOpen("result")}>
+                  {records.result.name}
+                </button>
+              </li>
+            ) : null}
+          </ol>
+        </div>
+      ) : (
+        <>
+          <div className={styles.operationSummary}>
+            <div>
+              <strong>Target</strong>
+              <span>
+                {operation === "transform"
+                  ? "Python Transform"
+                  : "reference-calculation · MCP tool"}
+              </span>
+            </div>
+            <div>
+              <strong>Last durable Run</strong>
+              <button type="button" onClick={() => onOpen(run)}>
+                {records[run].name}
+              </button>
+            </div>
+          </div>
+          <section className={styles.previewPanel} aria-label="Input preview">
+            <div className={styles.previewHeading}>
+              <div>
+                <h3>Preview inputs</h3>
+                <p>
+                  These saved defaults help inspect possible input. They do not
+                  change a Run or downstream Binding.
+                </p>
+              </div>
+              <span>Illustrative values</span>
+            </div>
+            <div className={styles.previewControls}>
+              <label>
+                Source
+                <select
+                  aria-label="Preview source"
+                  value={defaults.source}
+                  onChange={(event) =>
+                    update("source", event.target.value as PreviewSource)
+                  }
+                >
+                  {Object.entries(sourceNames).map(([key, name]) => (
+                    <option key={key} value={key}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Filter
+                <select
+                  aria-label="Preview filter"
+                  value={defaults.filter}
+                  onChange={(event) =>
+                    update(
+                      "filter",
+                      event.target.value as PreviewDefaults["filter"],
+                    )
+                  }
+                >
+                  <option value="all">All values</option>
+                  <option value="high">Load ≥ 9</option>
+                </select>
+              </label>
+              <label>
+                Sort
+                <select
+                  aria-label="Preview sort"
+                  value={defaults.sort}
+                  onChange={(event) =>
+                    update(
+                      "sort",
+                      event.target.value as PreviewDefaults["sort"],
+                    )
+                  }
+                >
+                  <option value="source">Source key</option>
+                  <option value="load">Highest load</option>
+                </select>
+              </label>
+              <label>
+                Show
+                <select
+                  aria-label="Preview limit"
+                  value={defaults.limit}
+                  onChange={(event) =>
+                    update(
+                      "limit",
+                      event.target.value as PreviewDefaults["limit"],
+                    )
+                  }
+                >
+                  <option value="2">Top 2</option>
+                  <option value="all">All</option>
+                </select>
+              </label>
+            </div>
+            <div className={styles.previewOutput} aria-live="polite">
+              <strong>{preview.length} preview values</strong>
+              <span>
+                {preview.length
+                  ? preview.map((item) => item.sourceKey).join(", ")
+                  : "No values match these defaults."}
+              </span>
+            </div>
+          </section>
+          <section
+            className={styles.savedFlow}
+            aria-label="Saved operation flow"
+          >
+            <div>
+              <h3>Durable execution</h3>
+              <p>
+                The Run captures its explicitly selected input. Downstream steps
+                use their own Bindings and retained outputs.
+              </p>
+            </div>
+            <div className={styles.flowPath}>
+              <button
+                type="button"
+                onClick={() =>
+                  onOpen(operation === "batch" ? "dataset" : "result")
+                }
+              >
+                {operation === "batch" ? "Load cases" : "Results for BR-204"}
+              </button>
+              <span aria-hidden="true">→</span>
+              <button type="button" onClick={() => onOpen(run)}>
+                {records[run].name}
+              </button>
+              {operation === "batch" ? (
+                <>
+                  <span aria-hidden="true">→</span>
+                  <button type="button" onClick={() => onOpen("result")}>
+                    Result Set
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </section>
+          <div className={styles.related}>
+            <h3>Runs and results</h3>
+            <RecordButton recordKey={run} selected={false} onOpen={onOpen} />
+            {operation === "batch" ? (
+              <RecordButton
+                recordKey="result"
+                selected={false}
+                onOpen={onOpen}
+              />
+            ) : null}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -661,8 +1030,8 @@ function Dataflow({
   onOpen: (key: RecordKey) => void;
 }) {
   const edges: { from: RecordKey; to: RecordKey; type: string }[] = [
-    { from: "dataset", to: "transform", type: "collection input" },
-    { from: "transform", to: "transformRun", type: "one execution" },
+    { from: "result", to: "transformRun", type: "captured input" },
+    { from: "transform", to: "transformRun", type: "definition used" },
     { from: "dataset", to: "batch", type: "collection input" },
     { from: "batch", to: "batchRun", type: "one execution" },
     { from: "batchRun", to: "result", type: "per-record outcomes" },
@@ -676,17 +1045,19 @@ function Dataflow({
         Select a record to inspect it.
       </p>
       <ol>
-        {edges.map((edge) => (
-          <li key={`${edge.from}-${edge.to}`}>
-            <button type="button" onClick={() => onOpen(edge.from)}>
-              {records[edge.from].name}
-            </button>
-            <span>→ {edge.type} →</span>
-            <button type="button" onClick={() => onOpen(edge.to)}>
-              {records[edge.to].name}
-            </button>
-          </li>
-        ))}
+        {edges
+          .filter((edge) => edge.from === selected || edge.to === selected)
+          .map((edge) => (
+            <li key={`${edge.from}-${edge.to}`}>
+              <button type="button" onClick={() => onOpen(edge.from)}>
+                {records[edge.from].name}
+              </button>
+              <span>→ {edge.type} →</span>
+              <button type="button" onClick={() => onOpen(edge.to)}>
+                {records[edge.to].name}
+              </button>
+            </li>
+          ))}
       </ol>
     </div>
   );
