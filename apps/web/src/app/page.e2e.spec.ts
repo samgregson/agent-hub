@@ -21,7 +21,12 @@ test("Plugins are available through the browser-facing Project API", async ({
       enabled: false,
       id: "foundation-fixture",
       name: "Foundation fixture",
-      tools: [{ name: "foundation_status", readOnly: true }],
+      tools: [
+        { name: "foundation_status", readOnly: true },
+        { name: "create_status_artifact", readOnly: false },
+        { name: "validate_status_artifact", readOnly: true },
+        { name: "set_status_artifact_status", readOnly: false },
+      ],
       version: "0.1.0",
     },
     {

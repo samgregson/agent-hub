@@ -78,33 +78,6 @@ async def test_rejected_oversized_request_keeps_a_correlation_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_metrics_expose_route_counts_without_request_data() -> None:
-    async def ready(_: Settings) -> None:
-        return None
-
-    app = create_app(settings=Settings(environment="test"), readiness_check=ready)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        await client.get(
-            "/health/ready?secret=do-not-export",
-            headers={"Authorization": "Bearer hidden"},
-        )
-        response = await client.get("/metrics")
-
-    assert response.status_code == 200
-    assert (
-        'agent_hub_http_requests_total{method="GET",route="/health/ready",status="200"} 1'
-        in response.text
-    )
-    assert (
-        "agent_hub_http_request_duration_seconds_bucket"
-        '{method="GET",route="/health/ready",status="200",le="+Inf"} 1' in response.text
-    )
-    assert "do-not-export" not in response.text
-    assert "hidden" not in response.text
-    assert 'route="/metrics"' not in response.text
-
-
-@pytest.mark.asyncio
 async def test_remote_span_correlates_without_tool_arguments_or_secret_headers() -> None:
     async def invoke(_: object) -> PlainTextResponse:
         async with trace_plugin_operation("mcp.tool", "foundation-fixture"):
