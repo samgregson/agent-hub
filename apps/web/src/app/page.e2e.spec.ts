@@ -399,7 +399,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
     updatedAt: "2026-09-21T00:00:00.000Z",
   };
   const artifactId = "artifact-123";
-  let documentRequests = 0;
+  let changedInAnotherThread = false;
   const artifactDocument = (documentVersion: number, threadId: string) => ({
     artifact: {
       documentVersion,
@@ -445,12 +445,10 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   await page.route(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
     async (route) => {
-      documentRequests += 1;
       await route.fulfill({
-        json:
-          documentRequests <= 2
-            ? artifactDocument(1, "thread-a")
-            : artifactDocument(2, "thread-b"),
+        json: changedInAnotherThread
+          ? artifactDocument(2, "thread-b")
+          : artifactDocument(1, "thread-a"),
       });
     },
   );
@@ -472,6 +470,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   const changedDocumentResponse = page.waitForResponse(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
   );
+  changedInAnotherThread = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await changedDocumentResponse;
 

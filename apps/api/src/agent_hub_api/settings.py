@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     plugin_max_concurrent_calls: int = Field(default=8, ge=1, le=100)
     plugin_max_calls_per_minute: int = Field(default=120, ge=1, le=10_000)
     plugin_discovery_cache_seconds: float = Field(default=300, ge=1, le=3600)
+    foundation_fixture_url: str = "http://foundation-fixture:8000/mcp"
     transform_runner_url: str | None = None
 
     @field_validator("openai_api_key", mode="before")

@@ -446,14 +446,14 @@ def create_postgres_plugin_gateway(
 ) -> PluginGatewayModule:
     """Compose the deployment-controlled initial catalog.
 
-    The endpoint remains source-controlled; it is never supplied by a browser
-    request or a Project configuration record.
+    The fixture endpoint is deployment-configured; it is never supplied by a
+    browser request or a Project configuration record.
     """
     fixture = PluginManifest(
         id="foundation-fixture",
         name="Foundation fixture",
         version="0.1.0",
-        endpoint="http://foundation-fixture:8000/mcp",
+        endpoint=settings.foundation_fixture_url,
         tools=(
             PluginTool(name="foundation_status", read_only=True),
             PluginTool(name="create_status_artifact", read_only=False, agent_visible=False),

@@ -1,5 +1,6 @@
 FROM node:22.22.1-slim AS builder
 
+ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /workspace
 RUN npm install --global pnpm@12.4.1
 
@@ -13,6 +14,7 @@ RUN pnpm --filter @agent-hub/web build
 FROM node:22.22.1-slim AS runner
 
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /workspace
 
 COPY --from=builder /workspace/apps/web/.next/standalone ./

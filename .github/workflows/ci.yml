@@ -11,6 +11,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -51,6 +53,7 @@ jobs:
       AGENT_HUB_DATABASE_URL: postgresql://agent_hub:agent_hub@localhost:5432/agent_hub
       AGENT_HUB_ENVIRONMENT: test
       AGENT_HUB_IDENTITY_MODE: fixed
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -75,18 +78,62 @@ jobs:
         env:
           AGENT_HUB_ISOLATED_TEST_DATABASE_URL: postgresql://agent_hub:agent_hub@localhost:5432/agent_hub
         run: uv run --frozen --package agent-hub-api pytest -q apps/api/src/agent_hub_api/modules/agent_execution/_postgres_integration_test.py apps/api/src/agent_hub_api/modules/artifacts/_postgres_integration_test.py
-      - name: Start API
+      - name: Build foundation runtime images
         run: |
-          uv run --frozen --package agent-hub-api uvicorn agent_hub_api.main:app --host 127.0.0.1 --port 8000 --no-access-log > /tmp/agent-hub-api.log 2>&1 &
+          docker build -t agent-hub-acceptance-api -f apps/api/Dockerfile .
+          docker build -t agent-hub-acceptance-web -f apps/web/Dockerfile .
+          docker build -t agent-hub-acceptance-fixture -f plugins/test-fixture/Dockerfile plugins/test-fixture
+      - name: Start foundation services
+        run: |
+          python3 scripts/foundation-model-fixture.py > /tmp/agent-hub-model-fixture.log 2>&1 &
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8000/health/ready; then
-              exit 0
+            if curl --fail --silent http://127.0.0.1:8012/health; then
+              break
             fi
             sleep 1
           done
-          cat /tmp/agent-hub-api.log
-          exit 1
-      - run: pnpm --filter @agent-hub/web test:e2e
+          curl --fail --silent http://127.0.0.1:8012/health
+          docker run -d --name agent-hub-acceptance-fixture -p 127.0.0.1:8001:8000 agent-hub-acceptance-fixture
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null --max-time 2 http://127.0.0.1:8001/mcp; then
+              break
+            fi
+            sleep 1
+          done
+          curl --silent --output /dev/null --max-time 2 http://127.0.0.1:8001/mcp
+          docker run -d --name agent-hub-acceptance-api --network host \
+            -e AGENT_HUB_DATABASE_URL="$AGENT_HUB_DATABASE_URL" \
+            -e AGENT_HUB_ENVIRONMENT=test \
+            -e AGENT_HUB_IDENTITY_MODE=fixed \
+            -e AGENT_HUB_OPENAI_API_KEY=foundation-test-key \
+            -e OPENAI_API_BASE=http://127.0.0.1:8012/v1 \
+            -e AGENT_HUB_FOUNDATION_FIXTURE_URL=http://127.0.0.1:8001/mcp \
+            agent-hub-acceptance-api
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health/ready; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8000/health/ready
+          docker run -d --name agent-hub-acceptance-web --network host \
+            -e PORT=3001 \
+            -e HOSTNAME=0.0.0.0 \
+            -e AGENT_HUB_API_URL=http://127.0.0.1:8000 \
+            agent-hub-acceptance-web
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3001/api/health/ready; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3001/api/health/ready
+      - name: Run browser and continuous foundation flow
+        env:
+          AGENT_HUB_E2E_EXTERNAL: "1"
+          AGENT_HUB_E2E_BASE_URL: http://127.0.0.1:3001
+          AGENT_HUB_FOUNDATION_E2E: "1"
+        run: pnpm --filter @agent-hub/web test:e2e
       - name: Restore application and checkpoint data
         env:
           AGENT_HUB_ALLOW_RESTORE_DRILL: "1"
@@ -104,3 +151,10 @@ jobs:
             --no-owner --exit-on-error /backup/agent-hub.dump
           AGENT_HUB_DATABASE_URL=postgresql://agent_hub:agent_hub@localhost:5432/agent_hub_restore \
             uv run --frozen --package agent-hub-api python scripts/foundation-restore-drill.py verify
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          docker logs agent-hub-acceptance-api || true
+          docker logs agent-hub-acceptance-web || true
+          docker logs agent-hub-acceptance-fixture || true
+          cat /tmp/agent-hub-model-fixture.log || true
