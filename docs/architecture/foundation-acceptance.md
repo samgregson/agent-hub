@@ -1,10 +1,10 @@
 # Foundation acceptance contract
 
-The foundation is complete when one deployed vertical slice demonstrates the following behavior without any production engineering-domain plugin.
+The foundation is complete when one repeatable CI flow demonstrates the following behavior against running production builds of the web app and API, PostgreSQL, and a separately runnable fixture MCP backend. The flow uses a scripted model through the real Deep Agent execution path so that model choice and live provider responses do not decide the result. A hosted-platform walkthrough is useful release validation, but is not a condition for closing the foundation issue.
 
 ## Required demonstration
 
-1. The platform-authenticated user can create a Project and start two Threads within it.
+1. A user with a trusted subject supplied to Agent Hub can create a Project and start two Threads within it.
 2. Each Thread maps to one persisted LangGraph thread and can execute multiple Deep Agent Runs.
 3. Text, tool calls, results, errors, cancellation, and one interrupt/approval round-trip render through assistant-ui and survive a page reload where applicable.
 4. The agent can use a project-scoped Virtual Filesystem that is shared between the two Threads but never exposes the server or user's computer filesystem.
