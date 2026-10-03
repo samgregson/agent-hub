@@ -85,7 +85,9 @@ jobs:
           docker build -t agent-hub-acceptance-fixture -f plugins/test-fixture/Dockerfile plugins/test-fixture
       - name: Start foundation services
         run: |
-          python3 scripts/foundation-model-fixture.py > /tmp/agent-hub-model-fixture.log 2>&1 &
+          docker run -d --name agent-hub-acceptance-model --network host \
+            -v "$PWD/scripts/foundation-model-fixture.py:/fixture.py:ro" \
+            python:3.14.4-slim python /fixture.py
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8012/health; then
               break
@@ -157,4 +159,4 @@ jobs:
           docker logs agent-hub-acceptance-api || true
           docker logs agent-hub-acceptance-web || true
           docker logs agent-hub-acceptance-fixture || true
-          cat /tmp/agent-hub-model-fixture.log || true
+          docker logs agent-hub-acceptance-model || true
