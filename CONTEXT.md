@@ -40,9 +40,13 @@ _Avoid_: Plugin protocol extension, arbitrary parser, direct app communication
 A durable project-owned declaration of a user-authored data transformation, including its source, declared inputs, declared output, and runtime identity. It is distinct from a direct Binding and does not grant its source authority to access Project storage, secrets, or the network.
 _Avoid_: Binding expression, Plugin-owned state, notebook session
 
+**Input Selection**:
+A bounded, ordered choice of values from Project records or retained operation outputs. Its source, derivation, and membership can be inspected and captured for a Run; it need not be an entire Dataset.
+_Avoid_: Dataset, untraceable copied JSON, execution mode
+
 **Transform Run**:
-One bounded host-orchestrated execution of a Transform Definition against immutable selected input snapshots. It records its runtime, inputs, outputs, provenance, and outcome. It may use one selected input or, when supported, one captured Dataset as its input. Applying a Transform separately to Dataset Records is a Batch Run and produces a Result Set.
-_Avoid_: Browser preview, Project File, Artifact, per-record Batch Run
+One bounded host-orchestrated invocation of a Transform Definition against an immutable selected input snapshot. The selected input may be one value or a collection. The Run records its runtime, inputs, outputs, provenance, and outcome. Repeated invocation over members of a selection is Batch execution.
+_Avoid_: Browser preview, Project File, Artifact
 
 **Project File**:
 A durable file in the project's virtual filesystem used as agent working material. It may be linked from chat and previewed without becoming an artifact. Elevation to an artifact is explicit: an agent-initiated elevation requires human approval, while a user-initiated plugin save is direct authorization.
