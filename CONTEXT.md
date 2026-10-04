@@ -37,8 +37,8 @@ A durable host-owned Project rule that maps an explicitly selected structured va
 _Avoid_: Plugin protocol extension, arbitrary parser, direct app communication
 
 **Workflow Definition**:
-A durable Project-owned plan for a named task. It connects input sources, operations, and Bindings with explicit execution and decision policies. It can be reused for later executions; it does not contain their results.
-_Avoid_: Batch Definition, one Run, visual canvas
+A durable Project-owned, acyclic dependency graph for a user-named task. It connects input sources, operations, and Bindings with explicit execution and decision policies; branches may converge on later operations. It can be reused for later executions and does not contain their results.
+_Avoid_: Batch Definition, one Run, numbered sequence, visual canvas
 
 **Workflow Run**:
 One host-orchestrated execution of a Workflow Definition against captured inputs and a captured plan. It records the decisions, child Runs, outputs, and outcome so an earlier execution remains inspectable after inputs or the Definition change.
