@@ -79,10 +79,11 @@ test("two Threads complete the foundation Artifact flow", async ({
   const projectDialog = page.getByRole("dialog", { name: "New Project" });
   await projectDialog.getByLabel("Project name").fill(projectName);
   await projectDialog.getByLabel("Project name").press("Enter");
+  await expect(page.getByLabel("Selected Project")).not.toHaveValue("");
+  await expect(projectDialog).toBeHidden();
   const project = {
     id: await page.getByLabel("Selected Project").inputValue(),
   };
-  expect(project.id).toBeTruthy();
   const threadIds: string[] = [];
 
   for (const title of ["First Thread", "Second Thread"]) {
