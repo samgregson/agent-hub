@@ -72,6 +72,9 @@ test("phone Workflow shows dependencies and one primary node detail", async ({
   await expect(
     page.getByRole("region", { name: "Workflow dependencies" }),
   ).toBeVisible();
+  await page.getByRole("button", { name: "Edit workflow" }).click();
+  await expect(page.getByLabel("Workflow definition map")).toBeHidden();
+  await expect(page.getByLabel("Workflow definition outline")).toBeVisible();
 });
 
 test("Workflow creation connects Data definitions to editable dependencies", async ({
@@ -80,11 +83,15 @@ test("Workflow creation connects Data definitions to editable dependencies", asy
   await page.goto("/prototype/project-explorer?variant=E");
   await page.getByRole("button", { name: "Edit workflow" }).click();
   await expect(page.getByLabel("Workflow editor")).toBeVisible();
-  await expect(page.getByLabel("Workflow definition")).toContainText(
-    "Select findings + Extract criteria",
-  );
+  await expect(page.getByLabel("Workflow definition map")).toBeVisible();
+  await expect(
+    page.locator('path[data-from="findings"][data-to="review"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("region", { name: "Workflow definition", exact: true }),
+  ).toContainText("Select findings + Extract criteria");
   await page
-    .getByLabel("Workflow definition")
+    .getByRole("region", { name: "Workflow definition", exact: true })
     .getByRole("button", { name: /Draft review/ })
     .click();
   await page
@@ -92,9 +99,12 @@ test("Workflow creation connects Data definitions to editable dependencies", asy
     .getByLabel("Evaluate records")
     .check();
   await page.getByRole("button", { name: "Save step bindings" }).click();
-  await expect(page.getByLabel("Workflow definition")).toContainText(
-    "Select findings + Extract criteria + Evaluate records",
-  );
+  await expect(
+    page.locator('path[data-from="evaluate"][data-to="review"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("region", { name: "Workflow definition", exact: true }),
+  ).toContainText("Select findings + Extract criteria + Evaluate records");
   await page.getByRole("button", { name: "Browse Data", exact: true }).click();
   await expect(page.getByLabel("Data catalog")).toBeVisible();
   await page.getByRole("button", { name: "Operations", exact: true }).click();
@@ -107,9 +117,12 @@ test("Workflow creation connects Data definitions to editable dependencies", asy
   await expect(page.getByLabel("Workflow editor")).toBeVisible();
   await page.getByLabel("Add workflow step").getByLabel("Draft review").check();
   await page.getByRole("button", { name: "Add to definition" }).click();
-  await expect(page.getByLabel("Workflow definition")).toContainText(
-    "Publish summary",
-  );
+  await expect(
+    page.locator('path[data-from="review"][data-to="step-1"]'),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("region", { name: "Workflow definition", exact: true }),
+  ).toContainText("Publish summary");
   await page.getByRole("button", { name: "Save definition" }).click();
   await expect(page.getByRole("status")).toContainText(
     "Captured Runs remain unchanged",

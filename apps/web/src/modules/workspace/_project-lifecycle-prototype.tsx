@@ -13,6 +13,12 @@ type CatalogItem = {
   detail: string;
 };
 type DraftStep = { id: string; assetId: string; dependencies: string[] };
+type WorkflowStep = {
+  id: string;
+  name: string;
+  kind: string;
+  dependencies: string[];
+};
 
 const startingItems: CatalogItem[] = [
   {
@@ -79,6 +85,136 @@ const initialSteps = [
     dependencies: ["findings", "extract"],
   },
 ];
+
+function DefinitionGraph({
+  steps,
+  selectedId,
+  onSelect,
+}: {
+  steps: WorkflowStep[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const columns = new Map<number, WorkflowStep[]>();
+  const depthById = new Map<string, number>();
+  for (const step of steps) {
+    const depth = step.dependencies.length
+      ? Math.max(...step.dependencies.map((id) => depthById.get(id) ?? 0)) + 1
+      : 0;
+    depthById.set(step.id, depth);
+    columns.set(depth, [...(columns.get(depth) ?? []), step]);
+  }
+  const width = Math.max(920, columns.size * 225 + 40);
+  const height = Math.max(
+    350,
+    Math.max(...[...columns.values()].map((group) => group.length)) * 118 + 72,
+  );
+  const positions = new Map<string, { x: number; y: number }>();
+  for (const [depth, group] of columns) {
+    group.forEach((step, index) => {
+      positions.set(step.id, {
+        x: 24 + depth * 225,
+        y: Math.round(((index + 1) * height) / (group.length + 1) - 39),
+      });
+    });
+  }
+
+  return (
+    <>
+      <div
+        className={styles.graphViewport}
+        aria-label="Workflow definition map"
+      >
+        <div className={styles.graphCanvas} style={{ width, height }}>
+          <svg width={width} height={height} aria-hidden="true">
+            <defs>
+              <marker
+                id="definition-arrow"
+                markerWidth="7"
+                markerHeight="7"
+                refX="6"
+                refY="3.5"
+                orient="auto"
+              >
+                <path d="M0 0 L7 3.5 L0 7" />
+              </marker>
+            </defs>
+            {steps.flatMap((step) =>
+              step.dependencies.map((id, dependencyIndex) => {
+                const from = positions.get(id);
+                const to = positions.get(step.id);
+                if (!from || !to) return null;
+                const startX = from.x + 180;
+                const endX = to.x - 8;
+                const bend = (startX + endX) / 2;
+                const startY = from.y + 39;
+                const endY =
+                  to.y +
+                  (step.dependencies.length > 1
+                    ? 26 + dependencyIndex * 26
+                    : 39);
+                const spansColumn =
+                  (depthById.get(step.id) ?? 0) - (depthById.get(id) ?? 0) > 1;
+                const path = spansColumn
+                  ? `M${startX} ${startY} L${startX + 20} ${startY} L${startX + 20} ${height - 22} L${endX - 24} ${height - 22} L${endX - 24} ${endY} L${endX} ${endY}`
+                  : `M${startX} ${startY} C${bend} ${startY} ${bend} ${endY} ${endX} ${endY}`;
+                return (
+                  <path
+                    key={`${id}-${step.id}`}
+                    data-from={id}
+                    data-to={step.id}
+                    d={path}
+                    markerEnd="url(#definition-arrow)"
+                  />
+                );
+              }),
+            )}
+          </svg>
+          {steps.map((step) => {
+            const position = positions.get(step.id)!;
+            return (
+              <button
+                key={step.id}
+                type="button"
+                className={styles.graphNode}
+                style={{ left: position.x, top: position.y }}
+                aria-current={selectedId === step.id ? "true" : undefined}
+                onClick={() => onSelect(step.id)}
+              >
+                <small>{step.kind}</small>
+                <strong>{step.name}</strong>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className={styles.stepList} aria-label="Workflow definition outline">
+        {steps.map((step) => (
+          <button
+            key={step.id}
+            type="button"
+            className={styles.step}
+            onClick={() => onSelect(step.id)}
+            aria-current={selectedId === step.id ? "true" : undefined}
+          >
+            <span>
+              <strong>{step.name}</strong>
+              <small>{step.kind}</small>
+            </span>
+            <span>
+              Needs:{" "}
+              {step.dependencies.length
+                ? step.dependencies
+                    .map((id) => steps.find((item) => item.id === id)?.name)
+                    .join(" + ")
+                : "Project input"}
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
 
 export function ProjectLifecyclePrototype({
   destination,
@@ -225,46 +361,28 @@ export function ProjectLifecyclePrototype({
             You are editing the Definition. Completed Runs keep their captured
             graph and results.
           </p>
-          <div className={styles.columns}>
+          <div className={styles.editorStack}>
             <section
               aria-label="Workflow definition"
               className={styles.listPanel}
             >
               <div className={styles.panelHead}>
-                <h2>Definition</h2>
+                <div>
+                  <h2>Definition</h2>
+                  <p>
+                    Branches and joins follow the current Definition. Select a
+                    step to edit its inputs.
+                  </p>
+                </div>
                 <button type="button" onClick={() => onNavigate("Data")}>
                   Browse Data
                 </button>
               </div>
-              <div className={styles.stepList}>
-                {allSteps.map((step) => (
-                  <button
-                    key={step.id}
-                    type="button"
-                    className={styles.step}
-                    onClick={() => editStep(step.id)}
-                    aria-current={
-                      editingStepId === step.id ? "true" : undefined
-                    }
-                  >
-                    <span>
-                      <strong>{step.name}</strong>
-                      <small>{step.kind}</small>
-                    </span>
-                    <span>
-                      Needs:{" "}
-                      {step.dependencies.length
-                        ? step.dependencies
-                            .map(
-                              (id) =>
-                                allSteps.find((item) => item.id === id)?.name,
-                            )
-                            .join(" + ")
-                        : "Project input"}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <DefinitionGraph
+                steps={allSteps}
+                selectedId={editingStepId}
+                onSelect={editStep}
+              />
               <button
                 className={styles.primary}
                 type="button"

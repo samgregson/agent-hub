@@ -64,6 +64,13 @@
   gap: 24px;
   align-items: start;
 }
+.editorStack {
+  display: grid;
+  gap: 24px;
+}
+.editorStack .composePanel {
+  max-width: 760px;
+}
 .listPanel,
 .composePanel,
 .detailPanel {
@@ -87,8 +94,65 @@
   color: var(--text-strong);
   font-size: 1.3rem;
 }
-.stepList {
+.panelHead p {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.4;
+}
+.graphViewport {
+  overflow-x: auto;
+  margin-bottom: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+.graphCanvas {
+  position: relative;
+}
+.graphCanvas svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.graphCanvas svg > path {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.7;
+}
+.graphCanvas marker path {
+  fill: var(--text-muted);
+}
+.graphNode {
+  position: absolute;
   display: grid;
+  align-content: center;
+  gap: 5px;
+  width: 180px;
+  min-height: 78px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  text-align: left;
+}
+.graphNode:hover,
+.graphNode[aria-current] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+}
+.graphNode small {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+.graphNode strong {
+  color: var(--text-strong);
+  font-size: var(--font-size-label);
+  line-height: 1.2;
+}
+.stepList {
+  display: none;
   gap: 0;
   margin-bottom: 20px;
   border-top: 1px solid var(--line);
@@ -296,6 +360,12 @@
   }
 }
 @media (max-width: 760px) {
+  .graphViewport {
+    display: none;
+  }
+  .stepList {
+    display: grid;
+  }
   .pageHead {
     display: block;
   }
