@@ -36,6 +36,15 @@ _Avoid_: Workflow, pipeline, Plugin protocol, run result
 A durable host-owned Project rule that maps an explicitly selected structured value to a declared argument of a target operation. Its mapping and execution policy are inspectable; it is not Plugin-owned code or an iframe-to-iframe connection.
 _Avoid_: Plugin protocol extension, arbitrary parser, direct app communication
 
+**Workflow Definition**:
+A durable Project-owned plan for a named task. It connects input sources, operations, and Bindings with explicit execution and decision policies. It can be reused for later executions; it does not contain their results.
+_Avoid_: Batch Definition, one Run, visual canvas
+
+**Workflow Run**:
+One host-orchestrated execution of a Workflow Definition against captured inputs and a captured plan. It records the decisions, child Runs, outputs, and outcome so an earlier execution remains inspectable after inputs or the Definition change.
+_Avoid_: Agent Run, Batch Run, mutable result
+
+
 **Transform Definition**:
 A durable project-owned declaration of a user-authored data transformation, including its source, declared inputs, declared output, and runtime identity. It is distinct from a direct Binding and does not grant its source authority to access Project storage, secrets, or the network.
 _Avoid_: Binding expression, Plugin-owned state, notebook session
