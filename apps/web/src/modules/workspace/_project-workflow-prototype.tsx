@@ -123,7 +123,15 @@ function recordLabel(node: WorkflowNode, run: RunNumber) {
   return node.record;
 }
 
-export function ProjectWorkflowPrototype() {
+export function ProjectWorkflowPrototype({
+  onEdit,
+  onBrowseData,
+  onOpenDefinition,
+}: {
+  onEdit?: () => void;
+  onBrowseData?: () => void;
+  onOpenDefinition?: (key: NodeKey) => void;
+}) {
   const [inputRevision, setInputRevision] = useState<"1" | "2">("1");
   const [latestRun, setLatestRun] = useState<RunNumber>(1);
   const [viewedRun, setViewedRun] = useState<RunNumber>(1);
@@ -166,7 +174,14 @@ export function ProjectWorkflowPrototype() {
             dependency to trace its captured result.
           </p>
         </div>
-        <span className={styles.workflowType}>Workflow · Project overview</span>
+        <div className={styles.headerActions}>
+          <button type="button" onClick={onBrowseData}>
+            Browse Data
+          </button>
+          <button type="button" onClick={onEdit}>
+            Edit workflow
+          </button>
+        </div>
       </header>
 
       <div className={styles.runBanner}>
@@ -341,6 +356,15 @@ export function ProjectWorkflowPrototype() {
             >
               {showRecord ? "Close captured record" : "Inspect captured record"}
             </button>
+            {selectedNode !== "references" && selectedNode !== "extract" ? (
+              <button
+                className={styles.recordLink}
+                type="button"
+                onClick={() => onOpenDefinition?.(selectedNode)}
+              >
+                Open source in Data
+              </button>
+            ) : null}
             {showRecord ? (
               <div className={styles.recordSnapshot}>
                 <strong>{recordLabel(selected, viewedRun)}</strong>

@@ -74,6 +74,72 @@ test("phone Workflow shows dependencies and one primary node detail", async ({
   ).toBeVisible();
 });
 
+test("Workflow creation connects Data definitions to editable dependencies", async ({
+  page,
+}) => {
+  await page.goto("/prototype/project-explorer?variant=E");
+  await page.getByRole("button", { name: "Edit workflow" }).click();
+  await expect(page.getByLabel("Workflow editor")).toBeVisible();
+  await expect(page.getByLabel("Workflow definition")).toContainText(
+    "Select findings + Extract criteria",
+  );
+  await page
+    .getByLabel("Workflow definition")
+    .getByRole("button", { name: /Draft review/ })
+    .click();
+  await page
+    .getByLabel("Add workflow step")
+    .getByLabel("Evaluate records")
+    .check();
+  await page.getByRole("button", { name: "Save step bindings" }).click();
+  await expect(page.getByLabel("Workflow definition")).toContainText(
+    "Select findings + Extract criteria + Evaluate records",
+  );
+  await page.getByRole("button", { name: "Browse Data", exact: true }).click();
+  await expect(page.getByLabel("Data catalog")).toBeVisible();
+  await page.getByRole("button", { name: "Operations", exact: true }).click();
+  await page.getByRole("button", { name: "Create Operation" }).click();
+  await page.getByLabel("Operation type").selectOption("MCP batch binding");
+  await page.getByRole("textbox", { name: "Name" }).fill("Publish summary");
+  await page.getByRole("button", { name: "Create draft" }).click();
+  await expect(page.getByLabel("Data editor")).toContainText("Publish summary");
+  await page.getByRole("button", { name: "Use in workflow" }).click();
+  await expect(page.getByLabel("Workflow editor")).toBeVisible();
+  await page.getByLabel("Add workflow step").getByLabel("Draft review").check();
+  await page.getByRole("button", { name: "Add to definition" }).click();
+  await expect(page.getByLabel("Workflow definition")).toContainText(
+    "Publish summary",
+  );
+  await page.getByRole("button", { name: "Save definition" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Captured Runs remain unchanged",
+  );
+  await page.getByRole("button", { name: "View captured Run" }).click();
+  await expect(page.getByLabel("Read-only dependency map")).toBeVisible();
+  await page.getByRole("button", { name: "Data", exact: true }).first().click();
+  await expect(page.getByLabel("Data catalog")).toContainText(
+    "Publish summary",
+  );
+});
+
+test("phone Data keeps catalog and record editor as separate primary surfaces", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/prototype/project-explorer?variant=E");
+  await page.getByRole("button", { name: "Browse Data" }).click();
+  await expect(page.getByLabel("Data catalog")).toBeVisible();
+  await expect(page.getByLabel("Data editor")).toBeHidden();
+  await page
+    .getByLabel("Data collections")
+    .getByRole("button", { name: /Input set/ })
+    .click();
+  await expect(page.getByLabel("Data editor")).toBeVisible();
+  await expect(page.getByLabel("Data collections")).toBeHidden();
+  await page.getByRole("button", { name: "Back to Data" }).click();
+  await expect(page.getByLabel("Data collections")).toBeVisible();
+});
+
 test("Operations groups definitions while preview settings leave saved dataflow alone", async ({
   page,
 }) => {

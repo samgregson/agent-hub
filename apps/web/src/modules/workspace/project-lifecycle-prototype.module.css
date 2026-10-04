@@ -1,0 +1,327 @@
+.lifecycle {
+  min-width: 0;
+  color: var(--text);
+}
+
+.lifecycle button {
+  cursor: pointer;
+}
+.lifecycle button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.lifecycle button:focus-visible,
+.lifecycle input:focus-visible,
+.lifecycle select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pageHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+.pageHead h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(2rem, 3.2vw, 2.65rem);
+  letter-spacing: -0.03em;
+}
+.pageHead p {
+  max-width: 68ch;
+  margin: 8px 0 0;
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+.pageHead > button,
+.panelHead button,
+.composePanel > button,
+.actions button,
+.context button,
+.mobileBack {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+.notice {
+  margin: 0 0 20px;
+  padding: 13px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-selected);
+  color: var(--text-subtle);
+  line-height: 1.45;
+}
+.columns {
+  display: grid;
+  grid-template-columns: minmax(290px, 0.9fr) minmax(0, 1.3fr);
+  gap: 24px;
+  align-items: start;
+}
+.listPanel,
+.composePanel,
+.detailPanel {
+  min-width: 0;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+.panelHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 17px;
+}
+.panelHead h2,
+.composePanel h2,
+.detailPanel h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1.3rem;
+}
+.stepList {
+  display: grid;
+  gap: 0;
+  margin-bottom: 20px;
+  border-top: 1px solid var(--line);
+}
+.step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 12px;
+  width: 100%;
+  padding: 14px 5px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.step:hover,
+.step[aria-current] {
+  background: var(--surface-selected);
+}
+.step > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+.step small,
+.step > span:last-child {
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.4;
+}
+.listPanel > p[role="status"] {
+  color: var(--text-subtle);
+  line-height: 1.45;
+}
+.composePanel > p,
+.hint,
+.recordDetail > p,
+.context p,
+.empty p {
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+.composePanel > p {
+  max-width: 48ch;
+  margin: 8px 0 18px;
+}
+.composePanel > button {
+  margin-bottom: 12px;
+}
+.pending {
+  display: grid;
+  gap: 8px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.pending small {
+  color: var(--text-muted);
+}
+.pending fieldset {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.pending legend {
+  padding: 0 7px;
+  color: var(--text-subtle);
+}
+.pending label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 30px;
+}
+.pending input {
+  accent-color: var(--accent);
+}
+.primary {
+  min-height: 42px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 22px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+.tabs button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-subtle);
+}
+.tabs button[aria-pressed="true"] {
+  background: var(--surface-selected);
+  color: var(--text-strong);
+  font-weight: 700;
+}
+.catalogList {
+  display: grid;
+  gap: 8px;
+}
+.catalogList button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 66px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text);
+  text-align: left;
+}
+.catalogList button:hover,
+.catalogList button[aria-current] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+}
+.catalogList small {
+  color: var(--text-subtle);
+  line-height: 1.35;
+}
+.listPanel > .hint {
+  margin: 20px 0 0;
+  font-size: var(--font-size-label);
+}
+.recordDetail > small {
+  color: var(--accent);
+  font-weight: 700;
+}
+.recordDetail h2 {
+  margin-top: 7px;
+  font-size: 1.8rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 22px 0;
+}
+.actions .primary {
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.form {
+  display: grid;
+  gap: 17px;
+  max-width: 560px;
+}
+.form label {
+  display: grid;
+  gap: 7px;
+  color: var(--text-subtle);
+}
+.form input,
+.form select {
+  width: 100%;
+  min-height: 43px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+.form .actions {
+  margin: 4px 0 0;
+}
+.form > .primary {
+  justify-self: start;
+}
+.context {
+  padding-top: 20px;
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.context h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.context p {
+  margin: 7px 0 14px;
+}
+.mobileBack {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 760px) {
+  .pageHead {
+    display: block;
+  }
+  .pageHead > button {
+    margin-top: 14px;
+  }
+  .listPanel,
+  .composePanel,
+  .detailPanel {
+    padding: 17px;
+  }
+  .data .detailPanel {
+    display: none;
+  }
+  .data.mobileDetail .listPanel {
+    display: none;
+  }
+  .data.mobileDetail .detailPanel {
+    display: block;
+  }
+  .mobileBack {
+    display: block;
+    margin-bottom: 18px;
+  }
+  .step {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

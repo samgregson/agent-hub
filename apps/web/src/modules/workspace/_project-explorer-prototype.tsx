@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 
-import { ProjectWorkflowPrototype } from "./_project-workflow-prototype";
+import { ProjectLifecyclePrototype } from "./_project-lifecycle-prototype";
 import styles from "./project-explorer-prototype.module.css";
 
 // Throwaway issue #37 prototype: compare navigation structures using the
@@ -374,8 +374,12 @@ export function ProjectExplorerPrototype() {
             </button>
           ))}
         </div>
-        {destination === "Overview" && variant === "E" ? (
-          <ProjectWorkflowPrototype />
+        {variant === "E" &&
+        (destination === "Overview" || destination === "Data") ? (
+          <ProjectLifecyclePrototype
+            destination={destination}
+            onNavigate={chooseDestination}
+          />
         ) : destination === "Data" ? (
           <>
             <div className={styles.workspaceHeading}>
