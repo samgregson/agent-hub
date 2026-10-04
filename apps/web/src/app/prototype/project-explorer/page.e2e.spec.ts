@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("Project opens on the engineering Workflow and retains iteration history", async ({
+test("Project opens on a branching Workflow and retains iteration history", async ({
   page,
 }) => {
   await page.goto("/prototype/project-explorer");
@@ -8,53 +8,69 @@ test("Project opens on the engineering Workflow and retains iteration history", 
     page.getByRole("button", { name: "E · Workflow first" }),
   ).toHaveAttribute("aria-pressed", "true");
   await expect(
-    page.getByRole("heading", { name: "Review floor-beam deflection" }),
+    page.getByRole("heading", { name: "Design review" }),
   ).toBeVisible();
-  await expect(page.getByText("Workflow Run 1")).toBeVisible();
-  await page.getByRole("combobox", { name: "B-12 trial I" }).selectOption("80");
-  await page.getByRole("button", { name: "Run revised workflow" }).click();
-  await expect(page.getByText("Workflow Run 2")).toBeVisible();
+  await expect(page.getByLabel("Read-only dependency map")).toBeVisible();
   await expect(
-    page.getByText("3 checked · 0 fail this check · no tool errors"),
+    page.getByLabel("Read-only dependency map").getByRole("button"),
+  ).toHaveCount(6);
+  await page.getByRole("button", { name: "Outline", exact: true }).click();
+  await expect(page.getByLabel("Dependency outline")).toBeVisible();
+  await expect(
+    page
+      .getByLabel("Dependency outline")
+      .getByRole("button", { name: /Draft review/ }),
+  ).toContainText("Select findings + Extract criteria");
+  await expect(page.getByText("Workflow Run 1", { exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Input set" }).selectOption("2");
+  await page.getByRole("button", { name: "Run Workflow" }).click();
+  await expect(page.getByText("Workflow Run 2", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Completed · 1 finding · no tool errors"),
   ).toBeVisible();
+  await expect(page.getByText(/selected findings 2 → 1/)).toBeVisible();
+  await page
+    .getByLabel("Dependency outline")
+    .getByText("Select findings", { exact: true })
+    .click();
   await expect(
-    page.getByText(/failed checks changed from 1 to 0/),
-  ).toBeVisible();
-  await page.getByRole("button", { name: /Isolate failed checks/ }).click();
-  await expect(
-    page.getByRole("region", { name: "Selected workflow step" }),
-  ).toContainText("Valid empty selection");
+    page.getByRole("region", { name: "Selected Workflow node" }),
+  ).toContainText("1 finding selected");
   await page.getByRole("button", { name: "Inspect captured record" }).click();
   await expect(
     page.getByRole("button", { name: "Close captured record" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /Run 1 · original input/ }).click();
-  await expect(page.getByText("Workflow Run 1")).toBeVisible();
+  await page.getByRole("button", { name: /Run 1 · input revision 1/ }).click();
+  await expect(page.getByText("Workflow Run 1", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("3 checked · 1 fails this check · no tool errors"),
+    page.getByText("Completed · 2 findings · no tool errors"),
   ).toBeVisible();
 });
 
-test("phone Workflow drills into one step then returns to overview", async ({
+test("phone Workflow shows dependencies and one primary node detail", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/prototype/project-explorer?variant=E");
   await expect(
-    page.getByRole("region", { name: "Selected workflow step" }),
+    page.getByRole("region", { name: "Selected Workflow node" }),
   ).toBeHidden();
   await page
-    .getByRole("button", { name: /Check imposed-load deflection/ })
+    .getByLabel("Dependency outline")
+    .getByRole("button", { name: /Draft review/ })
     .click();
   await expect(
-    page.getByRole("region", { name: "Selected workflow step" }),
+    page.getByRole("region", { name: "Selected Workflow node" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Workflow steps" }),
+    page.getByRole("region", { name: "Workflow dependencies" }),
   ).toBeHidden();
-  await page.getByRole("button", { name: "Back to workflow" }).click();
   await expect(
-    page.getByRole("region", { name: "Workflow steps" }),
+    page.getByRole("region", { name: "Selected Workflow node" }),
+  ).toContainText("Select findings + Extract criteria");
+  await page.getByRole("button", { name: "Back to Workflow" }).click();
+  await expect(
+    page.getByRole("region", { name: "Workflow dependencies" }),
   ).toBeVisible();
 });
 

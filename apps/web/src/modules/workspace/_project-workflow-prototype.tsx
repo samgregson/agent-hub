@@ -4,106 +4,153 @@ import { useState } from "react";
 
 import styles from "./project-workflow-prototype.module.css";
 
-type StepKey = "inputs" | "check" | "filter" | "size" | "note";
+type NodeKey =
+  "inputs" | "references" | "evaluate" | "extract" | "findings" | "review";
 type RunNumber = 1 | 2;
 
-const steps: {
-  key: StepKey;
+type WorkflowNode = {
+  key: NodeKey;
   title: string;
-  method: string;
-  from: string;
-  to: string;
-}[] = [
+  kind: string;
+  dependsOn: NodeKey[];
+  output: string;
+  record: string;
+  x: number;
+  y: number;
+};
+
+const nodes: WorkflowNode[] = [
   {
     key: "inputs",
-    title: "Beam schedule",
-    method: "Dataset",
-    from: "Project source",
-    to: "3 beam records",
+    title: "Input set",
+    kind: "Dataset",
+    dependsOn: [],
+    output: "Captured records",
+    record: "Dataset · Input set",
+    x: 2,
+    y: 12,
   },
   {
-    key: "check",
-    title: "Check imposed-load deflection",
-    method: "MCP tool · per beam",
-    from: "Beam schedule",
-    to: "Result Set",
+    key: "references",
+    title: "Reference sources",
+    kind: "Sources",
+    dependsOn: [],
+    output: "Selected documents",
+    record: "Project Sources",
+    x: 2,
+    y: 61,
   },
   {
-    key: "filter",
-    title: "Isolate failed checks",
-    method: "Transform",
-    from: "Result Set",
-    to: "Selected failures",
+    key: "evaluate",
+    title: "Evaluate records",
+    kind: "MCP Batch",
+    dependsOn: ["inputs"],
+    output: "Result Set",
+    record: "Batch Run and Result Set",
+    x: 28,
+    y: 12,
   },
   {
-    key: "size",
-    title: "Size the selected failure",
-    method: "MCP tool · Binding",
-    from: "Selected failure",
-    to: "Sizing result",
+    key: "extract",
+    title: "Extract criteria",
+    kind: "MCP tool",
+    dependsOn: ["references"],
+    output: "Retained tool result",
+    record: "MCP result snapshot",
+    x: 28,
+    y: 61,
   },
   {
-    key: "note",
-    title: "Draft review note",
-    method: "MCP tool · Binding",
-    from: "Sizing result",
-    to: "Review note",
+    key: "findings",
+    title: "Select findings",
+    kind: "Transform",
+    dependsOn: ["evaluate"],
+    output: "Selected values",
+    record: "Transform Run",
+    x: 54,
+    y: 12,
+  },
+  {
+    key: "review",
+    title: "Draft review",
+    kind: "MCP tool · Bindings",
+    dependsOn: ["findings", "extract"],
+    output: "Draft output",
+    record: "Retained tool result",
+    x: 79,
+    y: 38,
   },
 ];
 
-const outcomes: Record<RunNumber, Record<StepKey, string>> = {
+const nodeByKey = Object.fromEntries(
+  nodes.map((node) => [node.key, node]),
+) as Record<NodeKey, WorkflowNode>;
+
+const edges: { from: NodeKey; to: NodeKey; path: string }[] = [
+  { from: "inputs", to: "evaluate", path: "M200 80 L280 80" },
+  { from: "references", to: "extract", path: "M200 255 L280 255" },
+  { from: "evaluate", to: "findings", path: "M460 80 L540 80" },
+  { from: "findings", to: "review", path: "M720 80 C755 80 740 160 790 176" },
+  { from: "extract", to: "review", path: "M460 255 C650 255 690 176 790 176" },
+];
+
+const outcomes: Record<RunNumber, Record<NodeKey, string>> = {
   1: {
-    inputs: "B-12 uses trial I = 40 × 10⁶ mm⁴. B-13 and B-14 are unchanged.",
-    check: "3 checked · B-12 fails this check · 0 tool errors",
-    filter: "B-12 selected; B-13 and B-14 excluded.",
-    size: "B-12 requires about 43.393 × 10⁶ mm⁴ for this deflection check.",
-    note: "A review note for B-12 was explicitly saved as an Artifact.",
+    inputs: "Input set revision 1 was captured for this Run.",
+    references: "Two Project Sources were captured for this Run.",
+    evaluate: "3 records evaluated; 2 findings retained in a Result Set.",
+    extract: "Review criteria were extracted into a retained tool result.",
+    findings: "2 findings selected from the Result Set.",
+    review:
+      "The draft combines 2 selected findings with the extracted criteria.",
   },
   2: {
-    inputs:
-      "B-12 uses revised trial I = 80 × 10⁶ mm⁴. B-13 and B-14 are unchanged.",
-    check: "3 checked · all pass this check · 0 tool errors",
-    filter: "Valid empty selection; no failed checks.",
-    size: "Skipped because no failed check was selected.",
-    note: "Skipped. No new review note or Artifact was created.",
+    inputs: "Input set revision 2 was captured for this Run.",
+    references: "The same two Project Sources were captured for this Run.",
+    evaluate: "3 records evaluated; 1 finding retained in a new Result Set.",
+    extract: "Review criteria were extracted into a new retained tool result.",
+    findings: "1 finding selected from the new Result Set.",
+    review:
+      "The revised draft combines 1 selected finding with the extracted criteria.",
   },
 };
 
-const recordsByStep: Record<StepKey, string> = {
-  inputs: "Load cases · Dataset",
-  check: "Batch Run and Result Set",
-  filter: "Transform Run",
-  size: "Sizing result · retained MCP output",
-  note: "Review note · explicitly saved Artifact",
-};
+function recordLabel(node: WorkflowNode, run: RunNumber) {
+  if (node.key === "evaluate")
+    return `BR-${run === 1 ? "204" : "205"} · ${node.record}`;
+  if (node.key === "findings")
+    return `TR-${run === 1 ? "103" : "104"} · ${node.record}`;
+  return node.record;
+}
 
 export function ProjectWorkflowPrototype() {
-  const [trialI, setTrialI] = useState<"40" | "80">("40");
+  const [inputRevision, setInputRevision] = useState<"1" | "2">("1");
   const [latestRun, setLatestRun] = useState<RunNumber>(1);
   const [viewedRun, setViewedRun] = useState<RunNumber>(1);
-  const [selectedStep, setSelectedStep] = useState<StepKey>("check");
+  const [selectedNode, setSelectedNode] = useState<NodeKey>("review");
   const [detailOpen, setDetailOpen] = useState(false);
   const [showRecord, setShowRecord] = useState(false);
-  const selected = steps.find((step) => step.key === selectedStep)!;
-  const isRevised = viewedRun === 2;
-  const recordLabel =
-    selectedStep === "check"
-      ? `BR-${isRevised ? "205" : "204"} · ${recordsByStep.check}`
-      : selectedStep === "filter"
-        ? `TR-${isRevised ? "104" : "103"} · ${recordsByStep.filter}`
-        : recordsByStep[selectedStep];
+  const [viewMode, setViewMode] = useState<"map" | "outline">("map");
+  const selected = nodeByKey[selectedNode];
 
-  function runRevisedWorkflow() {
-    if (trialI !== "80" || latestRun === 2) return;
+  function runRevision() {
+    if (inputRevision !== "2" || latestRun === 2) return;
     setLatestRun(2);
     setViewedRun(2);
-    setSelectedStep("check");
+    setSelectedNode("review");
     setDetailOpen(false);
+    setShowRecord(false);
   }
 
-  function openStep(key: StepKey) {
-    setSelectedStep(key);
+  function openNode(key: NodeKey) {
+    setSelectedNode(key);
     setDetailOpen(true);
+    setShowRecord(false);
+  }
+
+  function viewRun(run: RunNumber) {
+    setViewedRun(run);
+    setDetailOpen(false);
     setShowRecord(false);
   }
 
@@ -111,105 +158,179 @@ export function ProjectWorkflowPrototype() {
     <div
       className={`${styles.workflow} ${detailOpen ? styles.detailOpen : ""}`}
     >
-      <div className={styles.overviewHeader}>
+      <header className={styles.overviewHeader}>
         <div>
-          <h1>Review floor-beam deflection</h1>
+          <h1>Design review</h1>
           <p>
-            Follow the beam schedule through checks, selected failures, sizing,
-            and the review note.
+            Project inputs and reference criteria feed the review. Inspect any
+            dependency to trace its captured result.
           </p>
         </div>
-        <span className={styles.workflowType}>
-          Project Workflow · illustrative
-        </span>
-      </div>
+        <span className={styles.workflowType}>Workflow · Project overview</span>
+      </header>
 
       <div className={styles.runBanner}>
         <div>
           <strong>Workflow Run {viewedRun}</strong>
           <span>
-            {isRevised
-              ? "3 checked · 0 fail this check · no tool errors"
-              : "3 checked · 1 fails this check · no tool errors"}
+            {viewedRun === 1
+              ? "Completed · 2 findings · no tool errors"
+              : "Completed · 1 finding · no tool errors"}
           </span>
         </div>
-        <span className={styles.runState}>Completed</span>
+        <span className={styles.runState}>Captured execution</span>
       </div>
-      {isRevised ? (
+      {viewedRun === 2 ? (
         <p className={styles.comparison}>
-          Since Run 1: B-12 trial I changed from 40 to 80 × 10⁶ mm⁴; failed
-          checks changed from 1 to 0. Sizing and note steps were skipped.
+          Compared with Run 1: input set revision 1 → 2; selected findings 2 →
+          1. The earlier Run and its outputs remain available.
         </p>
       ) : null}
 
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
-          <section className={styles.stepSection} aria-label="Workflow steps">
+          <section
+            className={styles.graphSection}
+            aria-label="Workflow dependencies"
+          >
             <div className={styles.sectionHeading}>
-              <h2>Task flow</h2>
-              <p>Select a step to inspect its captured input and outcome.</p>
+              <div>
+                <h2>Dependencies</h2>
+                <p>
+                  Two branches converge on the draft. Select a node to inspect
+                  its inputs and output.
+                </p>
+              </div>
+              <div
+                className={styles.viewToggle}
+                role="group"
+                aria-label="Dependency view"
+              >
+                <button
+                  type="button"
+                  aria-pressed={viewMode === "map"}
+                  onClick={() => setViewMode("map")}
+                >
+                  Map
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={viewMode === "outline"}
+                  onClick={() => setViewMode("outline")}
+                >
+                  Outline
+                </button>
+              </div>
             </div>
-            <ol className={styles.stepList}>
-              {steps.map((step, index) => {
-                const skipped =
-                  isRevised && (step.key === "size" || step.key === "note");
-                return (
-                  <li key={step.key}>
-                    <button
-                      type="button"
-                      aria-current={
-                        selectedStep === step.key ? "step" : undefined
-                      }
-                      onClick={() => openStep(step.key)}
-                    >
-                      <span className={styles.stepNumber}>{index + 1}</span>
-                      <span className={styles.stepText}>
-                        <strong>{step.title}</strong>
-                        <small>
-                          {step.from} → {step.to}
-                        </small>
-                      </span>
-                      <span className={styles.stepEnd}>
-                        <span>{step.method}</span>
-                        <strong>{skipped ? "Skipped" : "Completed"}</strong>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
+
+            <div
+              className={`${styles.map} ${viewMode === "map" ? styles.active : ""}`}
+              aria-label="Read-only dependency map"
+            >
+              <svg
+                viewBox="0 0 1000 350"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker
+                    id="workflow-arrow"
+                    markerWidth="7"
+                    markerHeight="7"
+                    refX="6"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <path d="M0 0 L7 3.5 L0 7" />
+                  </marker>
+                </defs>
+                {edges.map((edge) => (
+                  <path
+                    key={`${edge.from}-${edge.to}`}
+                    d={edge.path}
+                    markerEnd="url(#workflow-arrow)"
+                  />
+                ))}
+              </svg>
+              {nodes.map((node) => (
+                <button
+                  key={node.key}
+                  className={styles.mapNode}
+                  style={{ left: `${node.x}%`, top: `${node.y}%` }}
+                  type="button"
+                  aria-current={selectedNode === node.key ? "true" : undefined}
+                  onClick={() => openNode(node.key)}
+                >
+                  <small>{node.kind}</small>
+                  <strong>{node.title}</strong>
+                </button>
+              ))}
+            </div>
+
+            <div
+              className={`${styles.outline} ${viewMode === "outline" ? styles.active : ""}`}
+              aria-label="Dependency outline"
+            >
+              {nodes.map((node) => (
+                <button
+                  key={node.key}
+                  type="button"
+                  aria-current={selectedNode === node.key ? "true" : undefined}
+                  onClick={() => openNode(node.key)}
+                >
+                  <span>
+                    <strong>{node.title}</strong>
+                    <small>{node.kind}</small>
+                  </span>
+                  <span>
+                    Needs:{" "}
+                    {node.dependsOn.length
+                      ? node.dependsOn
+                          .map((key) => nodeByKey[key].title)
+                          .join(" + ")
+                      : "Project input"}
+                  </span>
+                </button>
+              ))}
+            </div>
           </section>
 
           <section
-            className={styles.stepDetail}
-            aria-label="Selected workflow step"
+            className={styles.nodeDetail}
+            aria-label="Selected Workflow node"
           >
             <button
               className={styles.mobileBack}
               type="button"
               onClick={() => setDetailOpen(false)}
             >
-              Back to workflow
+              Back to Workflow
             </button>
             <div className={styles.sectionHeading}>
               <h2>{selected.title}</h2>
-              <span>{selected.method}</span>
+              <span>{selected.kind}</span>
             </div>
             <p className={styles.outcome}>
-              {outcomes[viewedRun][selectedStep]}
+              {outcomes[viewedRun][selectedNode]}
             </p>
             <dl className={styles.lineage}>
               <div>
-                <dt>Captured from</dt>
-                <dd>{selected.from}</dd>
+                <dt>Depends on</dt>
+                <dd>
+                  {selected.dependsOn.length
+                    ? selected.dependsOn
+                        .map((key) => nodeByKey[key].title)
+                        .join(" + ")
+                    : "Project input"}
+                </dd>
               </div>
               <div>
-                <dt>Produced</dt>
-                <dd>{selected.to}</dd>
+                <dt>Produces</dt>
+                <dd>{selected.output}</dd>
               </div>
               <div>
-                <dt>Record</dt>
-                <dd>{recordLabel}</dd>
+                <dt>Captured record</dt>
+                <dd>{recordLabel(selected, viewedRun)}</dd>
               </div>
             </dl>
             <button
@@ -222,13 +343,21 @@ export function ProjectWorkflowPrototype() {
             </button>
             {showRecord ? (
               <div className={styles.recordSnapshot}>
-                <strong>{recordLabel}</strong>
-                <p>{outcomes[viewedRun][selectedStep]}</p>
+                <strong>{recordLabel(selected, viewedRun)}</strong>
+                <p>
+                  Workflow Run {viewedRun} · Captured input:{" "}
+                  {selected.dependsOn.length
+                    ? selected.dependsOn
+                        .map((key) => nodeByKey[key].output)
+                        .join(" + ")
+                    : selected.title}
+                </p>
+                <p>Stored output: {outcomes[viewedRun][selectedNode]}</p>
               </div>
             ) : null}
             <p className={styles.detailFoot}>
-              This view traces the saved Run. Preview filters do not change the
-              chain or its recorded results.
+              This is the captured result from Workflow Run {viewedRun}. Preview
+              settings do not change this dependency or its downstream output.
             </p>
           </section>
         </div>
@@ -238,34 +367,34 @@ export function ProjectWorkflowPrototype() {
           aria-label="Workflow runs and inputs"
         >
           <section className={styles.inputSection}>
-            <h2>Iterate on inputs</h2>
+            <h2>Run with revised inputs</h2>
             <p>
-              Revise B-12’s trial section and execute the chain again. Earlier
-              Runs stay inspectable.
+              Choose the input set for another execution. Earlier Runs remain
+              inspectable.
             </p>
             <label>
-              B-12 trial I
+              Input set
               <select
-                value={trialI}
+                value={inputRevision}
                 onChange={(event) =>
-                  setTrialI(event.target.value as "40" | "80")
+                  setInputRevision(event.target.value as "1" | "2")
                 }
               >
-                <option value="40">40 × 10⁶ mm⁴ · original</option>
-                <option value="80">80 × 10⁶ mm⁴ · revised</option>
+                <option value="1">Revision 1 · current Run</option>
+                <option value="2">Revision 2 · updated values</option>
               </select>
             </label>
             <button
               className={styles.runButton}
               type="button"
-              disabled={trialI !== "80" || latestRun === 2}
-              onClick={runRevisedWorkflow}
+              disabled={inputRevision !== "2" || latestRun === 2}
+              onClick={runRevision}
             >
-              {latestRun === 2 ? "Revised Run created" : "Run revised workflow"}
+              {latestRun === 2 ? "Revised Run created" : "Run Workflow"}
             </button>
             <small>
-              Prototype action. An agent-proposed input change and Run would
-              pause for approval.
+              An agent-proposed input change and durable Run would pause for
+              approval.
             </small>
           </section>
 
@@ -274,31 +403,24 @@ export function ProjectWorkflowPrototype() {
             <button
               type="button"
               aria-current={viewedRun === 1 ? "true" : undefined}
-              onClick={() => {
-                setViewedRun(1);
-                setDetailOpen(false);
-              }}
+              onClick={() => viewRun(1)}
             >
-              <strong>Run 1 · original input</strong>
-              <span>1 fails this check</span>
+              <strong>Run 1 · input revision 1</strong>
+              <span>2 findings</span>
             </button>
             {latestRun === 2 ? (
               <button
                 type="button"
                 aria-current={viewedRun === 2 ? "true" : undefined}
-                onClick={() => {
-                  setViewedRun(2);
-                  setDetailOpen(false);
-                }}
+                onClick={() => viewRun(2)}
               >
-                <strong>Run 2 · revised B-12</strong>
-                <span>All pass this check</span>
+                <strong>Run 2 · input revision 2</strong>
+                <span>1 finding</span>
               </button>
             ) : null}
           </section>
           <p className={styles.scopeNote}>
-            Passing this imposed-load deflection check is not a whole-beam
-            safety or code-compliance verdict.
+            Each Run retains its input snapshot, decisions, and linked outputs.
           </p>
         </aside>
       </div>

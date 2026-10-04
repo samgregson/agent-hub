@@ -8,24 +8,22 @@
 
 .overviewHeader {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 24px;
-  margin-bottom: 25px;
+  margin-bottom: 24px;
 }
 
 .overviewHeader h1 {
-  max-width: 22ch;
   margin: 0;
   color: var(--text-strong);
   font-size: clamp(2rem, 3.2vw, 2.65rem);
   letter-spacing: -0.03em;
-  line-height: 1.12;
 }
 
 .overviewHeader p {
   max-width: 70ch;
-  margin: 10px 0 0;
+  margin: 9px 0 0;
   color: var(--text-subtle);
   line-height: 1.5;
 }
@@ -42,7 +40,7 @@
 .runBanner {
   display: flex;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   align-items: center;
   padding: 16px 20px;
   border: 1px solid var(--line-strong);
@@ -57,11 +55,8 @@
   align-items: baseline;
 }
 
-.runBanner strong {
-  font-size: var(--font-size-body);
-}
-
-.runBanner span {
+.runBanner span,
+.comparison {
   color: var(--text-subtle);
 }
 
@@ -70,8 +65,7 @@
 }
 
 .comparison {
-  margin: 12px 0 0;
-  color: var(--text-subtle);
+  margin: 11px 0 0;
   font-size: var(--font-size-label);
   line-height: 1.5;
 }
@@ -79,9 +73,9 @@
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(260px, 310px);
-  gap: 30px;
-  margin-top: 28px;
+  gap: 28px;
   align-items: start;
+  margin-top: 28px;
 }
 
 .mainColumn,
@@ -92,7 +86,7 @@
 .sectionHeading {
   display: flex;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   align-items: baseline;
 }
 
@@ -100,98 +94,162 @@
 .sideColumn h2 {
   margin: 0;
   color: var(--text-strong);
-  font-size: 1.2rem;
+  font-size: 1.18rem;
 }
 
 .sectionHeading p {
-  margin: 0;
+  max-width: 65ch;
+  margin: 5px 0 0;
   color: var(--text-muted);
   font-size: var(--font-size-label);
+  line-height: 1.45;
 }
 
-.stepList {
-  list-style: none;
-  display: grid;
-  gap: 0;
-  margin: 17px 0 0;
-  padding: 0;
-  border-top: 1px solid var(--line);
-}
-
-.stepList li {
-  border-bottom: 1px solid var(--line);
-}
-
-.stepList button {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) minmax(110px, 0.55fr);
-  gap: 12px;
-  align-items: center;
-  width: 100%;
-  min-height: 74px;
-  padding: 11px 13px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-}
-
-.stepList button:hover,
-.stepList button[aria-current] {
-  background: var(--surface-selected);
-}
-
-.stepNumber {
-  display: grid;
-  place-items: center;
-  width: 25px;
-  height: 25px;
-  border-radius: 50%;
-  background: var(--surface-raised);
-  color: var(--text-subtle);
-  font-size: var(--font-size-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.stepText,
-.stepEnd {
-  display: grid;
+.viewToggle {
+  display: flex;
+  flex: 0 0 auto;
   gap: 4px;
-  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
 }
 
-.stepText strong {
-  color: var(--text-strong);
-  font-size: var(--font-size-body);
-}
-
-.stepText small,
-.stepEnd span {
-  color: var(--text-muted);
-  font-size: var(--font-size-meta);
-  line-height: 1.4;
-}
-
-.stepEnd {
-  justify-items: end;
-  text-align: right;
-}
-
-.stepEnd strong {
+.viewToggle button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-subtle);
-  font-size: var(--font-size-label);
-  font-weight: 600;
 }
 
-.stepDetail {
-  margin-top: 27px;
-  padding: 23px;
+.viewToggle button[aria-pressed="true"] {
+  background: var(--surface-selected);
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.map {
+  display: none;
+  position: relative;
+  height: 350px;
+  margin-top: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: var(--surface);
 }
 
-.stepDetail .sectionHeading span {
+.map.active {
+  display: block;
+}
+
+.map svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.map svg > path {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.7;
+}
+
+.map marker path {
+  fill: var(--text-muted);
+}
+
+.mapNode {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  width: 18%;
+  min-height: 82px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text);
+  text-align: left;
+}
+
+.mapNode:hover,
+.mapNode[aria-current] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+}
+
+.mapNode small {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+
+.mapNode strong {
+  color: var(--text-strong);
+  font-size: var(--font-size-label);
+  line-height: 1.2;
+}
+
+.outline {
+  display: none;
+  gap: 0;
+  margin-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.outline.active {
+  display: grid;
+}
+
+.outline button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  min-height: 65px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.outline button:hover,
+.outline button[aria-current] {
+  background: var(--surface-selected);
+}
+
+.outline button > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.outline strong {
+  color: var(--text-strong);
+}
+
+.outline small,
+.outline button > span:last-child {
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.35;
+}
+
+.nodeDetail {
+  margin-top: 23px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.nodeDetail .sectionHeading span {
   color: var(--accent);
   font-size: var(--font-size-label);
 }
@@ -208,13 +266,9 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
   margin: 0;
-  padding: 17px 0;
+  padding: 16px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-}
-
-.lineage div {
-  min-width: 0;
 }
 
 .lineage dt {
@@ -223,7 +277,7 @@
 }
 
 .lineage dd {
-  margin: 6px 0 0;
+  margin: 5px 0 0;
   color: var(--text);
   font-size: var(--font-size-label);
   line-height: 1.4;
@@ -231,7 +285,7 @@
 
 .recordLink {
   min-height: 40px;
-  margin-top: 18px;
+  margin-top: 17px;
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-control);
@@ -260,8 +314,12 @@
   margin: 0;
 }
 
+.recordSnapshot p + p {
+  margin-top: 7px;
+}
+
 .detailFoot {
-  margin: 18px 0 0;
+  margin: 17px 0 0;
   color: var(--text-muted);
   font-size: var(--font-size-label);
   line-height: 1.5;
@@ -269,19 +327,19 @@
 
 .sideColumn {
   display: grid;
-  gap: 25px;
+  gap: 24px;
 }
 
 .inputSection,
 .historySection {
-  padding: 20px;
+  padding: 19px;
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
   background: var(--surface);
 }
 
 .inputSection p {
-  margin: 10px 0 20px;
+  margin: 10px 0 18px;
   color: var(--text-subtle);
   font-size: var(--font-size-label);
   line-height: 1.5;
@@ -308,7 +366,7 @@
 .runButton {
   width: 100%;
   min-height: 44px;
-  margin-top: 15px;
+  margin-top: 14px;
   border: 0;
   border-radius: var(--radius-control);
   background: var(--accent);
@@ -324,14 +382,14 @@
 
 .inputSection small {
   display: block;
-  margin-top: 12px;
+  margin-top: 11px;
   color: var(--text-muted);
   line-height: 1.5;
 }
 
 .historySection {
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 
 .historySection h2 {
@@ -342,7 +400,7 @@
   display: grid;
   gap: 4px;
   width: 100%;
-  min-height: 59px;
+  min-height: 57px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
@@ -373,18 +431,17 @@
   display: none;
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 1180px) {
+  .map,
+  .viewToggle {
+    display: none !important;
+  }
+  .outline {
+    display: grid;
+  }
   .layout {
     grid-template-columns: minmax(0, 1fr) 260px;
     gap: 20px;
-  }
-  .stepList button {
-    grid-template-columns: 30px minmax(0, 1fr);
-  }
-  .stepEnd {
-    grid-column: 2;
-    justify-items: start;
-    text-align: left;
   }
 }
 
@@ -394,10 +451,10 @@
   }
   .workflowType {
     display: inline-block;
-    margin-top: 15px;
+    margin-top: 14px;
   }
   .runBanner {
-    align-items: start;
+    align-items: flex-start;
   }
   .layout {
     display: flex;
@@ -410,22 +467,25 @@
   .sectionHeading {
     display: block;
   }
-  .sectionHeading p,
-  .sectionHeading span {
+  .sectionHeading > span {
     display: block;
-    margin-top: 6px;
+    margin-top: 7px;
   }
-  .stepDetail {
+  .outline button {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .nodeDetail {
     display: none;
   }
   .detailOpen .overviewHeader,
   .detailOpen .runBanner,
   .detailOpen .comparison,
-  .detailOpen .stepSection,
+  .detailOpen .graphSection,
   .detailOpen .sideColumn {
     display: none;
   }
-  .detailOpen .stepDetail {
+  .detailOpen .nodeDetail {
     display: block;
     margin-top: 0;
   }
