@@ -9,7 +9,7 @@ import styles from "./project-explorer-prototype.module.css";
 // same illustrative Project records. Nothing here reads or writes Project data.
 type Variant = "A" | "B" | "C" | "D" | "E";
 type Destination =
-  "Overview" | "Chats" | "Work" | "Data" | "Sources" | "Plugins";
+  "Overview" | "Chats" | "Library" | "Data" | "Sources" | "Plugins";
 type Collection =
   "Datasets" | "Transform Definitions" | "Batch Definitions" | "Operations";
 type RecordKey =
@@ -66,7 +66,7 @@ const variants: { key: Variant; label: string }[] = [
 
 const destinations: Destination[] = [
   "Chats",
-  "Work",
+  "Library",
   "Data",
   "Sources",
   "Plugins",
@@ -231,7 +231,7 @@ export function ProjectExplorerPrototype() {
 
   function chooseDestination(next: Destination) {
     setChosenDestination(next);
-    if (next === "Work") setChosenSelected("artifact");
+    if (next === "Library") setChosenSelected("artifact");
     if (next === "Data" && selected === "artifact")
       setChosenSelected(
         primaryRecords[
@@ -252,7 +252,7 @@ export function ProjectExplorerPrototype() {
   }
 
   function openRecord(key: RecordKey) {
-    setChosenDestination(key === "artifact" ? "Work" : "Data");
+    setChosenDestination(key === "artifact" ? "Library" : "Data");
     if (key !== "artifact")
       setChosenCollection(
         variant === "D" || variant === "E"
@@ -586,19 +586,19 @@ export function ProjectExplorerPrototype() {
               </div>
             ) : null}
           </>
-        ) : destination === "Work" ? (
+        ) : destination === "Library" ? (
           <>
             <div className={styles.workspaceHeading}>
               <div>
-                <h1>Work</h1>
+                <h1>Library</h1>
                 <p>
-                  Project Artifacts and Files remain distinct from operational
-                  Data.
+                  Browse Project Files and Artifacts. Registered Datasets will
+                  join this Library after migration.
                 </p>
               </div>
             </div>
             <div className={styles.variantA}>
-              <aside className={styles.navigator} aria-label="Work items">
+              <aside className={styles.navigator} aria-label="Library items">
                 <RecordButton
                   recordKey="artifact"
                   selected={selected === "artifact"}

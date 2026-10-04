@@ -278,7 +278,7 @@ test("prototype keeps Runs and Result Sets contextual under Data definitions", a
   await expect(page.getByLabel("Data overview")).toBeVisible();
   await page
     .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Work" })
+    .getByRole("button", { name: "Library" })
     .click();
   await expect(
     page.getByRole("heading", { name: "Load summary" }),

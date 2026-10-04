@@ -255,7 +255,7 @@ test("navigator catalogs share collection typography at desktop and phone widths
   );
 });
 
-test("Work navigation combines Artifacts and Project files into one list", async ({
+test("Library navigation combines Artifacts and Project files into one list", async ({
   page,
 }) => {
   const project = {
@@ -301,15 +301,15 @@ test("Work navigation combines Artifacts and Project files into one list", async
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: "Library" }).click();
 
   await expect(
     page.getByRole("button", { exact: true, name: "Foundation status" }),
   ).toBeVisible();
-  await expect(page.getByLabel("Work items")).toContainText(
+  await expect(page.getByLabel("Library items")).toContainText(
     "Foundation status",
   );
-  await expect(page.getByLabel("Work items")).toContainText(
+  await expect(page.getByLabel("Library items")).toContainText(
     "/project/foundation-notes.md",
   );
   await expect(
@@ -324,7 +324,7 @@ test("Work navigation combines Artifacts and Project files into one list", async
   ).toHaveCount(0);
 });
 
-test("a Project file is deleted from its Work item action menu after confirmation", async ({
+test("a Project file is deleted from its Library item action menu after confirmation", async ({
   page,
 }) => {
   const project = {
@@ -364,7 +364,7 @@ test("a Project file is deleted from its Work item action menu after confirmatio
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: "Library" }).click();
   await page.getByRole("button", { name: `${path} actions` }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();
 
@@ -454,7 +454,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: "Library" }).click();
   await page
     .getByRole("button", { exact: true, name: "Foundation status" })
     .click();
@@ -557,7 +557,7 @@ test("an Artifact App receives its saved tool result through the MCP App bridge"
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: "Library" }).click();
   await page
     .getByRole("button", { exact: true, name: artifact.artifact.title })
     .click();
@@ -661,7 +661,7 @@ test.describe("at phone width", () => {
       drawer.getByRole("button", { name: "New Thread 1", exact: true }),
     ).toBeVisible();
 
-    await drawer.getByRole("button", { name: "Work" }).click();
+    await drawer.getByRole("button", { name: "Library" }).click();
     await drawer
       .getByRole("button", {
         exact: true,

@@ -39,10 +39,10 @@ import {
   createWorkspaceState,
   workspaceReducer,
 } from "./_state";
-import { WorkCatalog } from "./_work-catalog";
+import { LibraryCatalog } from "./_library-catalog";
 
 const activityLabels = {
-  artifacts: "Work",
+  artifacts: "Library",
   batchDefinitions: "Batch Definitions",
   chats: "Chats",
   datasets: "Datasets",
@@ -567,7 +567,7 @@ export function ProjectWorkspace() {
           />
         ) : (
           <>
-            <strong>Work preview</strong>
+            <strong>Library preview</strong>
             <p>
               Open a Project file, an Artifact, or a Thread-local scratch file
               to inspect it here.
@@ -647,7 +647,7 @@ function ProjectNavigator({
           </div>
         </>
       ) : selectedActivity === "artifacts" && project ? (
-        <WorkCatalog
+        <LibraryCatalog
           onOpenArtifact={onOpenArtifact}
           onOpenProjectFile={onOpenProjectFile}
           projectId={project.id}

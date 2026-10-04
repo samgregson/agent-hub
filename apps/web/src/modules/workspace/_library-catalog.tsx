@@ -7,22 +7,22 @@ import { Collection, CollectionItem, Menu, MenuItem } from "@/shared/ui";
 
 import styles from "./workspace.module.css";
 
-type WorkItem =
+type LibraryItem =
   | { id: string; kind: "artifact"; label: string; version: number }
   | { kind: "projectFile"; label: string; path: string; version: number };
 
-type PendingDeletion = WorkItem | null;
+type PendingDeletion = LibraryItem | null;
 
-interface WorkCatalogResult {
+interface LibraryCatalogResult {
   error: string | null;
-  items: WorkItem[] | null;
+  items: LibraryItem[] | null;
   projectId: string;
 }
 
-function combineWorkItems(
+function combineLibraryItems(
   artifacts: ArtifactCatalog,
   files: ProjectFileCatalog,
-): WorkItem[] {
+): LibraryItem[] {
   return [
     ...artifacts.artifacts.map((artifact) => ({
       id: artifact.id,
@@ -39,7 +39,7 @@ function combineWorkItems(
   ].sort((left, right) => left.label.localeCompare(right.label));
 }
 
-export function WorkCatalog({
+export function LibraryCatalog({
   onOpenArtifact,
   onOpenProjectFile,
   projectId,
@@ -48,7 +48,7 @@ export function WorkCatalog({
   onOpenProjectFile: (path: string) => void;
   projectId: string;
 }) {
-  const [result, setResult] = useState<WorkCatalogResult>({
+  const [result, setResult] = useState<LibraryCatalogResult>({
     error: null,
     items: null,
     projectId: "",
@@ -59,7 +59,7 @@ export function WorkCatalog({
   const items = result.projectId === projectId ? result.items : null;
   const error = result.projectId === projectId ? result.error : null;
 
-  async function deleteItem(item: WorkItem) {
+  async function deleteItem(item: LibraryItem) {
     setIsDeleting(true);
     setDeleteError(null);
     try {
@@ -104,9 +104,9 @@ export function WorkCatalog({
     ])
       .then(async ([artifactResponse, fileResponse]) => {
         if (!artifactResponse.ok || !fileResponse.ok) {
-          throw new Error("Work catalog unavailable");
+          throw new Error("Library catalog unavailable");
         }
-        return combineWorkItems(
+        return combineLibraryItems(
           (await artifactResponse.json()) as ArtifactCatalog,
           (await fileResponse.json()) as ProjectFileCatalog,
         );
@@ -117,7 +117,7 @@ export function WorkCatalog({
       .catch(() => {
         if (active) {
           setResult({
-            error: "Work items are temporarily unavailable.",
+            error: "Library items are temporarily unavailable.",
             items: null,
             projectId,
           });
@@ -129,9 +129,9 @@ export function WorkCatalog({
   }, [projectId]);
 
   return (
-    <section aria-label="Work items">
+    <section aria-label="Library items">
       {error ? <p className={styles.error}>{error}</p> : null}
-      {!items && !error ? <p>Loading work…</p> : null}
+      {!items && !error ? <p>Loading Library…</p> : null}
       <Collection>
         {items?.map((item) => (
           <CollectionItem
@@ -160,7 +160,7 @@ export function WorkCatalog({
           />
         ))}
       </Collection>
-      {items?.length === 0 ? <p>No work items yet.</p> : null}
+      {items?.length === 0 ? <p>No Library items yet.</p> : null}
       {pendingDeletion ? (
         <dialog
           aria-label="Confirm deletion"

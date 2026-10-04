@@ -67,7 +67,8 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Approval                   | Agent Hub policy plus LangGraph interrupt       | Application record and checkpointed interrupt state                                  |
 | Project Virtual Filesystem | Agent Hub                                       | Project-scoped PostgreSQL records exposed through a Deep Agents backend              |
 | Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
-| Dataset / Batch Definition | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
+| Dataset                    | Agent Hub Dataset Module                        | Registered typed Project VFS document plus query projection (target in #45; currently separate PostgreSQL records) |
+| Batch Definition           | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
 | Batch Run / Result Set     | Agent Hub                                       | PostgreSQL execution and result records                                               |
 | Transform Definition       | Agent Hub                                       | Project-scoped PostgreSQL definition record                                           |
 | Transform Run              | Agent Hub                                       | Project-scoped PostgreSQL snapshot and outcome record                                 |
@@ -75,13 +76,13 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
 | Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
 
-The Artifact catalog projection may repeat queryable envelope fields, but it is not a second authoritative document. It and the canonical VFS document update in one database transaction. LangGraph checkpoints are runtime history, not Artifact revision history.
+The Artifact catalog projection may repeat queryable envelope fields, but it is not a second authoritative document. It and the canonical VFS document update in one database transaction. The Dataset migration in #45 applies the same single-canonical-document rule while preserving Dataset-owned validation, Record identity, and existing Run snapshots. Generic Project File writes cannot modify registered Dataset or Artifact documents. LangGraph checkpoints are runtime history, not Artifact revision history.
 
 ## Modules and Interfaces
 
 ### Workspace Module — web
 
-Owns the selected Project, activity view, selected Thread, selected Artifact or Source, and panel layout. Project selection sits above the workspace. Chats, Artifacts, Sources, and Plugins are separate project-scoped rail views. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
+Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The agreed navigation target is Workflow overview, Chats, Library, Operations, Sources, and Plugins. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers; Operations groups Transform and MCP batch-binding definitions with contextual Runs. The current workspace still has separate Dataset and definition destinations until #37 and #45 are implemented. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
 
 Its Interface is application state plus navigation commands. It does not know how the agent runs or how a Plugin validates an Artifact.
 
@@ -127,7 +128,7 @@ The same-origin web proxy and assistant-ui AG-UI runtime are adapters at this se
 
 ### Project Files Module — API
 
-Implements Deep Agents' filesystem Interface over a Project-scoped PostgreSQL adapter. Trusted request context determines the namespace. `/project/**` is durable and shared between Threads; `/scratch/**` may remain Thread-local checkpointed state.
+Implements Deep Agents' filesystem Interface over a Project-scoped PostgreSQL adapter. Trusted request context determines the namespace. `/project/**` is durable and shared between Threads; `/scratch/**` may remain Thread-local checkpointed state. Registered Dataset and Artifact documents are readable through the Project filesystem, but generic file operations cannot replace their owning Modules' validated write commands.
 
 Generic file tools can list and read registered Artifact documents under `/project/.artifacts/**`, but cannot write those reserved paths. Artifact mutation crosses the Artifact Module Interface.
 
