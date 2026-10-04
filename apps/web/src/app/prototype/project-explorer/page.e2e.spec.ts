@@ -1,9 +1,67 @@
 import { expect, test } from "@playwright/test";
 
-test("Operations groups definitions while preview settings leave saved dataflow alone", async ({
+test("Project opens on the engineering Workflow and retains iteration history", async ({
   page,
 }) => {
   await page.goto("/prototype/project-explorer");
+  await expect(
+    page.getByRole("button", { name: "E · Workflow first" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByRole("heading", { name: "Review floor-beam deflection" }),
+  ).toBeVisible();
+  await expect(page.getByText("Workflow Run 1")).toBeVisible();
+  await page.getByRole("combobox", { name: "B-12 trial I" }).selectOption("80");
+  await page.getByRole("button", { name: "Run revised workflow" }).click();
+  await expect(page.getByText("Workflow Run 2")).toBeVisible();
+  await expect(
+    page.getByText("3 checked · 0 fail this check · no tool errors"),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/failed checks changed from 1 to 0/),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Isolate failed checks/ }).click();
+  await expect(
+    page.getByRole("region", { name: "Selected workflow step" }),
+  ).toContainText("Valid empty selection");
+  await page.getByRole("button", { name: "Inspect captured record" }).click();
+  await expect(
+    page.getByRole("button", { name: "Close captured record" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Run 1 · original input/ }).click();
+  await expect(page.getByText("Workflow Run 1")).toBeVisible();
+  await expect(
+    page.getByText("3 checked · 1 fails this check · no tool errors"),
+  ).toBeVisible();
+});
+
+test("phone Workflow drills into one step then returns to overview", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/prototype/project-explorer?variant=E");
+  await expect(
+    page.getByRole("region", { name: "Selected workflow step" }),
+  ).toBeHidden();
+  await page
+    .getByRole("button", { name: /Check imposed-load deflection/ })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Selected workflow step" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Workflow steps" }),
+  ).toBeHidden();
+  await page.getByRole("button", { name: "Back to workflow" }).click();
+  await expect(
+    page.getByRole("region", { name: "Workflow steps" }),
+  ).toBeVisible();
+});
+
+test("Operations groups definitions while preview settings leave saved dataflow alone", async ({
+  page,
+}) => {
+  await page.goto("/prototype/project-explorer?variant=D");
   await expect(
     page.getByRole("button", { name: "D · Operations" }),
   ).toHaveAttribute("aria-pressed", "true");

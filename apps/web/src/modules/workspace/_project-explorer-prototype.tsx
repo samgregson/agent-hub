@@ -2,12 +2,14 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 
+import { ProjectWorkflowPrototype } from "./_project-workflow-prototype";
 import styles from "./project-explorer-prototype.module.css";
 
 // Throwaway issue #37 prototype: compare navigation structures using the
 // same illustrative Project records. Nothing here reads or writes Project data.
-type Variant = "A" | "B" | "C" | "D";
-type Destination = "Chats" | "Work" | "Data" | "Sources" | "Plugins";
+type Variant = "A" | "B" | "C" | "D" | "E";
+type Destination =
+  "Overview" | "Chats" | "Work" | "Data" | "Sources" | "Plugins";
 type Collection =
   "Datasets" | "Transform Definitions" | "Batch Definitions" | "Operations";
 type RecordKey =
@@ -55,6 +57,7 @@ const sourceNames: Record<PreviewSource, string> = {
 };
 
 const variants: { key: Variant; label: string }[] = [
+  { key: "E", label: "Workflow first" },
   { key: "D", label: "Operations" },
   { key: "A", label: "Collection switcher" },
   { key: "B", label: "Expandable outline" },
@@ -68,6 +71,7 @@ const destinations: Destination[] = [
   "Sources",
   "Plugins",
 ];
+const workflowDestinations: Destination[] = ["Overview", ...destinations];
 const collections: Collection[] = [
   "Datasets",
   "Transform Definitions",
@@ -143,9 +147,11 @@ const linked: Partial<Record<RecordKey, { title: string; keys: RecordKey[] }>> =
   };
 
 function readVariant(): Variant {
-  if (typeof window === "undefined") return "D";
+  if (typeof window === "undefined") return "E";
   const value = new URLSearchParams(window.location.search).get("variant");
-  return value === "A" || value === "B" || value === "C" ? value : "D";
+  return value === "A" || value === "B" || value === "C" || value === "D"
+    ? value
+    : "E";
 }
 
 function subscribeVariant(callback: () => void) {
@@ -161,11 +167,20 @@ export function ProjectExplorerPrototype() {
   const variant = useSyncExternalStore(
     subscribeVariant,
     readVariant,
-    () => "D",
+    () => "E",
   );
-  const [destination, setDestination] = useState<Destination>("Data");
-  const [collection, setCollection] = useState<Collection>("Operations");
-  const [selected, setSelected] = useState<RecordKey | null>("transform");
+  const [chosenDestination, setChosenDestination] =
+    useState<Destination | null>(null);
+  const [chosenCollection, setChosenCollection] = useState<Collection | null>(
+    null,
+  );
+  const [chosenSelected, setChosenSelected] = useState<RecordKey | null>(null);
+  const destination =
+    chosenDestination ?? (variant === "E" ? "Overview" : "Data");
+  const collection =
+    chosenCollection ??
+    (variant === "D" || variant === "E" ? "Operations" : "Datasets");
+  const selected = chosenSelected ?? primaryRecords[collection][0];
   const [inspectingFlow, setInspectingFlow] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
@@ -186,10 +201,9 @@ export function ProjectExplorerPrototype() {
     url.searchParams.set("variant", next);
     window.history.replaceState(null, "", url);
     window.dispatchEvent(new Event("prototype-variant-changed"));
-    setDestination("Data");
-    const nextCollection = next === "D" ? "Operations" : "Datasets";
-    setCollection(nextCollection);
-    setSelected(primaryRecords[nextCollection][0]);
+    setChosenDestination(null);
+    setChosenCollection(null);
+    setChosenSelected(null);
     setInspectingFlow(false);
     setDrawerOpen(false);
     setMobileDetail(false);
@@ -216,11 +230,13 @@ export function ProjectExplorerPrototype() {
   }, [variant]);
 
   function chooseDestination(next: Destination) {
-    setDestination(next);
-    if (next === "Work") setSelected("artifact");
+    setChosenDestination(next);
+    if (next === "Work") setChosenSelected("artifact");
     if (next === "Data" && selected === "artifact")
-      setSelected(
-        primaryRecords[variant === "D" ? "Operations" : collection][0],
+      setChosenSelected(
+        primaryRecords[
+          variant === "D" || variant === "E" ? "Operations" : collection
+        ][0],
       );
     setDrawerOpen(false);
     setMobileDetail(false);
@@ -228,24 +244,24 @@ export function ProjectExplorerPrototype() {
   }
 
   function chooseCollection(next: Collection) {
-    setDestination("Data");
-    setCollection(next);
-    setSelected(primaryRecords[next][0]);
+    setChosenDestination("Data");
+    setChosenCollection(next);
+    setChosenSelected(primaryRecords[next][0]);
     setInspectingFlow(false);
     setMobileDetail(false);
   }
 
   function openRecord(key: RecordKey) {
-    setDestination(key === "artifact" ? "Work" : "Data");
+    setChosenDestination(key === "artifact" ? "Work" : "Data");
     if (key !== "artifact")
-      setCollection(
-        variant === "D"
+      setChosenCollection(
+        variant === "D" || variant === "E"
           ? key === "dataset"
             ? "Datasets"
             : "Operations"
           : collectionOf[key],
       );
-    setSelected(key);
+    setChosenSelected(key);
     setInspectingFlow(false);
     setDrawerOpen(false);
     setMobileDetail(true);
@@ -276,7 +292,7 @@ export function ProjectExplorerPrototype() {
       </header>
 
       <nav className={styles.rail} aria-label="Project views">
-        {destinations.map((item) => (
+        {(variant === "E" ? workflowDestinations : destinations).map((item) => (
           <button
             key={item}
             type="button"
@@ -298,33 +314,36 @@ export function ProjectExplorerPrototype() {
               </button>
             </div>
             <nav aria-label="Project views">
-              {destinations.map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  aria-current={destination === item ? "page" : undefined}
-                  onClick={() => chooseDestination(item)}
-                >
-                  {item}
-                </button>
-              ))}
+              {(variant === "E" ? workflowDestinations : destinations).map(
+                (item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    aria-current={destination === item ? "page" : undefined}
+                    onClick={() => chooseDestination(item)}
+                  >
+                    {item}
+                  </button>
+                ),
+              )}
             </nav>
             {destination === "Data" ? (
               <div className={styles.drawerCollections}>
-                {(variant === "D" ? operationCollections : collections).map(
-                  (item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      onClick={() => {
-                        chooseCollection(item);
-                        setDrawerOpen(false);
-                      }}
-                    >
-                      {item}
-                    </button>
-                  ),
-                )}
+                {(variant === "D" || variant === "E"
+                  ? operationCollections
+                  : collections
+                ).map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => {
+                      chooseCollection(item);
+                      setDrawerOpen(false);
+                    }}
+                  >
+                    {item}
+                  </button>
+                ))}
               </div>
             ) : null}
           </aside>
@@ -343,7 +362,7 @@ export function ProjectExplorerPrototype() {
           role="group"
           aria-label="Prototype variants"
         >
-          <strong>Compare Data navigation</strong>
+          <strong>Compare Project entry points</strong>
           {variants.map((item) => (
             <button
               key={item.key}
@@ -355,7 +374,9 @@ export function ProjectExplorerPrototype() {
             </button>
           ))}
         </div>
-        {destination === "Data" ? (
+        {destination === "Overview" && variant === "E" ? (
+          <ProjectWorkflowPrototype />
+        ) : destination === "Data" ? (
           <>
             <div className={styles.workspaceHeading}>
               <div>
@@ -366,7 +387,7 @@ export function ProjectExplorerPrototype() {
                 </p>
               </div>
             </div>
-            {variant === "D" ? (
+            {variant === "D" || variant === "E" ? (
               <div className={styles.variantD}>
                 <aside
                   className={styles.navigator}

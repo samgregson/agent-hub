@@ -1,0 +1,445 @@
+.workflow {
+  color: var(--text);
+}
+
+.workflow button {
+  cursor: pointer;
+}
+
+.overviewHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 25px;
+}
+
+.overviewHeader h1 {
+  max-width: 22ch;
+  margin: 0;
+  color: var(--text-strong);
+  font-size: clamp(2rem, 3.2vw, 2.65rem);
+  letter-spacing: -0.03em;
+  line-height: 1.12;
+}
+
+.overviewHeader p {
+  max-width: 70ch;
+  margin: 10px 0 0;
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+
+.workflowType {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+
+.runBanner {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 16px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-selected);
+}
+
+.runBanner > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: baseline;
+}
+
+.runBanner strong {
+  font-size: var(--font-size-body);
+}
+
+.runBanner span {
+  color: var(--text-subtle);
+}
+
+.runState {
+  font-size: var(--font-size-label);
+}
+
+.comparison {
+  margin: 12px 0 0;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+  line-height: 1.5;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 310px);
+  gap: 30px;
+  margin-top: 28px;
+  align-items: start;
+}
+
+.mainColumn,
+.sideColumn {
+  min-width: 0;
+}
+
+.sectionHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: baseline;
+}
+
+.sectionHeading h2,
+.sideColumn h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 1.2rem;
+}
+
+.sectionHeading p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+}
+
+.stepList {
+  list-style: none;
+  display: grid;
+  gap: 0;
+  margin: 17px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.stepList li {
+  border-bottom: 1px solid var(--line);
+}
+
+.stepList button {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) minmax(110px, 0.55fr);
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 74px;
+  padding: 11px 13px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.stepList button:hover,
+.stepList button[aria-current] {
+  background: var(--surface-selected);
+}
+
+.stepNumber {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  color: var(--text-subtle);
+  font-size: var(--font-size-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.stepText,
+.stepEnd {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stepText strong {
+  color: var(--text-strong);
+  font-size: var(--font-size-body);
+}
+
+.stepText small,
+.stepEnd span {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+  line-height: 1.4;
+}
+
+.stepEnd {
+  justify-items: end;
+  text-align: right;
+}
+
+.stepEnd strong {
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+}
+
+.stepDetail {
+  margin-top: 27px;
+  padding: 23px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.stepDetail .sectionHeading span {
+  color: var(--accent);
+  font-size: var(--font-size-label);
+}
+
+.outcome {
+  margin: 16px 0 18px;
+  color: var(--text-strong);
+  font-size: 1.05rem;
+  line-height: 1.5;
+}
+
+.lineage {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 17px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.lineage div {
+  min-width: 0;
+}
+
+.lineage dt {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+
+.lineage dd {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: var(--font-size-label);
+  line-height: 1.4;
+}
+
+.recordLink {
+  min-height: 40px;
+  margin-top: 18px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+.recordLink:hover {
+  border-color: var(--accent);
+}
+
+.recordSnapshot {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.recordSnapshot strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.recordSnapshot p {
+  margin: 0;
+}
+
+.detailFoot {
+  margin: 18px 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.5;
+}
+
+.sideColumn {
+  display: grid;
+  gap: 25px;
+}
+
+.inputSection,
+.historySection {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.inputSection p {
+  margin: 10px 0 20px;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+  line-height: 1.5;
+}
+
+.inputSection label {
+  display: grid;
+  gap: 8px;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.inputSection select {
+  width: 100%;
+  min-height: 43px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.runButton {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 15px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+}
+
+.runButton:disabled {
+  cursor: default;
+  background: var(--surface-selected);
+  color: var(--text-muted);
+}
+
+.inputSection small {
+  display: block;
+  margin-top: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.historySection {
+  display: grid;
+  gap: 10px;
+}
+
+.historySection h2 {
+  margin-bottom: 4px;
+}
+
+.historySection button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 59px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text);
+  text-align: left;
+}
+
+.historySection button[aria-current],
+.historySection button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-selected);
+}
+
+.historySection button span {
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.scopeNote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+  line-height: 1.5;
+}
+
+.mobileBack {
+  display: none;
+}
+
+@media (max-width: 1050px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 260px;
+    gap: 20px;
+  }
+  .stepList button {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+  .stepEnd {
+    grid-column: 2;
+    justify-items: start;
+    text-align: left;
+  }
+}
+
+@media (max-width: 760px) {
+  .overviewHeader {
+    display: block;
+  }
+  .workflowType {
+    display: inline-block;
+    margin-top: 15px;
+  }
+  .runBanner {
+    align-items: start;
+  }
+  .layout {
+    display: flex;
+    flex-direction: column;
+  }
+  .mainColumn,
+  .sideColumn {
+    width: 100%;
+  }
+  .sectionHeading {
+    display: block;
+  }
+  .sectionHeading p,
+  .sectionHeading span {
+    display: block;
+    margin-top: 6px;
+  }
+  .stepDetail {
+    display: none;
+  }
+  .detailOpen .overviewHeader,
+  .detailOpen .runBanner,
+  .detailOpen .comparison,
+  .detailOpen .stepSection,
+  .detailOpen .sideColumn {
+    display: none;
+  }
+  .detailOpen .stepDetail {
+    display: block;
+    margin-top: 0;
+  }
+  .mobileBack {
+    display: block;
+    min-height: 40px;
+    margin-bottom: 16px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
+    color: var(--text);
+  }
+  .lineage {
+    grid-template-columns: 1fr;
+  }
+}
