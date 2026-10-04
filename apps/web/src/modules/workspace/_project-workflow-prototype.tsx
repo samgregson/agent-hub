@@ -125,13 +125,9 @@ function recordLabel(node: WorkflowNode, run: RunNumber) {
 
 export function ProjectWorkflowPrototype({
   onEdit,
-  onBrowseLibrary,
-  onBrowseOperations,
   onOpenDefinition,
 }: {
   onEdit?: () => void;
-  onBrowseLibrary?: () => void;
-  onBrowseOperations?: () => void;
   onOpenDefinition?: (key: NodeKey | "output") => void;
 }) {
   const [inputRevision, setInputRevision] = useState<"1" | "2">("1");
@@ -177,12 +173,6 @@ export function ProjectWorkflowPrototype({
           </p>
         </div>
         <div className={styles.headerActions}>
-          <button type="button" onClick={onBrowseLibrary}>
-            Browse Library
-          </button>
-          <button type="button" onClick={onBrowseOperations}>
-            Browse Operations
-          </button>
           <button type="button" onClick={onEdit}>
             Edit workflow
           </button>

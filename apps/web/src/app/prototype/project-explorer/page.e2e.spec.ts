@@ -10,6 +10,9 @@ test("Project opens on a branching Workflow and retains iteration history", asyn
   await expect(
     page.getByRole("heading", { name: "Design review" }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Browse Library|Browse Operations/ }),
+  ).toHaveCount(0);
   await expect(page.getByLabel("Read-only dependency map")).toBeVisible();
   await expect(
     page.getByLabel("Read-only dependency map").getByRole("button"),
@@ -106,8 +109,8 @@ test("Workflow creation connects Operations to editable dependencies", async ({
     page.getByRole("region", { name: "Workflow definition", exact: true }),
   ).toContainText("Select findings + Extract criteria + Evaluate records");
   await page
-    .getByRole("button", { name: "Browse Operations", exact: true })
-    .first()
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations", exact: true })
     .click();
   await expect(page.getByLabel("Operations catalog")).toBeVisible();
   await page
@@ -152,11 +155,36 @@ test("Workflow creation connects Operations to editable dependencies", async ({
   );
 });
 
+test("Workflow editor adds an existing Library item without leaving the graph", async ({
+  page,
+}) => {
+  await page.goto("/prototype/project-explorer?variant=E");
+  await page.getByRole("button", { name: "Edit workflow" }).click();
+  await expect(page.getByLabel("Available workflow inputs")).toContainText(
+    "Project parameters.json",
+  );
+  await page
+    .getByLabel("Available workflow inputs")
+    .getByRole("button", { name: /Project parameters.json/ })
+    .click();
+  await expect(page.getByLabel("Workflow definition map")).toBeVisible();
+  await page.getByRole("button", { name: "Add to definition" }).click();
+  await expect(page.getByLabel("Workflow definition map")).toContainText(
+    "Project parameters.json",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Edit workflow" }),
+  ).toBeVisible();
+});
+
 test("Library holds typed content and connects a file to the Workflow", async ({
   page,
 }) => {
   await page.goto("/prototype/project-explorer?variant=E");
-  await page.getByRole("button", { name: "Browse Library" }).click();
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Library", exact: true })
+    .click();
   await expect(page.getByLabel("Library catalog")).toBeVisible();
   await expect(page.getByLabel("Library collections")).toContainText(
     "Input set",
@@ -179,14 +207,20 @@ test("Library holds typed content and connects a file to the Workflow", async ({
   await expect(page.getByLabel("Project File viewer")).toContainText(
     "format depends on the consuming app",
   );
-  await page.getByRole("button", { name: "View workflow" }).click();
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Overview", exact: true })
+    .click();
   await page
     .getByLabel("Read-only dependency map")
     .getByRole("button", { name: /Review guidance/ })
     .click();
   await page.getByRole("button", { name: "Open in Library" }).click();
   await expect(page.getByLabel("Project File viewer")).toBeVisible();
-  await page.getByRole("button", { name: "View workflow" }).click();
+  await expect(
+    page.getByText("Opened from Design review / Review guidance"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Back to Review guidance" }).click();
   await page
     .getByLabel("Read-only dependency map")
     .getByRole("button", { name: /Draft review/ })
@@ -195,6 +229,9 @@ test("Library holds typed content and connects a file to the Workflow", async ({
     .getByRole("button", { name: "Open saved Artifact in Library" })
     .click();
   await expect(page.getByLabel("Artifact viewer")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Back to Draft review" }),
+  ).toBeVisible();
 });
 
 test("phone Library keeps catalog and record viewer as separate primary surfaces", async ({
@@ -202,7 +239,11 @@ test("phone Library keeps catalog and record viewer as separate primary surfaces
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/prototype/project-explorer?variant=E");
-  await page.getByRole("button", { name: "Browse Library" }).click();
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  await page
+    .getByRole("complementary", { name: "Project navigation" })
+    .getByRole("button", { name: "Library", exact: true })
+    .click();
   await expect(page.getByLabel("Library catalog")).toBeVisible();
   await expect(page.getByLabel("Library detail")).toBeHidden();
   await page

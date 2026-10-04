@@ -36,12 +36,17 @@
   color: var(--text-subtle);
   line-height: 1.5;
 }
+.pageHead .location {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+}
 .pageHead > button,
 .panelHead button,
 .composePanel > button,
-.browseActions button,
+.stepChooser button,
+.returnPath button,
 .actions button,
-.context button,
 .mobileBack {
   min-height: 40px;
   padding: 0 12px;
@@ -58,19 +63,6 @@
   background: var(--surface-selected);
   color: var(--text-subtle);
   line-height: 1.45;
-}
-.browseActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.browseActions button {
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-control);
-  background: var(--surface-raised);
-  color: var(--text);
 }
 .columns {
   display: grid;
@@ -217,6 +209,27 @@
 .composePanel > button {
   margin-bottom: 12px;
 }
+.stepChooser {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+.stepChooser p {
+  margin: 0 0 8px;
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+.stepChooser button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+}
+.stepChooser small {
+  color: var(--text-muted);
+}
 .pending {
   display: grid;
   gap: 8px;
@@ -313,6 +326,20 @@
 .recordDetail h2 {
   margin-top: 7px;
   font-size: 1.8rem;
+}
+.returnPath {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 18px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.returnPath span {
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
 }
 .contentViewer {
   margin-top: 22px;

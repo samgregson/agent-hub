@@ -35,6 +35,12 @@ const startingItems: CatalogItem[] = [
     detail: "Version 2 · text · reusable input",
   },
   {
+    id: "parameters",
+    name: "Project parameters.json",
+    kind: "Project File",
+    detail: "Version 1 · JSON · reusable input",
+  },
+  {
     id: "output",
     name: "Review draft",
     kind: "Artifact",
@@ -257,6 +263,10 @@ export function ProjectLifecyclePrototype({
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [definitionSaved, setDefinitionSaved] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
+  const [returnToNode, setReturnToNode] = useState<{
+    itemId: string;
+    name: string;
+  } | null>(null);
   const selectedRecord = items.find((item) => item.id === selectedId);
   const selected =
     destination === "Operations" &&
@@ -282,11 +292,25 @@ export function ProjectLifecyclePrototype({
       dependencies: stepBindings[step.id] ?? step.dependencies,
     })),
   ];
+  const usedItemIds = new Set([
+    ...initialSteps.map((step) => step.id),
+    ...draftSteps.map((step) => step.assetId),
+  ]);
+  const availableItems = items.filter((item) => !usedItemIds.has(item.id));
+  const linkedFromWorkflow =
+    returnToNode?.itemId === selected?.id ? returnToNode : null;
 
   function openCatalog(id: string) {
     const item = items.find((entry) => entry.id === id);
     if (!item) return;
     setSelectedId(id);
+    setReturnToNode({
+      itemId: id,
+      name:
+        id === "output"
+          ? "Draft review"
+          : (initialSteps.find((step) => step.id === id)?.name ?? item.name),
+    });
     const inLibrary =
       item.kind === "Dataset" ||
       item.kind === "Project File" ||
@@ -308,6 +332,7 @@ export function ProjectLifecyclePrototype({
       detail: newDetail.trim() || "New definition · draft",
     };
     setItems((current) => [...current, item]);
+    setReturnToNode(null);
     setSelectedId(item.id);
     if (creating === "Dataset" || creating === "Project File")
       setCollection("All");
@@ -318,6 +343,7 @@ export function ProjectLifecyclePrototype({
   }
 
   function attachToWorkflow(id: string) {
+    setReturnToNode(null);
     setPendingId(id);
     setDependencies([]);
     setWorkflowEditing(true);
@@ -376,8 +402,6 @@ export function ProjectLifecyclePrototype({
       <div hidden={destination !== "Overview" || workflowEditing}>
         <ProjectWorkflowPrototype
           onEdit={() => setWorkflowEditing(true)}
-          onBrowseLibrary={() => onNavigate("Library")}
-          onBrowseOperations={() => onNavigate("Operations")}
           onOpenDefinition={openCatalog}
         />
       </div>
@@ -413,17 +437,6 @@ export function ProjectLifecyclePrototype({
                     step to edit its inputs.
                   </p>
                 </div>
-                <div className={styles.browseActions}>
-                  <button type="button" onClick={() => onNavigate("Library")}>
-                    Browse Library
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate("Operations")}
-                  >
-                    Browse Operations
-                  </button>
-                </div>
               </div>
               <DefinitionGraph
                 steps={allSteps}
@@ -453,14 +466,6 @@ export function ProjectLifecyclePrototype({
                 Select a Library item or Operation. Dependencies determine which
                 captured values feed this step.
               </p>
-              <div className={styles.browseActions}>
-                <button type="button" onClick={() => onNavigate("Library")}>
-                  Choose from Library
-                </button>
-                <button type="button" onClick={() => onNavigate("Operations")}>
-                  Choose from Operations
-                </button>
-              </div>
               {pending ? (
                 <div className={styles.pending}>
                   <strong>{pending.name}</strong>
@@ -534,10 +539,32 @@ export function ProjectLifecyclePrototype({
                   </button>
                 </div>
               ) : (
-                <p className={styles.hint}>
-                  Select a step to edit its bindings, or choose a record from
-                  Library or Operations to add another.
-                </p>
+                <div
+                  className={styles.stepChooser}
+                  aria-label="Available workflow inputs"
+                >
+                  <p>
+                    Choose an existing item. Create and manage items in Library
+                    or Operations using the Project rail.
+                  </p>
+                  {availableItems.length ? (
+                    availableItems.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setPendingId(item.id);
+                          setDependencies([]);
+                        }}
+                      >
+                        <strong>{item.name}</strong>
+                        <small>{item.kind}</small>
+                      </button>
+                    ))
+                  ) : (
+                    <p>Every available item is already in this Definition.</p>
+                  )}
+                </div>
               )}
             </section>
           </div>
@@ -551,6 +578,9 @@ export function ProjectLifecyclePrototype({
         >
           <header className={styles.pageHead}>
             <div>
+              <p className={styles.location}>
+                Riverside extension / {destination}
+              </p>
               <h1>{destination}</h1>
               <p>
                 {destination === "Library"
@@ -558,9 +588,6 @@ export function ProjectLifecyclePrototype({
                   : "Create reusable Transforms and MCP bindings. Runs and results stay with their definitions."}
               </p>
             </div>
-            <button type="button" onClick={() => onNavigate("Overview")}>
-              View workflow
-            </button>
           </header>
           <div className={styles.columns}>
             <aside
@@ -583,6 +610,7 @@ export function ProjectLifecyclePrototype({
                           setCollection(name);
                           setCreating(null);
                           setMobileDetail(false);
+                          setReturnToNode(null);
                         }}
                       >
                         {name}
@@ -598,6 +626,7 @@ export function ProjectLifecyclePrototype({
                 <button
                   type="button"
                   onClick={() => {
+                    setReturnToNode(null);
                     setCreating(
                       destination === "Library" ? "Dataset" : "Transform",
                     );
@@ -637,6 +666,7 @@ export function ProjectLifecyclePrototype({
                       }
                       onClick={() => {
                         setSelectedId(item.id);
+                        setReturnToNode(null);
                         setCreating(null);
                         setEditingItem(false);
                         setMobileDetail(true);
@@ -744,6 +774,19 @@ export function ProjectLifecyclePrototype({
                   <small>{selected.kind}</small>
                   <h2>{selected.name}</h2>
                   <p>{selected.detail}</p>
+                  {linkedFromWorkflow ? (
+                    <div className={styles.returnPath}>
+                      <span>
+                        Opened from Design review / {linkedFromWorkflow.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onNavigate("Overview")}
+                      >
+                        Back to {linkedFromWorkflow.name}
+                      </button>
+                    </div>
+                  ) : null}
                   {selected.kind === "Dataset" ? (
                     <section
                       className={styles.contentViewer}
@@ -851,13 +894,15 @@ export function ProjectLifecyclePrototype({
                             : "definition"}
                       </button>
                     ) : null}
-                    <button
-                      className={styles.primary}
-                      type="button"
-                      onClick={() => attachToWorkflow(selected.id)}
-                    >
-                      Use in workflow
-                    </button>
+                    {!usedItemIds.has(selected.id) ? (
+                      <button
+                        className={styles.primary}
+                        type="button"
+                        onClick={() => attachToWorkflow(selected.id)}
+                      >
+                        Use in workflow
+                      </button>
+                    ) : null}
                   </div>
                   {editingItem ? (
                     <form
@@ -887,22 +932,14 @@ export function ProjectLifecyclePrototype({
                     </form>
                   ) : null}
                   <section className={styles.context}>
-                    <h3>Used by workflow</h3>
+                    <h3>Workflow relationship</h3>
                     <p>
-                      {initialSteps.some((step) => step.id === selected.id) ||
-                      draftSteps.some((step) => step.assetId === selected.id)
-                        ? "Design review · inspect its bindings in the Workflow Definition"
-                        : "No workflow steps use this record yet."}
+                      {usedItemIds.has(selected.id)
+                        ? `Used in Design review as ${initialSteps.find((step) => step.id === selected.id)?.name ?? selected.name}. The Workflow Definition owns the binding; completed Runs keep captured versions.`
+                        : selected.kind === "Artifact"
+                          ? "Explicitly saved from Design review / Workflow Run 1. The Run retains its producing inputs."
+                          : "No workflow steps use this record yet."}
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setWorkflowEditing(true);
-                        onNavigate("Overview");
-                      }}
-                    >
-                      Open workflow definition
-                    </button>
                   </section>
                   {destination === "Operations" ? (
                     <section className={styles.context}>
@@ -921,17 +958,6 @@ export function ProjectLifecyclePrototype({
                         only. Every durable Run captures its selected input
                         independently.
                       </p>
-                      {initialSteps.some((step) => step.id === selected.id) ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setWorkflowEditing(false);
-                            onNavigate("Overview");
-                          }}
-                        >
-                          Inspect captured Run
-                        </button>
-                      ) : null}
                     </section>
                   ) : null}
                 </div>
