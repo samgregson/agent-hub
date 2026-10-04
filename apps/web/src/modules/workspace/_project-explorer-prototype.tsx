@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { ProjectLifecyclePrototype } from "./_project-lifecycle-prototype";
 import styles from "./project-explorer-prototype.module.css";
@@ -9,7 +9,13 @@ import styles from "./project-explorer-prototype.module.css";
 // same illustrative Project records. Nothing here reads or writes Project data.
 type Variant = "A" | "B" | "C" | "D" | "E";
 type Destination =
-  "Overview" | "Chats" | "Library" | "Data" | "Sources" | "Plugins";
+  | "Overview"
+  | "Chats"
+  | "Library"
+  | "Operations"
+  | "Data"
+  | "Sources"
+  | "Plugins";
 type Collection =
   "Datasets" | "Transform Definitions" | "Batch Definitions" | "Operations";
 type RecordKey =
@@ -71,7 +77,14 @@ const destinations: Destination[] = [
   "Sources",
   "Plugins",
 ];
-const workflowDestinations: Destination[] = ["Overview", ...destinations];
+const workflowDestinations: Destination[] = [
+  "Overview",
+  "Chats",
+  "Library",
+  "Operations",
+  "Sources",
+  "Plugins",
+];
 const collections: Collection[] = [
   "Datasets",
   "Transform Definitions",
@@ -164,6 +177,7 @@ function subscribeVariant(callback: () => void) {
 }
 
 export function ProjectExplorerPrototype() {
+  const workspaceRef = useRef<HTMLElement | null>(null);
   const variant = useSyncExternalStore(
     subscribeVariant,
     readVariant,
@@ -231,6 +245,7 @@ export function ProjectExplorerPrototype() {
 
   function chooseDestination(next: Destination) {
     setChosenDestination(next);
+    workspaceRef.current?.scrollTo({ top: 0 });
     if (next === "Library") setChosenSelected("artifact");
     if (next === "Data" && selected === "artifact")
       setChosenSelected(
@@ -252,6 +267,7 @@ export function ProjectExplorerPrototype() {
   }
 
   function openRecord(key: RecordKey) {
+    workspaceRef.current?.scrollTo({ top: 0 });
     setChosenDestination(key === "artifact" ? "Library" : "Data");
     if (key !== "artifact")
       setChosenCollection(
@@ -356,7 +372,7 @@ export function ProjectExplorerPrototype() {
         </div>
       ) : null}
 
-      <section className={styles.workspace}>
+      <section className={styles.workspace} ref={workspaceRef}>
         <div
           className={styles.variantBar}
           role="group"
@@ -375,7 +391,9 @@ export function ProjectExplorerPrototype() {
           ))}
         </div>
         {variant === "E" &&
-        (destination === "Overview" || destination === "Data") ? (
+        (destination === "Overview" ||
+          destination === "Library" ||
+          destination === "Operations") ? (
           <ProjectLifecyclePrototype
             destination={destination}
             onNavigate={chooseDestination}

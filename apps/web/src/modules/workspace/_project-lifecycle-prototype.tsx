@@ -5,7 +5,8 @@ import { useState } from "react";
 import { ProjectWorkflowPrototype } from "./_project-workflow-prototype";
 import styles from "./project-lifecycle-prototype.module.css";
 
-type CatalogKind = "Dataset" | "Transform" | "MCP batch binding";
+type CatalogKind =
+  "Dataset" | "Project File" | "Artifact" | "Transform" | "MCP batch binding";
 type CatalogItem = {
   id: string;
   name: string;
@@ -26,6 +27,18 @@ const startingItems: CatalogItem[] = [
     name: "Input set",
     kind: "Dataset",
     detail: "3 records · revision 2 available",
+  },
+  {
+    id: "references",
+    name: "Review guidance.txt",
+    kind: "Project File",
+    detail: "Version 2 · text · reusable input",
+  },
+  {
+    id: "output",
+    name: "Review draft",
+    kind: "Artifact",
+    detail: "Explicitly saved from Workflow Run 1",
   },
   {
     id: "evaluate",
@@ -56,8 +69,8 @@ const initialSteps = [
   },
   {
     id: "references",
-    name: "Reference sources",
-    kind: "Sources",
+    name: "Review guidance",
+    kind: "Project File",
     dependencies: [] as string[],
   },
   {
@@ -220,13 +233,13 @@ export function ProjectLifecyclePrototype({
   destination,
   onNavigate,
 }: {
-  destination: "Overview" | "Data";
-  onNavigate: (next: "Overview" | "Data") => void;
+  destination: "Overview" | "Library" | "Operations";
+  onNavigate: (next: "Overview" | "Library" | "Operations") => void;
 }) {
   const [items, setItems] = useState(startingItems);
-  const [collection, setCollection] = useState<"Datasets" | "Operations">(
-    "Datasets",
-  );
+  const [collection, setCollection] = useState<
+    "All" | "Datasets" | "Files" | "Artifacts"
+  >("All");
   const [selectedId, setSelectedId] = useState("inputs");
   const [creating, setCreating] = useState<CatalogKind | null>(null);
   const [newName, setNewName] = useState("");
@@ -244,7 +257,18 @@ export function ProjectLifecyclePrototype({
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [definitionSaved, setDefinitionSaved] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
-  const selected = items.find((item) => item.id === selectedId);
+  const selectedRecord = items.find((item) => item.id === selectedId);
+  const selected =
+    destination === "Operations" &&
+    selectedRecord?.kind !== "Transform" &&
+    selectedRecord?.kind !== "MCP batch binding"
+      ? items.find((item) => item.id === "evaluate")
+      : destination === "Library" &&
+          selectedRecord?.kind !== "Dataset" &&
+          selectedRecord?.kind !== "Project File" &&
+          selectedRecord?.kind !== "Artifact"
+        ? items.find((item) => item.id === "inputs")
+        : selectedRecord;
   const pending = items.find((item) => item.id === pendingId);
   const allSteps = [
     ...initialSteps.map((step) => ({
@@ -263,11 +287,15 @@ export function ProjectLifecyclePrototype({
     const item = items.find((entry) => entry.id === id);
     if (!item) return;
     setSelectedId(id);
-    setCollection(item.kind === "Dataset" ? "Datasets" : "Operations");
+    const inLibrary =
+      item.kind === "Dataset" ||
+      item.kind === "Project File" ||
+      item.kind === "Artifact";
+    if (inLibrary) setCollection("All");
     setCreating(null);
     setEditingItem(false);
     setMobileDetail(true);
-    onNavigate("Data");
+    onNavigate(inLibrary ? "Library" : "Operations");
   }
 
   function createItem(event: React.FormEvent<HTMLFormElement>) {
@@ -281,6 +309,8 @@ export function ProjectLifecyclePrototype({
     };
     setItems((current) => [...current, item]);
     setSelectedId(item.id);
+    if (creating === "Dataset" || creating === "Project File")
+      setCollection("All");
     setCreating(null);
     setNewName("");
     setNewDetail("");
@@ -297,7 +327,15 @@ export function ProjectLifecyclePrototype({
   }
 
   function addStep() {
-    if (!pendingId || !dependencies.length) return;
+    if (!pendingId) return;
+    const pendingItem = items.find((item) => item.id === pendingId);
+    if (
+      !dependencies.length &&
+      pendingItem?.kind !== "Dataset" &&
+      pendingItem?.kind !== "Project File" &&
+      pendingItem?.kind !== "Artifact"
+    )
+      return;
     setDraftSteps((current) => [
       ...current,
       { id: `step-${current.length + 1}`, assetId: pendingId, dependencies },
@@ -338,7 +376,8 @@ export function ProjectLifecyclePrototype({
       <div hidden={destination !== "Overview" || workflowEditing}>
         <ProjectWorkflowPrototype
           onEdit={() => setWorkflowEditing(true)}
-          onBrowseData={() => onNavigate("Data")}
+          onBrowseLibrary={() => onNavigate("Library")}
+          onBrowseOperations={() => onNavigate("Operations")}
           onOpenDefinition={openCatalog}
         />
       </div>
@@ -349,8 +388,8 @@ export function ProjectLifecyclePrototype({
             <div>
               <h1>Edit workflow</h1>
               <p>
-                Choose reusable Data records, then bind each step to its
-                upstream inputs.
+                Choose content from Library and definitions from Operations,
+                then bind each step to its upstream inputs.
               </p>
             </div>
             <button type="button" onClick={() => setWorkflowEditing(false)}>
@@ -374,9 +413,17 @@ export function ProjectLifecyclePrototype({
                     step to edit its inputs.
                   </p>
                 </div>
-                <button type="button" onClick={() => onNavigate("Data")}>
-                  Browse Data
-                </button>
+                <div className={styles.browseActions}>
+                  <button type="button" onClick={() => onNavigate("Library")}>
+                    Browse Library
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate("Operations")}
+                  >
+                    Browse Operations
+                  </button>
+                </div>
               </div>
               <DefinitionGraph
                 steps={allSteps}
@@ -403,12 +450,17 @@ export function ProjectLifecyclePrototype({
             >
               <h2>Add a step</h2>
               <p>
-                Select a Dataset or operation from Data. Dependencies determine
-                which captured outputs feed this step.
+                Select a Library item or Operation. Dependencies determine which
+                captured values feed this step.
               </p>
-              <button type="button" onClick={() => onNavigate("Data")}>
-                Choose from Data
-              </button>
+              <div className={styles.browseActions}>
+                <button type="button" onClick={() => onNavigate("Library")}>
+                  Choose from Library
+                </button>
+                <button type="button" onClick={() => onNavigate("Operations")}>
+                  Choose from Operations
+                </button>
+              </div>
               {pending ? (
                 <div className={styles.pending}>
                   <strong>{pending.name}</strong>
@@ -429,7 +481,12 @@ export function ProjectLifecyclePrototype({
                   <button
                     className={styles.primary}
                     type="button"
-                    disabled={!dependencies.length}
+                    disabled={
+                      !dependencies.length &&
+                      pending.kind !== "Dataset" &&
+                      pending.kind !== "Project File" &&
+                      pending.kind !== "Artifact"
+                    }
                     onClick={addStep}
                   >
                     Add to definition
@@ -478,8 +535,8 @@ export function ProjectLifecyclePrototype({
                 </div>
               ) : (
                 <p className={styles.hint}>
-                  Select a step to edit its bindings, or choose a record in Data
-                  to add another.
+                  Select a step to edit its bindings, or choose a record from
+                  Library or Operations to add another.
                 </p>
               )}
             </section>
@@ -487,17 +544,18 @@ export function ProjectLifecyclePrototype({
         </section>
       ) : null}
 
-      {destination === "Data" ? (
+      {destination === "Library" || destination === "Operations" ? (
         <section
-          className={`${styles.data} ${mobileDetail ? styles.mobileDetail : ""}`}
-          aria-label="Data catalog"
+          className={`${styles.data} ${mobileDetail && selectedId === selected?.id ? styles.mobileDetail : ""}`}
+          aria-label={`${destination} catalog`}
         >
           <header className={styles.pageHead}>
             <div>
-              <h1>Data</h1>
+              <h1>{destination}</h1>
               <p>
-                Create and manage Datasets and reusable Operations. Workflow
-                steps reference these definitions.
+                {destination === "Library"
+                  ? "Project Files, registered Datasets, and Artifacts share one home with distinct viewers and edit rules."
+                  : "Create reusable Transforms and MCP bindings. Runs and results stay with their definitions."}
               </p>
             </div>
             <button type="button" onClick={() => onNavigate("Overview")}>
@@ -505,52 +563,77 @@ export function ProjectLifecyclePrototype({
             </button>
           </header>
           <div className={styles.columns}>
-            <aside className={styles.listPanel} aria-label="Data collections">
-              <div className={styles.tabs} role="group" aria-label="Data type">
-                {(["Datasets", "Operations"] as const).map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    aria-pressed={collection === name}
-                    onClick={() => {
-                      setCollection(name);
-                      setCreating(null);
-                      setMobileDetail(false);
-                    }}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
+            <aside
+              className={styles.listPanel}
+              aria-label={`${destination} collections`}
+            >
+              {destination === "Library" ? (
+                <div
+                  className={styles.tabs}
+                  role="group"
+                  aria-label="Library type"
+                >
+                  {(["All", "Datasets", "Files", "Artifacts"] as const).map(
+                    (name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        aria-pressed={collection === name}
+                        onClick={() => {
+                          setCollection(name);
+                          setCreating(null);
+                          setMobileDetail(false);
+                        }}
+                      >
+                        {name}
+                      </button>
+                    ),
+                  )}
+                </div>
+              ) : null}
               <div className={styles.panelHead}>
-                <h2>{collection}</h2>
+                <h2>
+                  {destination === "Library" ? collection : "Definitions"}
+                </h2>
                 <button
                   type="button"
                   onClick={() => {
                     setCreating(
-                      collection === "Datasets" ? "Dataset" : "Transform",
+                      destination === "Library" ? "Dataset" : "Transform",
                     );
                     setNewName("");
                     setNewDetail("");
                     setMobileDetail(true);
                   }}
                 >
-                  Create {collection === "Datasets" ? "Dataset" : "Operation"}
+                  Create{" "}
+                  {destination === "Library" ? "Library item" : "Operation"}
                 </button>
               </div>
               <div className={styles.catalogList}>
                 {items
                   .filter((item) =>
-                    collection === "Datasets"
-                      ? item.kind === "Dataset"
-                      : item.kind !== "Dataset",
+                    destination === "Operations"
+                      ? item.kind === "Transform" ||
+                        item.kind === "MCP batch binding"
+                      : collection === "All"
+                        ? item.kind === "Dataset" ||
+                          item.kind === "Project File" ||
+                          item.kind === "Artifact"
+                        : collection === "Datasets"
+                          ? item.kind === "Dataset"
+                          : collection === "Files"
+                            ? item.kind === "Project File"
+                            : item.kind === "Artifact",
                   )
                   .map((item) => (
                     <button
                       key={item.id}
                       type="button"
                       aria-current={
-                        selectedId === item.id && !creating ? "true" : undefined
+                        selected?.id === item.id && !creating
+                          ? "true"
+                          : undefined
                       }
                       onClick={() => {
                         setSelectedId(item.id);
@@ -567,24 +650,39 @@ export function ProjectLifecyclePrototype({
                   ))}
               </div>
               <p className={styles.hint}>
-                Runs and Result Sets live under the definition that produced
-                them.
+                {destination === "Library"
+                  ? "Content is grouped for discovery; each type keeps its own identity and write rules."
+                  : "Runs and Result Sets remain under their producing definition."}
               </p>
             </aside>
-            <section className={styles.detailPanel} aria-label="Data editor">
+            <section
+              className={styles.detailPanel}
+              aria-label={`${destination} detail`}
+            >
               <button
                 className={styles.mobileBack}
                 type="button"
                 onClick={() => setMobileDetail(false)}
               >
-                Back to Data
+                Back to {destination}
               </button>
               {creating ? (
                 <form onSubmit={createItem} className={styles.form}>
-                  <h2>
-                    Create {creating === "Dataset" ? "Dataset" : "Operation"}
-                  </h2>
-                  {collection === "Operations" ? (
+                  <h2>Create {creating}</h2>
+                  {destination === "Library" ? (
+                    <label>
+                      Content type
+                      <select
+                        value={creating}
+                        onChange={(event) =>
+                          setCreating(event.target.value as CatalogKind)
+                        }
+                      >
+                        <option value="Dataset">Dataset</option>
+                        <option value="Project File">Project File</option>
+                      </select>
+                    </label>
+                  ) : (
                     <label>
                       Operation type
                       <select
@@ -599,7 +697,7 @@ export function ProjectLifecyclePrototype({
                         </option>
                       </select>
                     </label>
-                  ) : null}
+                  )}
                   <label>
                     Name
                     <input
@@ -632,23 +730,127 @@ export function ProjectLifecyclePrototype({
                   </div>
                 </form>
               ) : selected &&
-                (collection === "Datasets"
-                  ? selected.kind === "Dataset"
-                  : selected.kind !== "Dataset") ? (
+                (destination === "Operations"
+                  ? selected.kind === "Transform" ||
+                    selected.kind === "MCP batch binding"
+                  : collection === "All" ||
+                    (collection === "Datasets" &&
+                      selected.kind === "Dataset") ||
+                    (collection === "Files" &&
+                      selected.kind === "Project File") ||
+                    (collection === "Artifacts" &&
+                      selected.kind === "Artifact")) ? (
                 <div className={styles.recordDetail}>
                   <small>{selected.kind}</small>
                   <h2>{selected.name}</h2>
                   <p>{selected.detail}</p>
-                  <div className={styles.actions}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditName(selected.name);
-                        setEditingItem(true);
-                      }}
+                  {selected.kind === "Dataset" ? (
+                    <section
+                      className={styles.contentViewer}
+                      aria-label="Dataset viewer"
                     >
-                      Edit definition
-                    </button>
+                      <h3>Dataset records</h3>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Source key</th>
+                            <th>Case</th>
+                            <th>Value</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>A-01</td>
+                            <td>Baseline</td>
+                            <td>12</td>
+                          </tr>
+                          <tr>
+                            <td>A-02</td>
+                            <td>Revised</td>
+                            <td>15</td>
+                          </tr>
+                          <tr>
+                            <td>A-03</td>
+                            <td>Control</td>
+                            <td>10</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <p>
+                        Record IDs and order are owned by the Dataset, not by
+                        generic file editing.
+                      </p>
+                    </section>
+                  ) : selected.kind === "Project File" ? (
+                    <section
+                      className={styles.contentViewer}
+                      aria-label="Project File viewer"
+                    >
+                      <h3>File preview</h3>
+                      <pre>
+                        {selected.id === "references"
+                          ? "Review the selected findings against the current project criteria.\nPreserve the source and decision for each finding."
+                          : "New Project File · preview available after content is saved."}
+                      </pre>
+                      <p>
+                        This file can be bound as an explicit, versioned
+                        operation input. Its format depends on the consuming
+                        app.
+                      </p>
+                    </section>
+                  ) : selected.kind === "Artifact" ? (
+                    <section
+                      className={styles.contentViewer}
+                      aria-label="Artifact viewer"
+                    >
+                      <h3>Saved output</h3>
+                      <p>
+                        Review draft from Workflow Run 1. Open the captured Run
+                        to inspect its inputs and producing operations.
+                      </p>
+                    </section>
+                  ) : selected.kind === "Transform" ? (
+                    <section
+                      className={styles.contentViewer}
+                      aria-label="Transform preview"
+                    >
+                      <h3>Source and preview</h3>
+                      <p>
+                        Python preview and durable Runs use the same host-side
+                        Deno/Pyodide runner. Preview output is transient; a Run
+                        captures its chosen input and source version.
+                      </p>
+                    </section>
+                  ) : selected.kind === "MCP batch binding" ? (
+                    <section
+                      className={styles.contentViewer}
+                      aria-label="MCP binding detail"
+                    >
+                      <h3>Declared input mapping</h3>
+                      <p>
+                        Selected values map to the MCP tool’s declared
+                        arguments. The Workflow Definition names upstream
+                        dependencies and invocation cardinality.
+                      </p>
+                    </section>
+                  ) : null}
+                  <div className={styles.actions}>
+                    {selected.kind !== "Artifact" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditName(selected.name);
+                          setEditingItem(true);
+                        }}
+                      >
+                        Edit{" "}
+                        {selected.kind === "Dataset"
+                          ? "Dataset"
+                          : selected.kind === "Project File"
+                            ? "file"
+                            : "definition"}
+                      </button>
+                    ) : null}
                     <button
                       className={styles.primary}
                       type="button"
@@ -702,7 +904,7 @@ export function ProjectLifecyclePrototype({
                       Open workflow definition
                     </button>
                   </section>
-                  {selected.kind !== "Dataset" ? (
+                  {destination === "Operations" ? (
                     <section className={styles.context}>
                       <h3>Runs and results</h3>
                       <p>
@@ -713,6 +915,11 @@ export function ProjectLifecyclePrototype({
                             : selected.id === "review"
                               ? "Captured output in Workflow Run 1"
                               : "No Runs yet. Completed Runs will remain available here."}
+                      </p>
+                      <p>
+                        Saved preview filters, sort, and limit affect inspection
+                        only. Every durable Run captures its selected input
+                        independently.
                       </p>
                       {initialSteps.some((step) => step.id === selected.id) ? (
                         <button
@@ -733,8 +940,8 @@ export function ProjectLifecyclePrototype({
                   <h2>Select a record</h2>
                   <p>
                     Choose a{" "}
-                    {collection === "Datasets"
-                      ? "Dataset"
+                    {destination === "Library"
+                      ? "Project File, Dataset, or Artifact"
                       : "Transform or MCP batch binding"}{" "}
                     to inspect or edit it.
                   </p>

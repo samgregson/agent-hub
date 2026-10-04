@@ -32,11 +32,11 @@ const nodes: WorkflowNode[] = [
   },
   {
     key: "references",
-    title: "Reference sources",
-    kind: "Sources",
+    title: "Review guidance",
+    kind: "Project File",
     dependsOn: [],
-    output: "Selected documents",
-    record: "Project Sources",
+    output: "Captured file version",
+    record: "Project File · Review guidance.txt",
     x: 2,
     y: 61,
   },
@@ -97,7 +97,7 @@ const edges: { from: NodeKey; to: NodeKey; path: string }[] = [
 const outcomes: Record<RunNumber, Record<NodeKey, string>> = {
   1: {
     inputs: "Input set revision 1 was captured for this Run.",
-    references: "Two Project Sources were captured for this Run.",
+    references: "Review guidance.txt version 2 was captured for this Run.",
     evaluate: "3 records evaluated; 2 findings retained in a Result Set.",
     extract: "Review criteria were extracted into a retained tool result.",
     findings: "2 findings selected from the Result Set.",
@@ -106,7 +106,7 @@ const outcomes: Record<RunNumber, Record<NodeKey, string>> = {
   },
   2: {
     inputs: "Input set revision 2 was captured for this Run.",
-    references: "The same two Project Sources were captured for this Run.",
+    references: "The same Project File version was captured for this Run.",
     evaluate: "3 records evaluated; 1 finding retained in a new Result Set.",
     extract: "Review criteria were extracted into a new retained tool result.",
     findings: "1 finding selected from the new Result Set.",
@@ -125,12 +125,14 @@ function recordLabel(node: WorkflowNode, run: RunNumber) {
 
 export function ProjectWorkflowPrototype({
   onEdit,
-  onBrowseData,
+  onBrowseLibrary,
+  onBrowseOperations,
   onOpenDefinition,
 }: {
   onEdit?: () => void;
-  onBrowseData?: () => void;
-  onOpenDefinition?: (key: NodeKey) => void;
+  onBrowseLibrary?: () => void;
+  onBrowseOperations?: () => void;
+  onOpenDefinition?: (key: NodeKey | "output") => void;
 }) {
   const [inputRevision, setInputRevision] = useState<"1" | "2">("1");
   const [latestRun, setLatestRun] = useState<RunNumber>(1);
@@ -175,8 +177,11 @@ export function ProjectWorkflowPrototype({
           </p>
         </div>
         <div className={styles.headerActions}>
-          <button type="button" onClick={onBrowseData}>
-            Browse Data
+          <button type="button" onClick={onBrowseLibrary}>
+            Browse Library
+          </button>
+          <button type="button" onClick={onBrowseOperations}>
+            Browse Operations
           </button>
           <button type="button" onClick={onEdit}>
             Edit workflow
@@ -356,13 +361,25 @@ export function ProjectWorkflowPrototype({
             >
               {showRecord ? "Close captured record" : "Inspect captured record"}
             </button>
-            {selectedNode !== "references" && selectedNode !== "extract" ? (
+            {selectedNode !== "extract" ? (
               <button
                 className={styles.recordLink}
                 type="button"
                 onClick={() => onOpenDefinition?.(selectedNode)}
               >
-                Open source in Data
+                Open in{" "}
+                {selectedNode === "inputs" || selectedNode === "references"
+                  ? "Library"
+                  : "Operations"}
+              </button>
+            ) : null}
+            {selectedNode === "review" ? (
+              <button
+                className={styles.recordLink}
+                type="button"
+                onClick={() => onOpenDefinition?.("output")}
+              >
+                Open saved Artifact in Library
               </button>
             ) : null}
             {showRecord ? (
