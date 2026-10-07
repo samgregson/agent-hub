@@ -12,6 +12,7 @@ from agent_hub_api.modules.datasets._application import (
     DatasetRecord,
     DatasetRecordInput,
     DatasetValidationError,
+    DatasetVersionConflict,
 )
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
@@ -40,6 +41,7 @@ class DatasetRecordRequest(_Model):
 class DatasetRequest(_Model):
     name: str
     records: list[DatasetRecordRequest] = Field(default_factory=list)
+    expected_version: int | None = None
 
 
 class DatasetRecordResponse(_Model):
@@ -53,6 +55,8 @@ class DatasetResponse(_Model):
     id: str
     name: str
     records: list[DatasetRecordResponse]
+    version: int
+    file_path: str
 
 
 class BatchDefinitionRequest(_Model):
@@ -77,8 +81,12 @@ class BatchDefinitionResponse(_Model):
 
 class TransformBatchCreator(Protocol):
     async def define_transform_batch(
-        self, access: ProjectAccess, project_id: str, dataset_id: str,
-        name: str, transform_definition_id: str,
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        dataset_id: str,
+        name: str,
+        transform_definition_id: str,
     ) -> BatchDefinition: ...
 
 
@@ -96,6 +104,8 @@ def _dataset_response(dataset: Dataset) -> DatasetResponse:
         id=dataset.id,
         name=dataset.name,
         records=[_record_response(record) for record in dataset.records],
+        version=dataset.version,
+        file_path=f"/project/.datasets/{dataset.id}.json",
     )
 
 
@@ -121,7 +131,8 @@ async def _definition_response(
 
 
 def create_dataset_router(
-    identity: IdentityModule, datasets: DatasetModule,
+    identity: IdentityModule,
+    datasets: DatasetModule,
     transform_batches: TransformBatchCreator | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}", tags=["datasets"])
@@ -194,7 +205,10 @@ def create_dataset_router(
                 dataset_id,
                 body.name,
                 [DatasetRecordInput(item.value, item.source_key, item.id) for item in body.records],
+                expected_version=body.expected_version,
             )
+        except DatasetVersionConflict as error:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
         except (DatasetNotFound, DatasetValidationError) as error:
             raise failure(error) from error
         return _dataset_response(dataset)
@@ -240,15 +254,23 @@ def create_dataset_router(
                 if transform_batches is None:
                     raise DatasetValidationError("Transform execution is unavailable.")
                 definition = await transform_batches.define_transform_batch(
-                    request_access, project_id, body.dataset_id, body.name,
+                    request_access,
+                    project_id,
+                    body.dataset_id,
+                    body.name,
                     body.transform_definition_id,
                 )
             else:
                 if body.plugin_id is None or body.tool_name is None:
                     raise DatasetValidationError("An MCP tool target is required.")
                 definition = await datasets.create_definition(
-                    request_access, project_id, body.dataset_id, body.name,
-                    body.plugin_id, body.tool_name, body.argument_mappings,
+                    request_access,
+                    project_id,
+                    body.dataset_id,
+                    body.name,
+                    body.plugin_id,
+                    body.tool_name,
+                    body.argument_mappings,
                 )
         except (
             DatasetNotFound,

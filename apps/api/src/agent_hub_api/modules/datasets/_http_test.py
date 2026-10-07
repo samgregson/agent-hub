@@ -70,6 +70,45 @@ async def test_direct_user_dataset_and_definition_actions_are_project_scoped() -
 
 
 @pytest.mark.asyncio
+async def test_dataset_update_requires_the_loaded_document_version() -> None:
+    settings = Settings(environment="test", fixed_identity_subject="sam")
+    projects = create_memory_project_module()
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    app = FastAPI()
+    app.include_router(
+        create_dataset_router(create_identity_module(settings), datasets), prefix="/api"
+    )
+    project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post(
+            f"/api/projects/{project.id}/datasets",
+            json={"name": "Loads", "records": [{"value": {"length": 2}}]},
+        )
+        initial = created.json()
+        changed = await client.put(
+            f"/api/projects/{project.id}/datasets/{initial['id']}",
+            json={
+                "name": "Loads",
+                "expectedVersion": initial["version"],
+                "records": [{"id": initial["records"][0]["id"], "value": {"length": 3}}],
+            },
+        )
+        stale = await client.put(
+            f"/api/projects/{project.id}/datasets/{initial['id']}",
+            json={
+                "name": "Loads",
+                "expectedVersion": initial["version"],
+                "records": [{"id": initial["records"][0]["id"], "value": {"length": 4}}],
+            },
+        )
+
+    assert initial["version"] == 1
+    assert changed.status_code == 200
+    assert changed.json()["version"] == 2
+    assert stale.status_code == 409
+
+
+@pytest.mark.asyncio
 async def test_user_can_save_a_transform_targeted_batch_definition() -> None:
     settings = Settings(environment="test", fixed_identity_subject="sam")
     projects = create_memory_project_module()
@@ -89,12 +128,19 @@ async def test_user_can_save_a_transform_targeted_batch_definition() -> None:
 
     transforms = TransformModule(projects, MemoryTransformStore(), Runner())
     transform = await transforms.define(
-        owner, project.id, "Double", "def transform(inputs, parameters):\n    return {}\n",
-        {"load": "/load"}, {"type": "object"},
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
     )
     batches = BatchExecutionModule(
-        projects, datasets, cast(PluginGatewayModule, object()),
-        MemoryBatchRunStore(), transforms=transforms,
+        projects,
+        datasets,
+        cast(PluginGatewayModule, object()),
+        MemoryBatchRunStore(),
+        transforms=transforms,
     )
     app = FastAPI()
     app.include_router(
@@ -105,7 +151,8 @@ async def test_user_can_save_a_transform_targeted_batch_definition() -> None:
         created = await client.post(
             f"/api/projects/{project.id}/batch-definitions",
             json={
-                "name": "Double loads", "datasetId": dataset.id,
+                "name": "Double loads",
+                "datasetId": dataset.id,
                 "transformDefinitionId": transform.id,
             },
         )

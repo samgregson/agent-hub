@@ -7,6 +7,24 @@
   background: var(--surface-card);
 }
 
+.form label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.form input,
+.form textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font: inherit;
+  padding: var(--space-3);
+}
+
 .formActions {
   display: flex;
   justify-content: flex-end;
@@ -81,6 +99,51 @@
   margin: var(--space-2) 0 0;
   color: var(--text-subtle);
   font-size: var(--font-size-meta);
+}
+
+.datasetHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.datasetHeader h2 {
+  margin: var(--space-2) 0;
+}
+
+.datasetTableWrap {
+  overflow-x: auto;
+}
+
+.datasetTable {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.datasetTable th,
+.datasetTable td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.datasetTable code {
+  overflow-wrap: anywhere;
+}
+
+.recordEditor {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+}
+
+.recordEditor textarea {
+  width: 100%;
+  resize: vertical;
 }
 
 .resultValues {

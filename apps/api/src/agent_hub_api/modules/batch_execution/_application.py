@@ -11,7 +11,12 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from agent_hub_api.modules.datasets import BatchDefinition, DatasetModule, DatasetValidationError
+from agent_hub_api.modules.datasets import (
+    BatchDefinition,
+    DatasetModule,
+    DatasetRecord,
+    DatasetValidationError,
+)
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.modules.transforms import (
@@ -144,8 +149,12 @@ class BatchExecutionModule:
         self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
 
     async def define_transform_batch(
-        self, access: ProjectAccess, project_id: str, dataset_id: str,
-        name: str, transform_definition_id: str,
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        dataset_id: str,
+        name: str,
+        transform_definition_id: str,
     ) -> BatchDefinition:
         if self._transforms is None:
             raise DatasetValidationError("Transform execution is unavailable.")
@@ -164,10 +173,15 @@ class BatchExecutionModule:
         definition_id: str,
         record_id: str,
         idempotency_key: str | None = None,
-        *, initiation: BatchInitiation | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
     ) -> BatchRun:
         run = await self.submit_one(
-            access, project_id, definition_id, record_id, idempotency_key,
+            access,
+            project_id,
+            definition_id,
+            record_id,
+            idempotency_key,
             initiation=initiation,
         )
         return await self.execute(access, project_id, run.id)
@@ -179,7 +193,8 @@ class BatchExecutionModule:
         definition_id: str,
         record_id: str,
         idempotency_key: str | None = None,
-        *, initiation: BatchInitiation | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
     ) -> BatchRun:
         await self._authorize(access, project_id)
         definition = await self._datasets.load_definition(access, project_id, definition_id)
@@ -189,7 +204,8 @@ class BatchExecutionModule:
         if record is None:
             raise BatchRunNotFound
         arguments = (
-            dict(record.value) if definition.transform_definition_id
+            dict(record.value)
+            if definition.transform_definition_id
             else _arguments(record.value, definition)
         )
         now = datetime.now(UTC)
@@ -198,7 +214,7 @@ class BatchExecutionModule:
             project_id,
             definition.id,
             BatchRunStatus.queued,
-            snapshot,
+            {**snapshot, **_dataset_snapshot(dataset.id, dataset.version, (record,))},
             (ResultRecord(record.id, arguments),),
             now,
             now,
@@ -215,7 +231,8 @@ class BatchExecutionModule:
         project_id: str,
         definition_id: str,
         idempotency_key: str | None = None,
-        *, initiation: BatchInitiation | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
     ) -> BatchRun:
         run = await self.submit_all(
             access, project_id, definition_id, idempotency_key, initiation=initiation
@@ -228,7 +245,8 @@ class BatchExecutionModule:
         project_id: str,
         definition_id: str,
         idempotency_key: str | None = None,
-        *, initiation: BatchInitiation | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
     ) -> BatchRun:
         """Execute a captured Dataset after its first record succeeds."""
         await self._authorize(access, project_id)
@@ -241,9 +259,11 @@ class BatchExecutionModule:
         captured = tuple(
             (
                 record.id,
-                dict(record.value) if definition.transform_definition_id
+                dict(record.value)
+                if definition.transform_definition_id
                 else _arguments(record.value, definition),
-            ) for record in dataset.records
+            )
+            for record in dataset.records
         )
         run = BatchRun(
             str(uuid4()),
@@ -252,6 +272,7 @@ class BatchExecutionModule:
             BatchRunStatus.queued,
             {
                 **snapshot,
+                **_dataset_snapshot(dataset.id, dataset.version, dataset.records),
                 "maxConcurrency": self._max_concurrency,
                 "recordIds": [record_id for record_id, _ in captured],
             },
@@ -428,7 +449,8 @@ class BatchExecutionModule:
         if aggregate_path is not None:
             _validate_result_path(aggregate_path)
         records = [
-            record for record in run.records
+            record
+            for record in run.records
             if filter_path is None or _matches_result(record, filter_path, equals, minimum, maximum)
         ]
         if sort_path is not None:
@@ -440,14 +462,17 @@ class BatchExecutionModule:
         items = tuple(records[offset : offset + limit])
         next_offset = offset + len(items) if offset + len(items) < len(records) else None
         values = [
-            value for record in records
+            value
+            for record in records
             if aggregate_path is not None
             if (value := _result_value(record, aggregate_path)) is not None
-            and not isinstance(value, bool) and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and isinstance(value, (int, float))
         ]
         total = sum(values) if values else None
         return ResultRecordPage(
-            items, next_offset,
+            items,
+            next_offset,
             ResultSummary(
                 total_count=len(records),
                 succeeded_count=sum(record.structured_output is not None for record in records),
@@ -583,9 +608,7 @@ class MemoryBatchRunStore:
         reconciled = 0
         for key, run in runs:
             if run.status in {BatchRunStatus.queued, BatchRunStatus.running}:
-                self._runs[key] = replace(
-                    run, status=BatchRunStatus.failed, updated_at=now
-                )
+                self._runs[key] = replace(run, status=BatchRunStatus.failed, updated_at=now)
                 reconciled += 1
         return reconciled
 
@@ -676,7 +699,7 @@ class PostgresBatchRunStore:
                 clauses.append("archived_at IS NULL")
             direction = "DESC" if order is BatchRunOrder.newest else "ASC"
             cursor = await connection.execute(
-                f"""SELECT batch_run_id FROM batch_runs WHERE {' AND '.join(clauses)}
+                f"""SELECT batch_run_id FROM batch_runs WHERE {" AND ".join(clauses)}
                 ORDER BY updated_at {direction} LIMIT %s OFFSET %s""",
                 (*parameters, limit + 1, offset),
             )
@@ -686,9 +709,7 @@ class PostgresBatchRunStore:
                 run = await _load(connection, project_id, str(row["batch_run_id"]))
                 if run is not None:
                     runs.append(run)
-            return BatchRunPage(
-                tuple(runs), offset + limit if len(rows) > limit else None
-            )
+            return BatchRunPage(tuple(runs), offset + limit if len(rows) > limit else None)
 
     async def replace(self, run: BatchRun) -> BatchRun | None:
         connection = await self._connect()
@@ -845,8 +866,10 @@ def _obj(value: object) -> Mapping[str, object]:
 def _initiation_snapshot(initiation: BatchInitiation | None) -> Mapping[str, object]:
     context = initiation or BatchInitiation("directUser", "notRequired")
     return {
-        "kind": context.kind, "approval": context.approval,
-        "threadId": context.thread_id, "agentRunId": context.agent_run_id,
+        "kind": context.kind,
+        "approval": context.approval,
+        "threadId": context.thread_id,
+        "agentRunId": context.agent_run_id,
         "toolCallId": context.tool_call_id,
     }
 
@@ -894,8 +917,10 @@ def _matches_result(
     if value is None:
         return False
     same_numeric_type = (
-        not isinstance(value, bool) and not isinstance(equals, bool)
-        and isinstance(value, (int, float)) and isinstance(equals, (int, float))
+        not isinstance(value, bool)
+        and not isinstance(equals, bool)
+        and isinstance(value, (int, float))
+        and isinstance(equals, (int, float))
     )
     if equals is not None and not (same_numeric_type or type(value) is type(equals)):
         return False
@@ -931,6 +956,24 @@ def _snapshot(
         "argumentMappings": definition.argument_mappings,
         "inputSchema": definition.input_schema,
         "outputSchema": dict(output_schema),
+    }
+
+
+def _dataset_snapshot(
+    dataset_id: str, version: int, records: tuple[DatasetRecord, ...]
+) -> Mapping[str, object]:
+    return {
+        "datasetPath": f"/.datasets/{dataset_id}.json",
+        "datasetVersion": version,
+        "datasetRecords": [
+            {
+                "id": record.id,
+                "position": record.position,
+                "sourceKey": record.source_key,
+                "value": dict(record.value),
+            }
+            for record in records
+        ],
     }
 
 

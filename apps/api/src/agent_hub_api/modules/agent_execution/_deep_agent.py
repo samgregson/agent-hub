@@ -60,10 +60,11 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Creating or changing a Project Artifact also requires user approval. When the "
         "requested Artifact title or status is clear, call the Artifact tool without asking "
         "for approval in chat first; the approval card is shown automatically.",
-        "Datasets and Batch Definitions are durable Project records, not JSON Project files. "
-        "When a user asks to save, inspect, or change one, use the Project Dataset tools. "
-        "Do not write a Dataset as a JSON file under /project. Dataset and Batch Definition "
-        "mutations use the approval card automatically.",
+        "Datasets are registered, typed Project Files under /project/.datasets. "
+        "You may read them through Project files or Project Dataset tools. "
+        "Use the Project Dataset tools for Dataset mutations; generic file writes cannot "
+        "change registered Dataset files. Batch Definitions remain separate Project records. "
+        "Dataset and Batch Definition mutations use the approval card automatically.",
         "Transform Definitions and Runs are durable Project records. Use the Project "
         "Transform tools to inspect or change them; Definition changes, Run starts, and "
         "output saves use the approval card automatically.",
@@ -360,6 +361,7 @@ class PostgresDeepAgentRunner:
                             "id": dataset.id,
                             "name": dataset.name,
                             "recordCount": len(dataset.records),
+                            "version": dataset.version,
                         }
                         for dataset in await datasets.list_datasets(access, project_id)
                     ],
@@ -384,6 +386,8 @@ class PostgresDeepAgentRunner:
                 {
                     "id": dataset.id,
                     "name": dataset.name,
+                    "version": dataset.version,
+                    "filePath": f"/project/.datasets/{dataset.id}.json",
                     "records": [
                         {"id": record.id, "sourceKey": record.source_key, "value": record.value}
                         for record in dataset.records
@@ -425,12 +429,15 @@ class PostgresDeepAgentRunner:
             return f"Deleted Dataset {dataset_id}."
 
         @tool
-        async def update_project_dataset(dataset_id: str, name: str, records_json: str) -> str:
-            """Update a Dataset's name and Records after user approval."""
+        async def update_project_dataset(
+            dataset_id: str, expected_version: int, name: str, records_json: str
+        ) -> str:
+            """Update a Dataset after approval using its loaded document version."""
             dataset = await datasets.update_dataset(
-                access, project_id, dataset_id, name, _dataset_records(records_json)
+                access, project_id, dataset_id, name, _dataset_records(records_json),
+                expected_version=expected_version,
             )
-            return f"Updated Dataset {dataset.name} ({dataset.id})."
+            return f"Updated Dataset {dataset.name} ({dataset.id}, v{dataset.version})."
 
         @tool
         async def create_project_batch_definition(

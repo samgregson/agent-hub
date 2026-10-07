@@ -32,8 +32,12 @@ class Gateway:
         }
 
     async def batch_call(
-        self, _access: ProjectAccess, _project_id: str, _plugin_id: str,
-        _tool_name: str, arguments: Mapping[str, object],
+        self,
+        _access: ProjectAccess,
+        _project_id: str,
+        _plugin_id: str,
+        _tool_name: str,
+        arguments: Mapping[str, object],
     ) -> PluginToolResult:
         return PluginToolResult((), {"result": arguments["load"]})
 
@@ -70,11 +74,15 @@ async def test_postgres_transform_batch_definition_retains_result_set() -> None:
     project = await projects.create(access, "Transform Batch integration")
     try:
         dataset = await datasets.create_dataset(
-            access, project.id, "Loads",
+            access,
+            project.id,
+            "Loads",
             [DatasetRecordInput({"load": value}) for value in (2, 3)],
         )
         transform = await transforms.define(
-            access, project.id, "Double",
+            access,
+            project.id,
+            "Double",
             "def transform(inputs, parameters):\n    return {}\n",
             {"load": "/load"},
             {"type": "object", "required": ["result"]},
@@ -90,7 +98,8 @@ async def test_postgres_transform_batch_definition_retains_result_set() -> None:
         assert loaded_definition.plugin_id is None
         assert run.status is BatchRunStatus.succeeded
         assert [item.structured_output for item in page.items] == [
-            {"result": 4}, {"result": 6},
+            {"result": 4},
+            {"result": 6},
         ]
     finally:
         connection = await AsyncConnection.connect(str(settings.database_url))
@@ -120,18 +129,32 @@ async def test_postgres_batch_run_retains_captured_records_in_dataset_order() ->
     project = await projects.create(access, "Batch integration")
     try:
         dataset = await datasets.create_dataset(
-            access, project.id, "Loads",
+            access,
+            project.id,
+            "Loads",
             [DatasetRecordInput({"load": value}) for value in (3, 1, 2)],
         )
         definition = await datasets.create_definition(
-            access, project.id, dataset.id, "Echo", "fixture", "echo", {"load": "/load"},
+            access,
+            project.id,
+            dataset.id,
+            "Echo",
+            "fixture",
+            "echo",
+            {"load": "/load"},
         )
         initiation = BatchInitiation(
-            kind="agentRun", approval="approved", thread_id="thread-1",
-            agent_run_id="agent-run-1", tool_call_id="call-1",
+            kind="agentRun",
+            approval="approved",
+            thread_id="thread-1",
+            agent_run_id="agent-run-1",
+            tool_call_id="call-1",
         )
         queued = await batches.submit_all(
-            access, project.id, definition.id, idempotency_key="same-submission",
+            access,
+            project.id,
+            definition.id,
+            idempotency_key="same-submission",
             initiation=initiation,
         )
 
@@ -142,14 +165,29 @@ async def test_postgres_batch_run_retains_captured_records_in_dataset_order() ->
         completed = await batches.execute(access, project.id, queued.id)
 
         assert [record.input for record in loaded.records] == [
-            {"load": 3}, {"load": 1}, {"load": 2},
+            {"load": 3},
+            {"load": 1},
+            {"load": 2},
+        ]
+        assert loaded.definition_snapshot["datasetVersion"] == dataset.version
+        assert loaded.definition_snapshot["datasetPath"] == f"/.datasets/{dataset.id}.json"
+        assert loaded.definition_snapshot["datasetRecords"] == [
+            {
+                "id": record.id,
+                "position": record.position,
+                "sourceKey": record.source_key,
+                "value": record.value,
+            }
+            for record in dataset.records
         ]
         assert completed.status is BatchRunStatus.succeeded
         assert repeated.id == queued.id
         assert loaded.initiation == queued.initiation
         assert loaded.initiation["agentRunId"] == "agent-run-1"
         assert [record.structured_output for record in completed.records] == [
-            {"result": 3}, {"result": 1}, {"result": 2},
+            {"result": 3},
+            {"result": 1},
+            {"result": 2},
         ]
         archived = await batches.archive(access, project.id, queued.id)
         retained = await batches.inspect_results(access, project.id, queued.id, limit=2)
@@ -157,14 +195,44 @@ async def test_postgres_batch_run_retains_captured_records_in_dataset_order() ->
         assert [record.input for record in retained.items] == [{"load": 3}, {"load": 1}]
         assert retained.next_offset == 2
         filtered = await batches.inspect_results(
-            access, project.id, queued.id, limit=1,
-            filter_path="/input/load", minimum=2,
-            sort_path="/structuredOutput/result", descending=False,
+            access,
+            project.id,
+            queued.id,
+            limit=1,
+            filter_path="/input/load",
+            minimum=2,
+            sort_path="/structuredOutput/result",
+            descending=False,
             aggregate_path="/structuredOutput/result",
         )
         assert [record.input for record in filtered.items] == [{"load": 2}]
         assert filtered.summary.total_count == 2
         assert filtered.summary.numeric_sum == 5
+        await datasets.update_dataset(
+            access,
+            project.id,
+            dataset.id,
+            "Changed loads",
+            [DatasetRecordInput({"load": 99}, id=dataset.records[0].id)],
+            expected_version=dataset.version,
+        )
+        await datasets.delete_dataset(access, project.id, dataset.id)
+        historical = await batches.load(access, project.id, queued.id)
+        assert historical.definition_snapshot["datasetVersion"] == 1
+        assert historical.definition_snapshot["datasetRecords"] == [
+            {
+                "id": record.id,
+                "position": record.position,
+                "sourceKey": record.source_key,
+                "value": record.value,
+            }
+            for record in dataset.records
+        ]
+        assert [record.structured_output for record in historical.records] == [
+            {"result": 3},
+            {"result": 1},
+            {"result": 2},
+        ]
     finally:
         connection = await AsyncConnection.connect(str(settings.database_url))
         async with connection:

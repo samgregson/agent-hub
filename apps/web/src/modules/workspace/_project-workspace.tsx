@@ -11,7 +11,7 @@ import {
 
 import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
 import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
-import { DatasetCatalog } from "@/modules/datasets";
+import { DatasetCatalog, DatasetFilePreview } from "@/modules/datasets";
 import { TransformCatalog } from "@/modules/transforms";
 import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
@@ -45,7 +45,6 @@ const activityLabels = {
   artifacts: "Library",
   batchDefinitions: "Batch Definitions",
   chats: "Chats",
-  datasets: "Datasets",
   transforms: "Transforms",
   plugins: "Plugins",
   sources: "Sources",
@@ -85,6 +84,7 @@ export function ProjectWorkspace() {
     () => new Set(),
   );
   const [error, setError] = useState<string | null>(null);
+  const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const newProjectNameInput = useRef<HTMLInputElement>(null);
   const projectPicker = useRef<HTMLSelectElement>(null);
 
@@ -115,7 +115,6 @@ export function ProjectWorkspace() {
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
   const isExplorerActivity = [
     "batchDefinitions",
-    "datasets",
     "transforms",
     "plugins",
     "sources",
@@ -416,6 +415,7 @@ export function ProjectWorkspace() {
 
       <aside className={styles.navigator}>
         <ProjectNavigator
+          libraryRefreshKey={libraryRefreshKey}
           onCreateThread={() => void handleCreateThread()}
           onDeleteThread={(thread) => void handleDeleteThread(thread)}
           onOpenArtifact={(artifactId) =>
@@ -476,6 +476,7 @@ export function ProjectWorkspace() {
             </nav>
             <div className={styles.mobileNavigatorContent}>
               <ProjectNavigator
+                libraryRefreshKey={libraryRefreshKey}
                 onCreateThread={() => void handleCreateThread()}
                 onDeleteThread={(thread) => void handleDeleteThread(thread)}
                 onOpenArtifact={(artifactId) => {
@@ -560,6 +561,20 @@ export function ProjectWorkspace() {
             projectId={selectedProject.id}
             threadId={selectedWorkspace.selectedScratchThreadId}
           />
+        ) : selectedProject &&
+          selectedWorkspace?.selectedFilePath?.startsWith(
+            "/project/.datasets/",
+          ) &&
+          selectedWorkspace.selectedFilePath.endsWith(".json") ? (
+          <DatasetFilePreview
+            datasetId={selectedWorkspace.selectedFilePath
+              .split("/")
+              .at(-1)!
+              .slice(0, -5)}
+            key={`${selectedProject.id}:${selectedWorkspace.selectedFilePath}`}
+            onSaved={() => setLibraryRefreshKey((current) => current + 1)}
+            projectId={selectedProject.id}
+          />
         ) : selectedProject && selectedWorkspace?.selectedFilePath ? (
           <ProjectFilePreview
             path={selectedWorkspace.selectedFilePath}
@@ -580,6 +595,7 @@ export function ProjectWorkspace() {
 }
 
 interface ProjectNavigatorProps {
+  libraryRefreshKey: number;
   onCreateThread: () => void;
   onDeleteThread: (thread: Thread) => void;
   onOpenArtifact: (artifactId: string) => void;
@@ -593,6 +609,7 @@ interface ProjectNavigatorProps {
 }
 
 function ProjectNavigator({
+  libraryRefreshKey,
   onCreateThread,
   onDeleteThread,
   onOpenArtifact,
@@ -651,14 +668,10 @@ function ProjectNavigator({
           onOpenArtifact={onOpenArtifact}
           onOpenProjectFile={onOpenProjectFile}
           projectId={project.id}
+          refreshKey={libraryRefreshKey}
         />
-      ) : (selectedActivity === "datasets" ||
-          selectedActivity === "batchDefinitions") &&
-        project ? (
-        <DatasetCatalog
-          mode={selectedActivity === "datasets" ? "datasets" : "definitions"}
-          projectId={project.id}
-        />
+      ) : selectedActivity === "batchDefinitions" && project ? (
+        <DatasetCatalog mode="definitions" projectId={project.id} />
       ) : selectedActivity === "transforms" && project ? (
         <TransformCatalog key={project.id} projectId={project.id} />
       ) : selectedActivity === "plugins" && project ? (

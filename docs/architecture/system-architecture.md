@@ -67,7 +67,7 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Approval                   | Agent Hub policy plus LangGraph interrupt       | Application record and checkpointed interrupt state                                  |
 | Project Virtual Filesystem | Agent Hub                                       | Project-scoped PostgreSQL records exposed through a Deep Agents backend              |
 | Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
-| Dataset                    | Agent Hub Dataset Module                        | Registered typed Project VFS document plus query projection (target in #45; currently separate PostgreSQL records) |
+| Dataset                    | Agent Hub Dataset Module                        | Registered typed Project VFS document plus query projection                          |
 | Batch Definition           | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
 | Batch Run / Result Set     | Agent Hub                                       | PostgreSQL execution and result records                                               |
 | Transform Definition       | Agent Hub                                       | Project-scoped PostgreSQL definition record                                           |
@@ -76,13 +76,13 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
 | Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
 
-The Artifact catalog projection may repeat queryable envelope fields, but it is not a second authoritative document. It and the canonical VFS document update in one database transaction. The Dataset migration in #45 applies the same single-canonical-document rule while preserving Dataset-owned validation, Record identity, and existing Run snapshots. Generic Project File writes cannot modify registered Dataset or Artifact documents. LangGraph checkpoints are runtime history, not Artifact revision history.
+The Artifact catalog projection may repeat queryable envelope fields, but it is not a second authoritative document. It and the canonical VFS document update in one database transaction. Dataset content is canonical in `/project/.datasets/<id>.json`; the existing Dataset and Record tables remain transactionally updated projections for query and rollback compatibility. The Dataset Module validates writes, retains stable Record IDs and order, and uses the Project File version for expected-version updates. Generic Project File writes cannot modify registered Dataset or Artifact documents. LangGraph checkpoints are runtime history, not Artifact revision history.
 
 ## Modules and Interfaces
 
 ### Workspace Module — web
 
-Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The agreed navigation target is Workflow overview, Chats, Library, Operations, Sources, and Plugins. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers; Operations groups Transform and MCP batch-binding definitions with contextual Runs. The current workspace still has separate Dataset and definition destinations until #37 and #45 are implemented. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
+Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The agreed navigation target is Workflow overview, Chats, Library, Operations, Sources, and Plugins. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers; Operations groups Transform and MCP batch-binding definitions with contextual Runs. Datasets now have one primary home in Library, while Batch Definitions and Transforms retain separate destinations until #37 consolidates Operations. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
 
 Its Interface is application state plus navigation commands. It does not know how the agent runs or how a Plugin validates an Artifact.
 
@@ -130,7 +130,7 @@ The same-origin web proxy and assistant-ui AG-UI runtime are adapters at this se
 
 Implements Deep Agents' filesystem Interface over a Project-scoped PostgreSQL adapter. Trusted request context determines the namespace. `/project/**` is durable and shared between Threads; `/scratch/**` may remain Thread-local checkpointed state. Registered Dataset and Artifact documents are readable through the Project filesystem, but generic file operations cannot replace their owning Modules' validated write commands.
 
-Generic file tools can list and read registered Artifact documents under `/project/.artifacts/**`, but cannot write those reserved paths. Artifact mutation crosses the Artifact Module Interface.
+Generic file tools can list and read registered Artifact and Dataset documents under `/project/.artifacts/**` and `/project/.datasets/**`, but cannot write those reserved paths. Mutations cross the owning Module Interfaces.
 
 ### Artifact Module — API
 
@@ -144,9 +144,9 @@ apply(context, artifact_id | new, semantic_operation, expected_version?) -> save
 
 `apply` resolves the responsible Plugin, sends the complete portable document and semantic operation, rejects malformed or invalid replacements, restores host-controlled envelope fields, and commits the updated current document atomically. `documentVersion` is an internal concurrency token; it does not imply retained revisions or a user-facing version browser.
 
-### Batch Execution Module — API
+### Dataset and Batch Execution Modules — API
 
-Owns Dataset and Batch Definition persistence, immutable Batch Run snapshots, bounded dispatch, Result Set persistence, progress, and result queries. Its Interface stays host-oriented and compact:
+The Dataset Module owns Dataset files and Batch Definition persistence. The Batch Execution Module owns immutable Batch Run snapshots, bounded dispatch, Result Set persistence, progress, and result queries. Their Interfaces stay host-oriented and compact:
 
 ```text
 save_dataset(context, draft) -> Dataset
@@ -156,7 +156,7 @@ inspect(context, batch_run_id, query?) -> Batch Run summary / Result page
 archive(context, batch_run_id) -> archived Batch Run summary
 ```
 
-`start` captures the selected Dataset records, Batch Definition, its MCP tool/schema or Transform source/runtime/package identity, policy, and initiator before execution. The executor invokes one real selected record first; a failure or schema-invalid response stops fan-out, while later failures produce an explicitly partial Result Set. MCP targets accept only catalogued repeat-safe tools; Transform targets use the same isolated runner as previews and single Runs. Execution uses host-configured bounded concurrency and does not provide cancellation or retry in the first pass. A Result Set retains normalized inputs and complete structured outputs within explicit limits, but is not an Artifact unless a user or approved agent explicitly saves a curated conclusion. Completed Batch Runs are immutable; `archive` hides a run from normal workspace views without deleting its Result Set or provenance.
+`start` captures the Dataset file path and version, selected Record IDs and complete values, Batch Definition, its MCP tool/schema or Transform source/runtime/package identity, policy, and initiator before execution. The executor invokes one real selected record first; a failure or schema-invalid response stops fan-out, while later failures produce an explicitly partial Result Set. MCP targets accept only catalogued repeat-safe tools; Transform targets use the same isolated runner as previews and single Runs. Execution uses host-configured bounded concurrency and does not provide cancellation or retry in the first pass. A Result Set retains normalized inputs and complete structured outputs within explicit limits, but is not an Artifact unless a user or approved agent explicitly saves a curated conclusion. Completed Batch Runs are immutable; `archive` hides a run from normal workspace views without deleting its Result Set or provenance.
 
 Agent-proposed Dataset saves, definition changes, and `start` calls pause at the existing LangGraph approval interrupt. An approved Batch start uses the Thread and tool-call identities as its idempotency key, so replay across Agent Runs returns the original Batch Run. Runs retain whether a direct user or approved agent started them, with the Agent Run and approval context when applicable; historical Runs have an explicit unknown marker. The Agent Run may await a short bounded completion window; otherwise it receives a Batch Run reference and ends normally. The executor outlives the AG-UI stream, and later runs discover compact summaries and inspect bounded Result Set pages through host tools.
 

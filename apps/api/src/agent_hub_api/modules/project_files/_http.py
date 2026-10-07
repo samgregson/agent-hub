@@ -103,7 +103,7 @@ def create_project_files_router(
         except ReservedProjectFilePath as error:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Artifacts must be deleted through the Artifact interface",
+                detail=str(error),
             ) from error
         except (InvalidProjectFilePath, ProjectFileNotFound) as error:
             raise HTTPException(

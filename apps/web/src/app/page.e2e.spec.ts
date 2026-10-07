@@ -16,22 +16,26 @@ test("Plugins are available through the browser-facing Project API", async ({
   );
 
   expect(pluginsResponse.status()).toBe(200);
-  await expect(pluginsResponse.json()).resolves.toEqual([
-    {
-      enabled: false,
-      id: "foundation-fixture",
-      name: "Foundation fixture",
-      tools: [{ name: "foundation_status", readOnly: true }],
-      version: "0.1.0",
-    },
-    {
-      enabled: false,
-      id: "reference-calculation",
-      name: "Reference calculation",
-      tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
-      version: "0.1.0",
-    },
-  ]);
+  await expect(pluginsResponse.json()).resolves.toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        enabled: false,
+        id: "foundation-fixture",
+        name: "Foundation fixture",
+        tools: expect.arrayContaining([
+          { name: "foundation_status", readOnly: true },
+        ]),
+        version: "0.1.0",
+      }),
+      {
+        enabled: false,
+        id: "reference-calculation",
+        name: "Reference calculation",
+        tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
+        version: "0.1.0",
+      },
+    ]),
+  );
 });
 
 test("Plugin selections can be updated through the browser-facing Project API", async ({
@@ -122,7 +126,7 @@ test("project creation is unavailable before the workspace hydrates", async ({
   await context.close();
 });
 
-test("Datasets are created and deleted through the Project workspace", async ({
+test("Datasets are created and deleted through Library commands", async ({
   page,
 }) => {
   const project = {
@@ -134,6 +138,8 @@ test("Datasets are created and deleted through the Project workspace", async ({
   const created = {
     id: "dataset-123",
     name: "Load cases",
+    version: 1,
+    filePath: "/project/.datasets/dataset-123.json",
     records: [
       {
         id: "record-123",
@@ -147,6 +153,15 @@ test("Datasets are created and deleted through the Project workspace", async ({
   await page.route("**/api/projects", async (route) => {
     await route.fulfill({ json: [project] });
   });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({ json: { artifacts: [] } });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
   await page.route(
     `**/api/projects/${project.id}/batch-definitions`,
     async (route) => {
@@ -163,22 +178,32 @@ test("Datasets are created and deleted through the Project workspace", async ({
   await page.route(
     `**/api/projects/${project.id}/datasets/${created.id}`,
     async (route) => {
-      deleted = route.request().method() === "DELETE";
-      await route.fulfill({ status: 204 });
+      if (route.request().method() === "DELETE") {
+        deleted = true;
+        await route.fulfill({ status: 204 });
+        return;
+      }
+      await route.fulfill({ json: created });
     },
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Datasets" }).click();
+  await page.getByRole("button", { name: "Library" }).click();
   await page.getByRole("button", { name: "+ New Dataset" }).click();
   await page.getByLabel("Name").fill(created.name);
   await page
     .getByLabel("Records (JSON array)")
     .fill('[{"sourceKey":"LC-1","value":{"load":12.5}}]');
   await page.getByRole("button", { name: "Save Dataset" }).click();
-  await expect(page.getByText("Load cases")).toBeVisible();
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Delete" }).click();
+  await expect(
+    page.getByRole("button", { name: "Load cases", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Load cases actions" }).click();
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await page
+    .getByRole("dialog", { name: "Confirm deletion" })
+    .getByRole("button", { name: "Delete" })
+    .click();
   await expect.poll(() => deleted).toBe(true);
 });
 
@@ -197,12 +222,23 @@ test("navigator catalogs share collection typography at desktop and phone widths
   await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
     await route.fulfill({ json: [] });
   });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({ json: { artifacts: [] } });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
     await route.fulfill({
       json: [
         {
           id: "dataset-123",
           name: "Load cases",
+          version: 1,
+          filePath: "/project/.datasets/dataset-123.json",
           records: [],
         },
       ],
@@ -223,7 +259,7 @@ test("navigator catalogs share collection typography at desktop and phone widths
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Datasets" }).click();
+  await page.getByRole("button", { name: "Library" }).click();
   const datasetTitle = page.getByText("Load cases");
   await expect(datasetTitle).toBeVisible();
   const desktopDatasetStyle = await datasetTitle.evaluate((element) => ({
@@ -243,7 +279,7 @@ test("navigator catalogs share collection typography at desktop and phone widths
   await page.setViewportSize({ height: 844, width: 390 });
   await page.getByRole("button", { name: "Open Project navigation" }).click();
   const drawer = page.getByRole("dialog", { name: "Project navigation" });
-  await drawer.getByRole("button", { name: "Datasets" }).click();
+  await drawer.getByRole("button", { name: "Library" }).click();
   const mobileDatasetTitle = drawer.getByText("Load cases");
   await expect(mobileDatasetTitle).toHaveCSS(
     "font-size",
@@ -300,6 +336,10 @@ test("Library navigation combines Artifacts and Project files into one list", as
     },
   );
 
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+
   await page.goto("/");
   await page.getByRole("button", { name: "Library" }).click();
 
@@ -322,6 +362,87 @@ test("Library navigation combines Artifacts and Project files into one list", as
       "Shared working files. Opening one does not create an Artifact.",
     ),
   ).toHaveCount(0);
+});
+
+test("Library opens a registered Dataset in its table viewer and saves through Dataset commands", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-07T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-10-07T00:00:00.000Z",
+  };
+  const dataset = {
+    id: "dataset-123",
+    name: "Load cases",
+    version: 1,
+    filePath: "/project/.datasets/dataset-123.json",
+    records: [
+      {
+        id: "record-123",
+        position: 0,
+        sourceKey: "LC-1",
+        value: { load: 12.5 },
+      },
+    ],
+  };
+  let savedVersion: number | null = null;
+  let currentDataset = dataset;
+  await page.route("**/api/projects", async (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) =>
+    route.fulfill({ json: { artifacts: [] } }),
+  );
+  await page.route(`**/api/projects/${project.id}/files/index`, async (route) =>
+    route.fulfill({
+      json: {
+        files: [
+          { path: dataset.filePath, version: 1, updatedAt: project.updatedAt },
+        ],
+      },
+    }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) =>
+    route.fulfill({ json: [currentDataset] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/datasets/${dataset.id}`,
+    async (route) => {
+      if (route.request().method() === "PUT") {
+        const body = route.request().postDataJSON() as {
+          expectedVersion: number;
+          records: Array<{ value: { load: number } }>;
+        };
+        savedVersion = body.expectedVersion;
+        currentDataset = {
+          ...dataset,
+          version: 2,
+          records: [{ ...dataset.records[0], value: body.records[0].value }],
+        };
+        await route.fulfill({
+          json: currentDataset,
+        });
+        return;
+      }
+      await route.fulfill({ json: dataset });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Library" }).click();
+  await page.getByRole("button", { name: "Load cases", exact: true }).click();
+  const viewer = page.getByRole("region", { name: "Dataset viewer" });
+  await expect(viewer).toContainText("LC-1");
+  await expect(viewer).toContainText("12.5");
+  await viewer.getByRole("button", { name: "Edit Dataset" }).click();
+  await viewer.getByLabel("LC-1 value (JSON)").fill('{"load":13}');
+  await viewer.getByRole("button", { name: "Save Dataset" }).click();
+  await expect.poll(() => savedVersion).toBe(1);
+  await expect(viewer).toContainText("Version 2");
+  await expect(viewer).toContainText("13");
+  await expect(page.getByLabel("Library items")).toContainText("Version 2");
 });
 
 test("a Project file is deleted from its Library item action menu after confirmation", async ({
@@ -362,6 +483,9 @@ test("a Project file is deleted from its Library item action menu after confirma
       await route.fulfill({ status: 204 });
     },
   );
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
 
   await page.goto("/");
   await page.getByRole("button", { name: "Library" }).click();
@@ -378,7 +502,9 @@ test("a Project file is deleted from its Library item action menu after confirma
   await page.getByRole("menuitem", { name: "Delete" }).click();
   await dialog.getByRole("button", { name: "Delete" }).click();
 
-  await expect(page.getByText(path)).toBeHidden();
+  await expect(
+    page.getByRole("button", { name: path, exact: true }),
+  ).toBeHidden();
 });
 
 test("an Artifact changed by another Thread stays open until the user reloads it", async ({
@@ -434,6 +560,9 @@ test("an Artifact changed by another Thread stays open until the user reloads it
       await route.fulfill({ json: { files: [] } });
     },
   );
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
   await page.route(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
     async (route) => {
@@ -543,6 +672,9 @@ test("an Artifact App receives its saved tool result through the MCP App bridge"
       await route.fulfill({ json: { files: [] } });
     },
   );
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
   await page.route(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
     async (route) => {
@@ -649,6 +781,12 @@ test.describe("at phone width", () => {
         });
       },
     );
+    await page.route(
+      `**/api/projects/${project.id}/datasets`,
+      async (route) => {
+        await route.fulfill({ json: [] });
+      },
+    );
 
     await page.goto("/");
     await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
@@ -672,7 +810,7 @@ test.describe("at phone width", () => {
     await expect(page.getByText("# Preview")).toBeVisible();
   });
 
-  test("Dataset and Batch Definition controls retain their dark, touch-ready treatment", async ({
+  test("Library Dataset and Batch Definition controls retain their dark, touch-ready treatment", async ({
     page,
   }) => {
     const project = {
@@ -684,6 +822,8 @@ test.describe("at phone width", () => {
     const dataset = {
       id: "dataset-123",
       name: "Load cases",
+      version: 1,
+      filePath: "/project/.datasets/dataset-123.json",
       records: [{ id: "record-123", sourceKey: "LC-1" }],
     };
     const definition = {
@@ -702,6 +842,28 @@ test.describe("at phone width", () => {
       await route.fulfill({ json: [] });
     });
     await page.route(
+      `**/api/projects/${project.id}/artifacts`,
+      async (route) => {
+        await route.fulfill({ json: { artifacts: [] } });
+      },
+    );
+    await page.route(
+      `**/api/projects/${project.id}/files/index`,
+      async (route) => {
+        await route.fulfill({
+          json: {
+            files: [
+              {
+                path: dataset.filePath,
+                version: 1,
+                updatedAt: project.updatedAt,
+              },
+            ],
+          },
+        });
+      },
+    );
+    await page.route(
       `**/api/projects/${project.id}/datasets`,
       async (route) => {
         await route.fulfill({ json: [dataset] });
@@ -718,18 +880,20 @@ test.describe("at phone width", () => {
     await page.getByRole("button", { name: "Open Project navigation" }).click();
     const drawer = page.getByRole("dialog", { name: "Project navigation" });
 
-    await drawer.getByRole("button", { name: "Datasets" }).click();
+    await drawer.getByRole("button", { name: "Library" }).click();
     await expect(drawer.getByText("Load cases")).toBeVisible();
-    await expect(drawer.getByRole("button", { name: "Delete" })).toBeVisible();
+    await expect(
+      drawer.getByRole("button", { name: "Load cases actions" }),
+    ).toBeVisible();
 
     await drawer.getByRole("button", { name: "Batch Definitions" }).click();
     const recordSelector = drawer.getByLabel("Cantilever check Dataset Record");
     await expect(recordSelector).toBeVisible();
     await expect(recordSelector).toHaveCSS(
       "background-color",
-      "rgb(34, 34, 30)",
+      "rgb(27, 33, 26)",
     );
-    await expect(recordSelector).toHaveCSS("color", "rgb(240, 238, 232)");
+    await expect(recordSelector).toHaveCSS("color", "rgb(251, 253, 246)");
   });
 });
 

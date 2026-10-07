@@ -36,6 +36,7 @@ class Dataset:
     records: tuple[DatasetRecord, ...]
     created_at: datetime
     updated_at: datetime
+    version: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,10 @@ class DatasetNotFound(Exception):
 
 class DatasetValidationError(Exception):
     """A Dataset or Batch Definition violates its host-owned contract."""
+
+
+class DatasetVersionConflict(DatasetValidationError):
+    """The Dataset changed since the caller loaded its document version."""
 
 
 class ToolSchemaResolver(Protocol):
@@ -125,6 +130,7 @@ class DatasetModule:
                 records=_records(records),
                 created_at=now,
                 updated_at=now,
+                version=1,
             )
         )
 
@@ -148,8 +154,11 @@ class DatasetModule:
         dataset_id: str,
         name: str,
         records: Sequence[DatasetRecordInput],
+        expected_version: int | None = None,
     ) -> Dataset:
         current = await self.load_dataset(access, project_id, dataset_id)
+        if expected_version is not None and current.version != expected_version:
+            raise DatasetVersionConflict("Dataset version has changed.")
         updated = Dataset(
             id=current.id,
             project_id=current.project_id,
@@ -157,6 +166,7 @@ class DatasetModule:
             records=_records(records, existing=current.records),
             created_at=current.created_at,
             updated_at=datetime.now(UTC),
+            version=current.version + 1,
         )
         saved = await self._store.replace_dataset(updated)
         if saved is None:
@@ -199,16 +209,27 @@ class DatasetModule:
         )
 
     async def create_transform_definition(
-        self, access: ProjectAccess, project_id: str, dataset_id: str,
-        name: str, transform_definition_id: str,
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        dataset_id: str,
+        name: str,
+        transform_definition_id: str,
     ) -> BatchDefinition:
         await self.load_dataset(access, project_id, dataset_id)
         now = datetime.now(UTC)
         return await self._store.create_definition(
             BatchDefinition(
-                id=str(uuid4()), project_id=project_id, dataset_id=dataset_id,
-                name=_name(name, "Batch Definition"), plugin_id=None, tool_name=None,
-                argument_mappings={}, input_schema={}, created_at=now, updated_at=now,
+                id=str(uuid4()),
+                project_id=project_id,
+                dataset_id=dataset_id,
+                name=_name(name, "Batch Definition"),
+                plugin_id=None,
+                tool_name=None,
+                argument_mappings={},
+                input_schema={},
+                created_at=now,
+                updated_at=now,
                 transform_definition_id=transform_definition_id,
             )
         )
@@ -339,8 +360,20 @@ class PostgresDatasetStore:
         )
 
     async def create_dataset(self, dataset: Dataset) -> Dataset:
+        self._check_file_size(dataset)
         connection = await self._connect()
         async with connection:
+            await connection.execute(
+                "SELECT 1 FROM projects WHERE id=%s FOR UPDATE", (dataset.project_id,)
+            )
+            count = await connection.execute(
+                "SELECT count(*) AS count FROM project_files WHERE project_id=%s",
+                (dataset.project_id,),
+            )
+            count_row = await count.fetchone()
+            assert count_row is not None
+            if int(str(count_row["count"])) >= self._settings.project_file_max_files:
+                raise DatasetValidationError("Project file-count limit reached.")
             await _write_dataset(connection, dataset, replace=False)
         return dataset
 
@@ -364,6 +397,7 @@ class PostgresDatasetStore:
             return tuple(datasets)
 
     async def replace_dataset(self, dataset: Dataset) -> Dataset | None:
+        self._check_file_size(dataset)
         connection = await self._connect()
         async with connection:
             existing = await _load_dataset(connection, dataset.project_id, dataset.id)
@@ -372,9 +406,17 @@ class PostgresDatasetStore:
             await _write_dataset(connection, dataset, replace=True)
         return dataset
 
+    def _check_file_size(self, dataset: Dataset) -> None:
+        if len(_dataset_content(dataset).encode("utf-8")) > self._settings.project_file_max_bytes:
+            raise DatasetValidationError("Dataset exceeds the Project file size limit.")
+
     async def delete_dataset(self, project_id: str, dataset_id: str) -> bool:
         connection = await self._connect()
         async with connection:
+            await connection.execute(
+                "DELETE FROM project_files WHERE project_id=%s AND path=%s",
+                (project_id, _dataset_path(dataset_id)),
+            )
             cursor = await connection.execute(
                 "DELETE FROM datasets WHERE project_id=%s AND dataset_id=%s RETURNING dataset_id",
                 (project_id, dataset_id),
@@ -450,7 +492,16 @@ class PostgresDatasetStore:
 async def _write_dataset(
     connection: AsyncConnection[dict[str, object]], dataset: Dataset, *, replace: bool
 ) -> None:
+    content = _dataset_content(dataset)
+    path = _dataset_path(dataset.id)
     if replace:
+        file = await connection.execute(
+            """UPDATE project_files SET content=%s, version=version+1, updated_at=%s
+            WHERE project_id=%s AND path=%s AND version=%s RETURNING version""",
+            (content, dataset.updated_at, dataset.project_id, path, dataset.version - 1),
+        )
+        if await file.fetchone() is None:
+            raise DatasetVersionConflict("Dataset version has changed.")
         await connection.execute(
             "UPDATE datasets SET name=%s, updated_at=%s WHERE project_id=%s AND dataset_id=%s",
             (dataset.name, dataset.updated_at, dataset.project_id, dataset.id),
@@ -471,6 +522,20 @@ async def _write_dataset(
                 dataset.updated_at,
             ),
         )
+        await connection.execute(
+            """INSERT INTO project_files
+            (project_id,path,content,version,created_at,updated_at)
+            VALUES (%s,%s,%s,1,%s,%s)""",
+            (
+                dataset.project_id,
+                path,
+                content,
+                dataset.created_at,
+                dataset.updated_at,
+            ),
+        )
+    # The legacy table remains a query/rollback projection, updated in the
+    # same transaction. Dataset reads always use the Project File document.
     for record in dataset.records:
         await connection.execute(
             """INSERT INTO dataset_records
@@ -482,7 +547,7 @@ async def _write_dataset(
                 record.id,
                 record.position,
                 record.source_key,
-                json.dumps(record.value),
+                json.dumps(record.value, allow_nan=False),
             ),
         )
 
@@ -497,25 +562,60 @@ async def _load_dataset(
     if dataset is None:
         return None
     cursor = await connection.execute(
-        "SELECT * FROM dataset_records WHERE project_id=%s AND dataset_id=%s ORDER BY position",
-        (project_id, dataset_id),
+        "SELECT content, version FROM project_files WHERE project_id=%s AND path=%s",
+        (project_id, _dataset_path(dataset_id)),
     )
+    file = await cursor.fetchone()
+    if file is None:
+        raise DatasetValidationError("Registered Dataset file is missing.")
+    document = _json_object(file["content"])
+    if document.get("kind") != "dataset" or document.get("id") != dataset_id:
+        raise DatasetValidationError("Registered Dataset file is invalid.")
+    raw_records = document.get("records")
+    if not isinstance(raw_records, list):
+        raise DatasetValidationError("Registered Dataset Records are invalid.")
     records = tuple(
         DatasetRecord(
-            id=str(row["record_id"]),
-            position=int(str(row["position"])),
-            source_key=str(row["source_key"]) if row["source_key"] is not None else None,
-            value=_json_object(row["value"]),
+            id=str(record["id"]),
+            position=int(str(record["position"])),
+            source_key=(str(record["sourceKey"]) if record.get("sourceKey") is not None else None),
+            value=_json_object(record["value"]),
         )
-        for row in await cursor.fetchall()
+        for record in raw_records
     )
     return Dataset(
         id=str(dataset["dataset_id"]),
         project_id=str(dataset["project_id"]),
-        name=str(dataset["name"]),
+        name=str(document["name"]),
         records=records,
         created_at=dataset["created_at"],  # type: ignore[arg-type]
         updated_at=dataset["updated_at"],  # type: ignore[arg-type]
+        version=int(str(file["version"])),
+    )
+
+
+def _dataset_path(dataset_id: str) -> str:
+    return f"/.datasets/{dataset_id}.json"
+
+
+def _dataset_content(dataset: Dataset) -> str:
+    return json.dumps(
+        {
+            "kind": "dataset",
+            "schemaVersion": 1,
+            "id": dataset.id,
+            "name": dataset.name,
+            "records": [
+                {
+                    "id": record.id,
+                    "position": record.position,
+                    "sourceKey": record.source_key,
+                    "value": record.value,
+                }
+                for record in dataset.records
+            ],
+        },
+        allow_nan=False,
     )
 
 
@@ -551,7 +651,8 @@ def _definition_from_row(row: Mapping[str, object]) -> BatchDefinition:
         updated_at=row["updated_at"],  # type: ignore[arg-type]
         transform_definition_id=(
             str(row["transform_definition_id"])
-            if row.get("transform_definition_id") is not None else None
+            if row.get("transform_definition_id") is not None
+            else None
         ),
     )
 
