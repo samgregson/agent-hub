@@ -1,4 +1,4 @@
-import { ProjectExplorerPrototype } from "@/modules/workspace/_project-explorer-prototype";
+import { ProjectExplorerPrototype } from "@/modules/workspace";
 
 export default function ProjectExplorerPrototypePage() {
   return <ProjectExplorerPrototype />;

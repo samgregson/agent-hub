@@ -202,12 +202,8 @@ class FoundationContracts(BaseModel):
         extra="forbid",
     )
     agent_run: Annotated[AgentRun | None, Field(alias="agentRun")] = None
-    artifact_catalog: Annotated[
-        ArtifactCatalog | None, Field(alias="artifactCatalog")
-    ] = None
-    artifact_document: Annotated[
-        ArtifactDocument | None, Field(alias="artifactDocument")
-    ] = None
+    artifact_catalog: Annotated[ArtifactCatalog | None, Field(alias="artifactCatalog")] = None
+    artifact_document: Annotated[ArtifactDocument | None, Field(alias="artifactDocument")] = None
     error: ErrorEnvelope | None = None
     project_file_preview: Annotated[
         ProjectFilePreview | None, Field(alias="projectFilePreview")

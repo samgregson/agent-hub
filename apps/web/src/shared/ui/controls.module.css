@@ -29,8 +29,8 @@
 }
 
 .primary:hover:not(:disabled) {
-  border-color: #edff9c;
-  background: #edff9c;
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
 }
 
 .danger {
