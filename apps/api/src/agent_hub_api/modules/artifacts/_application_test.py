@@ -155,9 +155,7 @@ async def test_artifact_replacement_rejects_stale_or_rebound_documents() -> None
         )
 
     rebound = created.model_copy(
-        update={
-            "artifact": created.artifact.model_copy(update={"type": "forged.type"})
-        }
+        update={"artifact": created.artifact.model_copy(update={"type": "forged.type"})}
     )
     with pytest.raises(ArtifactAuthorityError):
         await artifacts.replace(
@@ -240,11 +238,9 @@ async def test_enabled_plugin_replacement_is_applied_through_the_artifact_author
     access = ArtifactMutationAccess(subject="sam", thread_id="thread-a", run_id="run-a")
     created = await artifacts.create(access, project.id, _draft())
     replacement = created.model_copy(update={"payload": {"status": "unavailable"}})
-    gateway.result = (
-        PluginToolResult(
-            content=("Set the fixture status to unavailable.",),
-            structured_content=replacement.model_dump(by_alias=True),
-        )
+    gateway.result = PluginToolResult(
+        content=("Set the fixture status to unavailable.",),
+        structured_content=replacement.model_dump(by_alias=True),
     )
 
     saved = await artifacts.apply_plugin_operation(

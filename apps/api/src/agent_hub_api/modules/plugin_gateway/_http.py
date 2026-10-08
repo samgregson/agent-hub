@@ -56,7 +56,11 @@ def create_plugin_gateway_router(
 
     async def request_context(request: Request) -> RequestContext:
         try:
-            return identity.resolve(IdentityEvidence(headers=request.headers))
+            return identity.resolve(
+                IdentityEvidence(
+                    headers=request.headers, request_id=getattr(request.state, "request_id", None)
+                )
+            )
         except IdentityUnavailable as error:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

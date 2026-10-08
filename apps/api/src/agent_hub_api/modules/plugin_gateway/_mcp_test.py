@@ -52,6 +52,9 @@ class FakeClient:
         self.calls.append((name, arguments, read_timeout_seconds))
         return self.response
 
+    async def list_tools(self) -> object:
+        return type("ToolList", (), {"tools": []})()
+
     async def list_resources(self) -> object:
         resource = type(
             "Resource",
@@ -101,6 +104,58 @@ async def test_mcp_client_rejects_an_oversized_result(monkeypatch: pytest.Monkey
 
     with pytest.raises(PluginTransportError, match="size limit"):
         await client.call_tool("foundation_status", {})
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_normalizes_malformed_structured_content(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        FakeClient,
+        "response",
+        FakeResponse(content=[], structured_content={"secret": object()}),
+    )
+    monkeypatch.setattr(_mcp, "Client", FakeClient)
+    client = McpPluginClient(
+        endpoint="http://foundation-fixture:8000/mcp",
+        timeout_seconds=12,
+        max_result_bytes=1_024,
+        allow_private_network=True,
+    )
+
+    with pytest.raises(PluginTransportError, match="malformed tool content"):
+        await client.call_tool("foundation_status", {})
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_rejects_oversized_discovery_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def oversized_tools(_: FakeClient) -> object:
+        tool = type(
+            "Tool",
+            (),
+            {
+                "name": "foundation_status",
+                "description": "x" * 2_000,
+                "annotations": None,
+                "input_schema": {},
+                "output_schema": None,
+            },
+        )()
+        return type("ToolList", (), {"tools": [tool]})()
+
+    monkeypatch.setattr(FakeClient, "list_tools", oversized_tools)
+    monkeypatch.setattr(_mcp, "Client", FakeClient)
+    client = McpPluginClient(
+        endpoint="http://foundation-fixture:8000/mcp",
+        timeout_seconds=12,
+        max_result_bytes=1_024,
+        allow_private_network=True,
+    )
+
+    with pytest.raises(PluginTransportError, match="metadata exceeded the size limit"):
+        await client.discover_tools()
 
 
 @pytest.mark.parametrize(
@@ -156,3 +211,23 @@ async def test_mcp_client_reads_only_a_declared_bounded_app_resource(
     resource = await client.read_ui_resource("ui://agent-hub-foundation/status.html")
 
     assert resource.html == "<main>Fixture</main>"
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_normalizes_a_malformed_app_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def malformed_resource(_: FakeClient, __: str) -> object:
+        return type("ResourceResult", (), {"contents": None})()
+
+    monkeypatch.setattr(FakeClient, "read_resource", malformed_resource)
+    monkeypatch.setattr(_mcp, "Client", FakeClient)
+    client = McpPluginClient(
+        endpoint="http://foundation-fixture:8000/mcp",
+        timeout_seconds=12,
+        max_result_bytes=1_024,
+        allow_private_network=True,
+    )
+
+    with pytest.raises(PluginTransportError, match="invalid response"):
+        await client.read_ui_resource("ui://agent-hub-foundation/status.html")

@@ -210,8 +210,6 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
         indexed = next(iter(decisions_by_raw.values()))
         return Command(
             resume={
-                "decisions": [
-                    decision for _, decision in sorted(indexed, key=lambda item: item[0])
-                ]
+                "decisions": [decision for _, decision in sorted(indexed, key=lambda item: item[0])]
             }
         )

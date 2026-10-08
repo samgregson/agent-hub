@@ -152,14 +152,23 @@ def _response(definition: TransformDefinition) -> DefinitionResponse:
 
 def _run_response(run: TransformRun) -> RunResponse:
     return RunResponse(
-        id=run.id, definition_id=run.definition_id, status=run.status,
-        definition_snapshot=dict(run.definition_snapshot), inputs=dict(run.inputs),
-        parameters=dict(run.parameters), input_hash=run.input_hash,
-        source_hash=run.source_hash, runtime=run.runtime, output=run.output,
+        id=run.id,
+        definition_id=run.definition_id,
+        status=run.status,
+        definition_snapshot=dict(run.definition_snapshot),
+        inputs=dict(run.inputs),
+        parameters=dict(run.parameters),
+        input_hash=run.input_hash,
+        source_hash=run.source_hash,
+        runtime=run.runtime,
+        output=run.output,
         package_hash=run.package_hash,
-        output_manifest=dict(run.output_manifest), error=run.error,
-        initiator_subject=run.initiator_subject, created_at=run.created_at.isoformat(),
-        initiation=dict(run.initiation), limits=dict(run.limits),
+        output_manifest=dict(run.output_manifest),
+        error=run.error,
+        initiator_subject=run.initiator_subject,
+        created_at=run.created_at.isoformat(),
+        initiation=dict(run.initiation),
+        limits=dict(run.limits),
         completed_at=run.completed_at.isoformat() if run.completed_at else None,
     )
 
@@ -169,7 +178,11 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
 
     async def context(request: Request) -> RequestContext:
         try:
-            return identity.resolve(IdentityEvidence(headers=request.headers))
+            return identity.resolve(
+                IdentityEvidence(
+                    headers=request.headers, request_id=getattr(request.state, "request_id", None)
+                )
+            )
         except IdentityUnavailable as error:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -196,19 +209,23 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                 "busy": status.HTTP_503_SERVICE_UNAVAILABLE,
             }.get(error.code, status.HTTP_502_BAD_GATEWAY)
             return HTTPException(status_code=status_code, detail=error.code)
-        return HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)
-        )
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
 
     @router.post("", response_model=DefinitionResponse, status_code=status.HTTP_201_CREATED)
     async def define(
         project_id: str, body: DefinitionRequest, request_context: Context
     ) -> DefinitionResponse:
         try:
-            return _response(await transforms.define(
-                access(request_context), project_id, body.name, body.source,
-                body.input_selectors, body.output_schema,
-            ))
+            return _response(
+                await transforms.define(
+                    access(request_context),
+                    project_id,
+                    body.name,
+                    body.source,
+                    body.input_selectors,
+                    body.output_schema,
+                )
+            )
         except (TransformNotFound, TransformValidationError) as error:
             raise failure(error) from error
 
@@ -224,7 +241,8 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
 
     @router.get("/runs", response_model=RunPageResponse)
     async def list_runs(
-        project_id: str, request_context: Context,
+        project_id: str,
+        request_context: Context,
         definition_id: str | None = Query(default=None, alias="definitionId"),
         limit: int = Query(default=20, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
@@ -252,33 +270,45 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
 
     @router.post("/{definition_id}/preview", response_model=PreviewResponse)
     async def preview(
-        project_id: str, definition_id: str, body: PreviewRequest,
+        project_id: str,
+        definition_id: str,
+        body: PreviewRequest,
         request_context: Context,
     ) -> PreviewResponse:
         try:
             result = await transforms.preview(
-                access(request_context), project_id, definition_id,
-                body.record, body.parameters,
+                access(request_context),
+                project_id,
+                definition_id,
+                body.record,
+                body.parameters,
             )
             return PreviewResponse(
-                output=result.output, runtime=result.runtime,
+                output=result.output,
+                runtime=result.runtime,
                 source_hash=result.source_hash,
             )
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error
 
     @router.post(
-        "/{definition_id}/runs", response_model=RunResponse,
+        "/{definition_id}/runs",
+        response_model=RunResponse,
         status_code=status.HTTP_201_CREATED,
     )
     async def start_run(
-        project_id: str, definition_id: str, body: PreviewRequest,
+        project_id: str,
+        definition_id: str,
+        body: PreviewRequest,
         request_context: Context,
     ) -> RunResponse:
         try:
             run = await transforms.start_run(
-                access(request_context), project_id, definition_id,
-                body.record, body.parameters,
+                access(request_context),
+                project_id,
+                definition_id,
+                body.record,
+                body.parameters,
             )
             return _run_response(run)
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
@@ -322,22 +352,23 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
         return _run_response(run)
 
     @router.get("/runs/{run_id}", response_model=RunResponse)
-    async def load_run(
-        project_id: str, run_id: str, request_context: Context
-    ) -> RunResponse:
+    async def load_run(project_id: str, run_id: str, request_context: Context) -> RunResponse:
         try:
-            return _run_response(await transforms.load_run(
-                access(request_context), project_id, run_id
-            ))
+            return _run_response(
+                await transforms.load_run(access(request_context), project_id, run_id)
+            )
         except (TransformNotFound, TransformExecutionError) as error:
             raise failure(error) from error
 
     @router.post(
-        "/runs/{run_id}/save-dataset", response_model=SaveDatasetResponse,
+        "/runs/{run_id}/save-dataset",
+        response_model=SaveDatasetResponse,
         status_code=status.HTTP_201_CREATED,
     )
     async def save_dataset(
-        project_id: str, run_id: str, body: SaveDatasetRequest,
+        project_id: str,
+        run_id: str,
+        body: SaveDatasetRequest,
         request_context: Context,
     ) -> SaveDatasetResponse:
         try:
@@ -345,21 +376,28 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                 access(request_context), project_id, run_id, body.name
             )
             return SaveDatasetResponse(
-                id=dataset.id, name=dataset.name,
-                record_count=len(dataset.records), source_run_id=run_id,
+                id=dataset.id,
+                name=dataset.name,
+                record_count=len(dataset.records),
+                source_run_id=run_id,
             )
         except (
-            TransformNotFound, TransformValidationError, TransformExecutionError,
+            TransformNotFound,
+            TransformValidationError,
+            TransformExecutionError,
             DatasetValidationError,
         ) as error:
             raise failure(error) from error
 
     @router.post(
-        "/runs/{run_id}/save-artifact", response_model=ArtifactDocument,
+        "/runs/{run_id}/save-artifact",
+        response_model=ArtifactDocument,
         status_code=status.HTTP_201_CREATED,
     )
     async def save_artifact(
-        project_id: str, run_id: str, body: SaveArtifactRequest,
+        project_id: str,
+        run_id: str,
+        body: SaveArtifactRequest,
         request_context: Context,
     ) -> ArtifactDocument:
         try:
@@ -367,28 +405,37 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                 ArtifactUserActionAccess(
                     subject=request_context.subject, user_action_id=str(uuid4())
                 ),
-                project_id, run_id, body.title,
+                project_id,
+                run_id,
+                body.title,
             )
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error
 
     @router.put("/{definition_id}", response_model=DefinitionResponse)
     async def revise(
-        project_id: str, definition_id: str, body: DefinitionRequest,
+        project_id: str,
+        definition_id: str,
+        body: DefinitionRequest,
         request_context: Context,
     ) -> DefinitionResponse:
         try:
-            return _response(await transforms.revise(
-                access(request_context), project_id, definition_id, body.name, body.source,
-                body.input_selectors, body.output_schema,
-            ))
+            return _response(
+                await transforms.revise(
+                    access(request_context),
+                    project_id,
+                    definition_id,
+                    body.name,
+                    body.source,
+                    body.input_selectors,
+                    body.output_schema,
+                )
+            )
         except (TransformNotFound, TransformValidationError) as error:
             raise failure(error) from error
 
     @router.delete("/{definition_id}", status_code=status.HTTP_204_NO_CONTENT)
-    async def delete(
-        project_id: str, definition_id: str, request_context: Context
-    ) -> None:
+    async def delete(project_id: str, definition_id: str, request_context: Context) -> None:
         try:
             await transforms.delete(access(request_context), project_id, definition_id)
         except TransformNotFound as error:

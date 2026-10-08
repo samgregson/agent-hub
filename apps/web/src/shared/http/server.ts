@@ -19,14 +19,17 @@ export async function forwardBackendRequest(
   if (contentType) headers.set("content-type", contentType);
   if (platformSubject) headers.set(identityHeader, platformSubject);
 
-  const response = await fetch(backendRequestUrl(apiUrl, backendPath, request.url), {
-    body: request.method === "GET" ? undefined : request.body,
-    cache: "no-store",
-    duplex: "half",
-    headers,
-    method: request.method,
-    signal: request.signal,
-  } as RequestInit & { duplex: "half" });
+  const response = await fetch(
+    backendRequestUrl(apiUrl, backendPath, request.url),
+    {
+      body: request.method === "GET" ? undefined : request.body,
+      cache: "no-store",
+      duplex: "half",
+      headers,
+      method: request.method,
+      signal: request.signal,
+    } as RequestInit & { duplex: "half" },
+  );
 
   const responseHeaders = new Headers();
   for (const name of [
@@ -35,6 +38,7 @@ export async function forwardBackendRequest(
     "content-type",
     "referrer-policy",
     "x-content-type-options",
+    "x-request-id",
   ]) {
     const value = response.headers.get(name);
     if (value) responseHeaders.set(name, value);

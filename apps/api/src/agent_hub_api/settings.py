@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         "postgresql://agent_hub:agent_hub@localhost:5432/agent_hub"
     )
     database_connect_timeout_seconds: int = Field(default=2, ge=1, le=30)
+    request_body_max_bytes: int = Field(default=4_000_000, ge=1_024, le=20_000_000)
     identity_mode: Literal["fixed", "trusted_header"] = "fixed"
     fixed_identity_subject: str = Field(default="local-user", min_length=1, max_length=240)
     trusted_identity_header: str = Field(
@@ -36,7 +37,10 @@ class Settings(BaseSettings):
     project_file_search_max_matches: int = Field(default=200, ge=1, le=10_000)
     plugin_tool_timeout_seconds: float = Field(default=30, ge=1, le=300)
     plugin_result_max_bytes: int = Field(default=1_000_000, ge=1_024, le=20_000_000)
+    plugin_max_concurrent_calls: int = Field(default=8, ge=1, le=100)
+    plugin_max_calls_per_minute: int = Field(default=120, ge=1, le=10_000)
     plugin_discovery_cache_seconds: float = Field(default=300, ge=1, le=3600)
+    foundation_fixture_url: str = "http://foundation-fixture:8000/mcp"
     transform_runner_url: str | None = None
 
     @field_validator("openai_api_key", mode="before")

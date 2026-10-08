@@ -9,7 +9,11 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { AgentChat, ScratchFilePreview } from "@/modules/agent-ui";
+import {
+  AgentChat,
+  ProposedFilePreview,
+  ScratchFilePreview,
+} from "@/modules/agent-ui";
 import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
 import { DatasetCatalog, DatasetFilePreview } from "@/modules/datasets";
 import { TransformCatalog } from "@/modules/transforms";
@@ -506,6 +510,12 @@ export function ProjectWorkspace() {
         {selectedProject && selectedThread && selectedActivity === "chats" ? (
           <AgentChat
             key={selectedThread.id}
+            onOpenFileProposal={(proposal) =>
+              dispatch({ proposal, type: "openFileProposal" })
+            }
+            onOpenArtifact={(artifactId) =>
+              dispatch({ artifactId, type: "openArtifact" })
+            }
             onOpenVirtualFile={(path) => {
               if (path.startsWith("/scratch/")) {
                 dispatch({
@@ -545,7 +555,11 @@ export function ProjectWorkspace() {
         >
           Back to chat
         </button>
-        {selectedProject && selectedWorkspace?.selectedArtifactId ? (
+        {selectedProject && selectedWorkspace?.selectedFileProposal ? (
+          <ProposedFilePreview
+            proposal={selectedWorkspace.selectedFileProposal}
+          />
+        ) : selectedProject && selectedWorkspace?.selectedArtifactId ? (
           <ArtifactDocumentPreview
             artifactId={selectedWorkspace.selectedArtifactId}
             projectId={selectedProject.id}

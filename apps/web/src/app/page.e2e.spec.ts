@@ -822,7 +822,9 @@ test("a Project File Binding can be inspected and rebound after its source chang
   });
 });
 
-test("selection planning and runs reach the Project API through the browser", async ({ request }) => {
+test("selection planning and runs reach the Project API through the browser", async ({
+  request,
+}) => {
   for (const endpoint of ["selection-plan", "selection-runs"]) {
     const response = await request.post(
       `/api/projects/missing/transforms/missing/${endpoint}`,
@@ -1304,6 +1306,279 @@ test("approving a tool call resumes through the AG-UI transport contract", async
     ]);
   await page.getByRole("button", { name: "the file" }).click();
   await expect(page.getByText("# Example")).toBeVisible();
+});
+
+test("the foundation fixture App renders a portable status Artifact", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-22T00:00:00.000Z",
+    id: "project-fixture",
+    name: "Foundation",
+    updatedAt: "2026-09-22T00:00:00.000Z",
+  };
+  const artifactId = "artifact-fixture";
+  const artifact = {
+    artifact: {
+      documentVersion: 1,
+      id: artifactId,
+      plugin: { id: "foundation-fixture", version: "0.1.0" },
+      provenance: {
+        createdBy: { kind: "agentRun", runId: "run-a", threadId: "thread-a" },
+        lastChangedBy: {
+          kind: "agentRun",
+          runId: "run-a",
+          threadId: "thread-a",
+        },
+      },
+      relations: [],
+      schema: { id: "agent-hub.fixture.status", version: "1.0" },
+      title: "Bridge status",
+      type: "agent-hub.fixture.status",
+    },
+    payload: { status: "available" },
+  };
+  const app = readFileSync(
+    "../../plugins/test-fixture/app/foundation-status-view.html",
+    "utf8",
+  );
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({
+      json: {
+        artifacts: [
+          {
+            documentVersion: 1,
+            id: artifactId,
+            pluginId: "foundation-fixture",
+            pluginVersion: "0.1.0",
+            title: artifact.artifact.title,
+            type: artifact.artifact.type,
+          },
+        ],
+      },
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}`,
+    async (route) => {
+      await route.fulfill({ json: artifact });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/artifacts/${artifactId}/app`,
+    async (route) => {
+      await route.fulfill({ body: app, contentType: "text/html" });
+    },
+  );
+
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Library" }).click();
+  await page
+    .getByRole("button", { exact: true, name: "Bridge status" })
+    .click();
+  await expect(
+    page.frameLocator('iframe[title="Artifact App"]').locator("#status"),
+  ).toHaveText("available");
+});
+
+test("pending edit_file shows a diff and proposed file in the right preview", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "project-edit-preview",
+    name: "Design review",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "thread-edit-preview",
+    projectId: project.id,
+    title: "New Thread 1",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as { runId: string };
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "tool-edit",
+            toolCallName: "edit_file",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "tool-edit",
+            delta: JSON.stringify({
+              file_path: "/project/check.md",
+              old_string: "# Original",
+              new_string: "# Revised",
+            }),
+          },
+          { type: "TOOL_CALL_END", toolCallId: "tool-edit" },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-edit",
+                  reason: "tool_call",
+                  toolCallId: "tool-edit",
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    if (path.endsWith("/files"))
+      return route.fulfill({
+        json: {
+          content: "# Original\nKeep this line.\n",
+          path: "/project/check.md",
+          version: 3,
+        },
+      });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message Agent Hub").fill("Revise the check");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByRole("region", {
+    name: "Approve Project File change",
+  });
+  await expect(card).toContainText("/project/check.md");
+  await card.getByText("Review proposed change").click();
+  await expect(card.getByText(/-# Original/)).toBeVisible();
+  await expect(card.getByText(/\+# Revised/)).toBeVisible();
+  await card.getByRole("button", { name: "Open diff in preview" }).click();
+  const preview = page.getByRole("region", { name: "Proposed Project File" });
+  await expect(preview).toContainText("review snapshot");
+  await expect(preview.getByLabel("Proposed file diff")).toContainText(
+    "-# Original",
+  );
+  await preview.getByRole("button", { name: "Proposed file" }).click();
+  await expect(preview.getByLabel("Proposed file content")).toContainText(
+    "# Revised\nKeep this line.",
+  );
+  await expect(card.getByRole("button", { name: "Approve" })).toBeVisible();
+});
+
+test("rejected Project File approval remains a resolved card after reload", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "project-rejected",
+    name: "Design review",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "thread-rejected",
+    projectId: project.id,
+    title: "Rejected change",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/threads")) {
+      await route.fulfill({ json: [thread] });
+    } else if (path.endsWith("/history")) {
+      await route.fulfill({
+        json: {
+          approvals: [
+            {
+              approved: false,
+              decisionRunId: "decision-run",
+              interruptId: "interrupt-rejected",
+              resolution: null,
+              sourceRunId: "source-run",
+              toolCallId: "tool-rejected",
+            },
+          ],
+          interrupts: [],
+          messages: [
+            {
+              content: null,
+              id: "assistant-rejected",
+              role: "assistant",
+              toolCalls: [
+                {
+                  function: {
+                    arguments: JSON.stringify({
+                      file_path: "/project/check.md",
+                      old_string: "old",
+                      new_string: "new",
+                    }),
+                    name: "edit_file",
+                  },
+                  id: "tool-rejected",
+                  type: "function",
+                },
+              ],
+            },
+          ],
+        },
+      });
+    } else if (path.endsWith("/runs")) {
+      await route.fulfill({ json: [] });
+    } else {
+      await route.fulfill({ json: {} });
+    }
+  });
+
+  await page.goto("/");
+  const card = page.getByRole("region", {
+    name: "Approve Project File change",
+  });
+  await expect(card).toContainText("Rejected");
+  await expect(card).toContainText("/project/check.md");
+  await card.getByText("Review proposed change").click();
+  await expect(card).toContainText("old");
+  await expect(card).toContainText("new");
+  await expect(card.getByRole("button", { name: "Approve" })).toBeHidden();
+  await expect(
+    card.getByRole("button", { name: "Open Project File" }),
+  ).toBeHidden();
 });
 
 function sse(events: object[]) {

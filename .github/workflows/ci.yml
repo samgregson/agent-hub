@@ -11,6 +11,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -30,3 +32,131 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: uv sync --frozen --all-packages
       - run: make acceptance
+
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_DB: agent_hub
+          POSTGRES_PASSWORD: agent_hub
+          POSTGRES_USER: agent_hub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_hub -d agent_hub"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+    env:
+      AGENT_HUB_DATABASE_URL: postgresql://agent_hub:agent_hub@localhost:5432/agent_hub
+      AGENT_HUB_ENVIRONMENT: test
+      AGENT_HUB_IDENTITY_MODE: fixed
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.1
+          cache: pnpm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14.4"
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          version: "0.11.15"
+          enable-cache: true
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --frozen --all-packages
+      - run: pnpm --filter @agent-hub/web exec playwright install --with-deps chromium
+      - run: make migrate
+      - name: Verify PostgreSQL Run reconciliation and Artifact audit
+        env:
+          AGENT_HUB_ISOLATED_TEST_DATABASE_URL: postgresql://agent_hub:agent_hub@localhost:5432/agent_hub
+        run: uv run --frozen --package agent-hub-api pytest -q apps/api/src/agent_hub_api/modules/agent_execution/_postgres_integration_test.py apps/api/src/agent_hub_api/modules/artifacts/_postgres_integration_test.py
+      - name: Build foundation runtime images
+        run: |
+          docker build -t agent-hub-acceptance-api -f apps/api/Dockerfile .
+          docker build -t agent-hub-acceptance-web -f apps/web/Dockerfile .
+          docker build -t agent-hub-acceptance-fixture -f plugins/test-fixture/Dockerfile plugins/test-fixture
+      - name: Start foundation services
+        run: |
+          docker run -d --name agent-hub-acceptance-model --network host \
+            -v "$PWD/scripts/foundation-model-fixture.py:/fixture.py:ro" \
+            python:3.14.4-slim python /fixture.py
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8012/health; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8012/health
+          docker run -d --name agent-hub-acceptance-fixture -p 127.0.0.1:8001:8000 agent-hub-acceptance-fixture
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null --max-time 2 http://127.0.0.1:8001/mcp; then
+              break
+            fi
+            sleep 1
+          done
+          curl --silent --output /dev/null --max-time 2 http://127.0.0.1:8001/mcp
+          docker run -d --name agent-hub-acceptance-api --network host \
+            -e AGENT_HUB_DATABASE_URL="$AGENT_HUB_DATABASE_URL" \
+            -e AGENT_HUB_ENVIRONMENT=test \
+            -e AGENT_HUB_IDENTITY_MODE=fixed \
+            -e AGENT_HUB_OPENAI_API_KEY=foundation-test-key \
+            -e OPENAI_API_BASE=http://127.0.0.1:8012/v1 \
+            -e AGENT_HUB_FOUNDATION_FIXTURE_URL=http://127.0.0.1:8001/mcp \
+            agent-hub-acceptance-api
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8000/health/ready; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8000/health/ready
+          docker run -d --name agent-hub-acceptance-web --network host \
+            -e PORT=3001 \
+            -e HOSTNAME=0.0.0.0 \
+            -e AGENT_HUB_API_URL=http://127.0.0.1:8000 \
+            agent-hub-acceptance-web
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3001/api/health/ready; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:3001/api/health/ready
+      - name: Run browser and continuous foundation flow
+        env:
+          AGENT_HUB_E2E_EXTERNAL: "1"
+          AGENT_HUB_E2E_BASE_URL: http://127.0.0.1:3001
+          AGENT_HUB_FOUNDATION_E2E: "1"
+        run: pnpm --filter @agent-hub/web test:e2e
+      - name: Restore application and checkpoint data
+        env:
+          AGENT_HUB_ALLOW_RESTORE_DRILL: "1"
+        run: |
+          uv run --frozen --package agent-hub-api python scripts/foundation-restore-drill.py seed
+          mkdir -p "$RUNNER_TEMP/agent-hub-restore"
+          docker run --rm --network host -e PGPASSWORD=agent_hub \
+            -v "$RUNNER_TEMP/agent-hub-restore:/backup" postgres:17.6-alpine \
+            pg_dump -h 127.0.0.1 -U agent_hub -d agent_hub -Fc -f /backup/agent-hub.dump
+          docker run --rm --network host -e PGPASSWORD=agent_hub postgres:17.6-alpine \
+            createdb -h 127.0.0.1 -U agent_hub agent_hub_restore
+          docker run --rm --network host -e PGPASSWORD=agent_hub \
+            -v "$RUNNER_TEMP/agent-hub-restore:/backup" postgres:17.6-alpine \
+            pg_restore -h 127.0.0.1 -U agent_hub -d agent_hub_restore \
+            --no-owner --exit-on-error /backup/agent-hub.dump
+          AGENT_HUB_DATABASE_URL=postgresql://agent_hub:agent_hub@localhost:5432/agent_hub_restore \
+            uv run --frozen --package agent-hub-api python scripts/foundation-restore-drill.py verify
+      - name: Show service logs on failure
+        if: failure()
+        run: |
+          docker logs agent-hub-acceptance-api || true
+          docker logs agent-hub-acceptance-web || true
+          docker logs agent-hub-acceptance-fixture || true
+          docker logs agent-hub-acceptance-model || true

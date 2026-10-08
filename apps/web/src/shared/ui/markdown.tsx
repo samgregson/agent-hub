@@ -61,7 +61,8 @@ export function parseInlineMarkdown(
 
 export function virtualFilePath(url: string): string | null {
   const path = url.startsWith("sandbox:/") ? url.replace(/^sandbox:/, "") : url;
-  return /^\/(?:project|scratch)\//.test(path) && !path.split("/").includes("..")
+  return /^\/(?:project|scratch)\//.test(path) &&
+    !path.split("/").includes("..")
     ? path
     : null;
 }

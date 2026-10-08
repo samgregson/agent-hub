@@ -13,7 +13,9 @@ from agent_hub_api.modules.artifacts import (
     create_memory_artifact_module,
 )
 from agent_hub_api.modules.identity import create_identity_module
+from agent_hub_api.modules.observability import RequestLoggingMiddleware
 from agent_hub_api.modules.plugin_gateway import (
+    PluginCallLimitExceeded,
     PluginManifest,
     PluginSelection,
     PluginTool,
@@ -144,10 +146,13 @@ async def test_user_can_delete_an_artifact_only_from_their_authorized_project() 
 
 
 @pytest.mark.asyncio
-async def test_artifact_app_has_a_sandbox_safe_resource_and_a_reviewed_action_route() -> None:
+async def test_artifact_app_has_a_sandbox_safe_resource_and_a_reviewed_action_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     projects = create_memory_project_module()
     project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
-    artifacts = create_memory_artifact_module(projects, plugin_gateway=FixtureGateway())  # type: ignore[arg-type]
+    gateway = FixtureGateway()
+    artifacts = create_memory_artifact_module(projects, plugin_gateway=gateway)  # type: ignore[arg-type]
     created = await artifacts.create(
         ArtifactUserActionAccess(subject="sam", user_action_id="create-action"),
         project.id,
@@ -162,6 +167,7 @@ async def test_artifact_app_has_a_sandbox_safe_resource_and_a_reviewed_action_ro
         ),
     )
     app = FastAPI()
+    app.add_middleware(RequestLoggingMiddleware)
     app.include_router(
         create_artifact_router(
             create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
@@ -191,6 +197,22 @@ async def test_artifact_app_has_a_sandbox_safe_resource_and_a_reviewed_action_ro
             },
         )
 
+        async def busy(
+            _: object, __: str, ___: str, ____: str, arguments: dict[str, object]
+        ) -> PluginToolResult:
+            del arguments
+            raise PluginCallLimitExceeded("retry later")
+
+        monkeypatch.setattr(gateway, "call", busy)
+        limited = await client.post(
+            f"/api/projects/{project.id}/artifacts/{created.artifact.id.root}/app/actions",
+            json={
+                "name": "set_status_artifact_status",
+                "arguments": {"status": "available"},
+                "expectedVersion": 2,
+            },
+        )
+
     assert resource.status_code == 200
     assert resource.headers["content-security-policy"] == (
         "default-src 'none'; base-uri 'none'; connect-src 'none'; "
@@ -200,4 +222,9 @@ async def test_artifact_app_has_a_sandbox_safe_resource_and_a_reviewed_action_ro
     assert resource.headers["x-content-type-options"] == "nosniff"
     assert saved.status_code == 200
     assert saved.json()["payload"] == {"status": "unavailable"}
+    assert (
+        saved.json()["artifact"]["provenance"]["lastChangedBy"]["userActionId"]
+        == saved.headers["X-Request-Id"]
+    )
     assert forbidden.status_code == 422
+    assert limited.status_code == 429

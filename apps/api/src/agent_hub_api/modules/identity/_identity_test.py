@@ -23,6 +23,14 @@ def test_fixed_identity_ignores_forged_browser_header() -> None:
     assert context.subject == "trusted-local-user"
 
 
+def test_identity_context_uses_server_generated_correlation_id() -> None:
+    identity = create_identity_module(Settings(environment="test"))
+
+    context = identity.resolve(IdentityEvidence(headers={}, request_id="server-request-id"))
+
+    assert context.request_id == "server-request-id"
+
+
 def test_trusted_header_identity_requires_platform_subject() -> None:
     identity = create_identity_module(Settings(environment="test", identity_mode="trusted_header"))
 

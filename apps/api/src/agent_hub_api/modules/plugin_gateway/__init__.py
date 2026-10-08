@@ -1,5 +1,6 @@
 from agent_hub_api.modules.plugin_gateway._application import (
     MemoryPluginEnablementStore,
+    PluginCallLimitExceeded,
     PluginCapability,
     PluginDiscoveredTool,
     PluginGatewayModule,
@@ -24,6 +25,7 @@ from agent_hub_api.modules.plugin_gateway._mcp import (
 
 __all__ = [
     "MemoryPluginEnablementStore",
+    "PluginCallLimitExceeded",
     "McpPluginClient",
     "PluginEndpointRejected",
     "PostgresPluginEnablementStore",

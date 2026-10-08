@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { fromAgUiMessages } from "@assistant-ui/react-ag-ui";
 
-import { restoreInterruptMetadata } from "./_history";
+import { restoreInterruptMetadata, restoreResolvedApprovals } from "./_history";
 
 test("restores pending interrupts onto the last assistant message", () => {
   const result = restoreInterruptMetadata(
@@ -87,4 +87,47 @@ test("restored interrupt becomes an assistant-ui tool approval", () => {
       type: "tool-call",
     },
   ]);
+});
+
+test("restores a resolved decision only onto its original tool call", () => {
+  const converted = fromAgUiMessages([
+    {
+      content: null,
+      id: "assistant-1",
+      role: "assistant",
+      toolCalls: [
+        {
+          function: {
+            arguments: '{"file_path":"/project/a.md"}',
+            name: "write_file",
+          },
+          id: "tool-1",
+          type: "function",
+        },
+        {
+          function: { arguments: "{}", name: "foundation_status" },
+          id: "tool-2",
+          type: "function",
+        },
+      ],
+    },
+  ]);
+  const [restored] = restoreResolvedApprovals(converted, [
+    {
+      approved: false,
+      decisionRunId: "run-2",
+      interruptId: "interrupt-1",
+      resolution: null,
+      sourceRunId: "run-1",
+      toolCallId: "tool-1",
+    },
+  ]);
+
+  assert.equal(restored.role, "assistant");
+  if (restored.role !== "assistant") return;
+  assert.deepEqual(restored.content[0], {
+    ...(converted[0].content[0] as Record<string, unknown>),
+    approval: { id: "interrupt-1", approved: false },
+  });
+  assert.deepEqual(restored.content[1], converted[0].content[1]);
 });

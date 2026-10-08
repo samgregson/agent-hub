@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Protocol, Self
 
 from ag_ui.core import BaseEvent, Interrupt, Message, RunAgentInput, RunErrorEvent, RunFinishedEvent
 from psycopg import AsyncConnection
@@ -25,6 +25,60 @@ class AgentRunStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class ApprovalDecision:
+    interrupt_id: str
+    tool_call_id: str
+    approved: bool | None
+    resolution: str | None
+    source_run_id: str | None
+    decision_run_id: str
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "interruptId": self.interrupt_id,
+            "toolCallId": self.tool_call_id,
+            "approved": self.approved,
+            "resolution": self.resolution,
+            "sourceRunId": self.source_run_id,
+            "decisionRunId": self.decision_run_id,
+        }
+
+    @classmethod
+    def from_json(cls, value: object) -> Self:
+        if not isinstance(value, dict):
+            raise ValueError("Invalid stored approval decision")
+        interrupt_id = value.get("interruptId")
+        tool_call_id = value.get("toolCallId")
+        approved = value.get("approved")
+        resolution = value.get("resolution")
+        source_run_id = value.get("sourceRunId")
+        decision_run_id = value.get("decisionRunId")
+        if (
+            not isinstance(interrupt_id, str)
+            or not isinstance(tool_call_id, str)
+            or (approved is not None and not isinstance(approved, bool))
+            or (resolution is not None and not isinstance(resolution, str))
+            or (source_run_id is not None and not isinstance(source_run_id, str))
+            or not isinstance(decision_run_id, str)
+        ):
+            raise ValueError("Invalid stored approval decision")
+        return cls(
+            interrupt_id=interrupt_id,
+            tool_call_id=tool_call_id,
+            approved=approved,
+            resolution=resolution,
+            source_run_id=source_run_id,
+            decision_run_id=decision_run_id,
+        )
+
+
+def _approval_decisions_from_json(value: object) -> tuple[ApprovalDecision, ...]:
+    if not isinstance(value, list):
+        raise ValueError("Invalid stored approval decisions")
+    return tuple(ApprovalDecision.from_json(item) for item in value)
+
+
+@dataclass(frozen=True, slots=True)
 class AgentRun:
     id: str
     thread_id: str
@@ -33,6 +87,7 @@ class AgentRun:
     created_at: datetime
     updated_at: datetime
     error: ErrorEnvelope | None = None
+    approval_decisions: tuple[ApprovalDecision, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +163,7 @@ class AgentExecutionModule:
         request_id: str,
         subject: str | None = None,
     ) -> AsyncIterator[BaseEvent]:
+        approval_decisions: tuple[ApprovalDecision, ...] = ()
         if input_data.resume:
             thread_state = await self._runner.load_thread_state(
                 input_data.thread_id, project_id=project_id
@@ -116,6 +172,34 @@ class AgentExecutionModule:
             supplied = [entry.interrupt_id for entry in input_data.resume]
             if len(supplied) != len(set(supplied)) or set(supplied) != expected:
                 raise InvalidAgentRunResume
+            previous_runs = await self._store.list(input_data.thread_id)
+            source_run_id = next(
+                (run.id for run in previous_runs if run.status is AgentRunStatus.INTERRUPTED),
+                None,
+            )
+            responses = {entry.interrupt_id: entry for entry in input_data.resume}
+            decisions = []
+            for interrupt in thread_state.interrupts:
+                if interrupt.tool_call_id is None:
+                    continue
+                response = responses[interrupt.id]
+                payload = response.payload
+                approved = (
+                    payload.get("approved")
+                    if response.status == "resolved" and isinstance(payload, dict)
+                    else None
+                )
+                decisions.append(
+                    ApprovalDecision(
+                        interrupt_id=interrupt.id,
+                        tool_call_id=interrupt.tool_call_id,
+                        approved=approved if isinstance(approved, bool) else None,
+                        resolution="cancelled" if response.status == "cancelled" else None,
+                        source_run_id=source_run_id,
+                        decision_run_id=input_data.run_id,
+                    )
+                )
+            approval_decisions = tuple(decisions)
         now = datetime.now(UTC)
         run = AgentRun(
             id=input_data.run_id,
@@ -124,6 +208,7 @@ class AgentExecutionModule:
             status=AgentRunStatus.RUNNING,
             created_at=now,
             updated_at=now,
+            approval_decisions=approval_decisions,
         )
         create_result = await self._store.create(run)
         if create_result is CreateAgentRunResult.DUPLICATE:
@@ -285,8 +370,9 @@ class PostgresAgentRunStore:
             cursor = await connection.execute(
                 """
                 INSERT INTO agent_runs
-                    (id, thread_id, request_id, status, created_at, updated_at, error)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (id, thread_id, request_id, status, created_at, updated_at,
+                     error, approval_decisions)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT DO NOTHING
                 RETURNING id
                 """,
@@ -298,6 +384,7 @@ class PostgresAgentRunStore:
                     run.created_at,
                     run.updated_at,
                     self._serialized_error(run.error),
+                    Jsonb([decision.as_json() for decision in run.approval_decisions]),
                 ),
             )
             if await cursor.fetchone() is not None:
@@ -332,7 +419,8 @@ class PostgresAgentRunStore:
         async with connection:
             cursor = await connection.execute(
                 """
-                SELECT id, thread_id, request_id, status, created_at, updated_at, error
+                SELECT id, thread_id, request_id, status, created_at, updated_at, error,
+                       approval_decisions
                 FROM agent_runs
                 WHERE thread_id = %s
                 ORDER BY updated_at DESC, id
@@ -350,6 +438,7 @@ class PostgresAgentRunStore:
                     error=(
                         None if row["error"] is None else ErrorEnvelope.model_validate(row["error"])
                     ),
+                    approval_decisions=_approval_decisions_from_json(row["approval_decisions"]),
                 )
                 for row in await cursor.fetchall()
             )

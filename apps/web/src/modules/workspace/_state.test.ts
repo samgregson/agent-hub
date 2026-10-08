@@ -106,6 +106,28 @@ test("opening a Project Artifact selects its generic view and clears a file prev
   assert.equal(state.projects["project-a"].mobileSurface, "artifact");
 });
 
+test("opening a proposed file shows the right panel without selecting the saved file", () => {
+  let state = workspaceReducer(createWorkspaceState(), {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  const proposal = {
+    kind: "diff" as const,
+    path: "/project/check.md",
+    proposed: "# Revised\n",
+    text: "-# Original\n+# Revised",
+  };
+  state = workspaceReducer(state, { proposal, type: "openFileProposal" });
+  assert.equal(state.projects["project-a"].selectedFileProposal, proposal);
+  assert.equal(state.projects["project-a"].selectedFilePath, null);
+  assert.equal(state.projects["project-a"].mobileSurface, "artifact");
+  state = workspaceReducer(state, {
+    path: "/project/check.md",
+    type: "openProjectFile",
+  });
+  assert.equal(state.projects["project-a"].selectedFileProposal, null);
+});
+
 test("activity changes are ignored until a Project is selected", () => {
   const state = createWorkspaceState();
   assert.equal(

@@ -8,7 +8,9 @@
   font-size: var(--font-size-label);
   padding: 0 var(--space-4);
   font-weight: 650;
-  transition: background-color 160ms ease, border-color 160ms ease;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
 }
 
 .button:hover:not(:disabled) {

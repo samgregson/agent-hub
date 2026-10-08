@@ -15,8 +15,9 @@
   <body>
     <main>
       <strong>Foundation fixture</strong>
-      <h1>MCP App connection verified</h1>
-      <p>This deliberately small App verifies resource discovery and sandboxed rendering.</p>
+      <h1>Status Artifact</h1>
+      <p>Current status: <strong id="status">Waiting for Artifact…</strong></p>
+      <p>This portable App renders the document supplied by its MCP host.</p>
     </main>
     <script>
       let nextId = 1;
@@ -31,6 +32,12 @@
         if (event.source === window.parent && message?.id && pending.has(message.id)) {
           pending.get(message.id)(message.result);
           pending.delete(message.id);
+        }
+        if (event.source === window.parent && message?.method === "ui/notifications/tool-result") {
+          const status = message.params?.structuredContent?.payload?.status;
+          if (status === "available" || status === "unavailable") {
+            document.querySelector("#status").textContent = status;
+          }
         }
       });
       (async () => {

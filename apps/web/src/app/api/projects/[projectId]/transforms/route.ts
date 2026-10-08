@@ -4,7 +4,10 @@ interface RouteContext {
   params: Promise<{ projectId: string }>;
 }
 
-async function forward(request: Request, context: RouteContext): Promise<Response> {
+async function forward(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
   const { projectId } = await context.params;
   return forwardBackendRequest(
     request,

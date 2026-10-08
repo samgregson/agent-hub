@@ -9,9 +9,9 @@
     "contracts:check": "node scripts/generate-contracts.mjs --check",
     "contracts:generate": "node scripts/generate-contracts.mjs --write",
     "dev:web": "pnpm --filter @agent-hub/web dev",
-    "format": "pnpm --recursive --if-present format && uv run ruff format apps/api",
-    "format:check": "pnpm --recursive --if-present format:check && uv run ruff format --check apps/api",
-    "lint": "pnpm architecture:check && pnpm ui:check && pnpm --recursive --if-present lint && uv run ruff check apps/api",
+    "format": "pnpm --recursive --if-present format && uv run ruff format apps/api scripts/foundation-model-fixture.py",
+    "format:check": "pnpm --recursive --if-present format:check && uv run ruff format --check apps/api scripts/foundation-model-fixture.py",
+    "lint": "pnpm architecture:check && pnpm ui:check && pnpm --recursive --if-present lint && uv run ruff check apps/api scripts/foundation-model-fixture.py",
     "test": "pnpm --recursive --if-present test && uv run pytest",
     "typecheck": "pnpm --recursive --if-present typecheck && uv run mypy apps/api/src"
   },

@@ -23,9 +23,7 @@ def client_for(subject: str, projects: ProjectModule, gateway: PluginGatewayModu
     app = FastAPI()
     identity = create_identity_module(settings)
     app.include_router(create_project_router(identity, projects), prefix="/api")
-    app.include_router(
-        create_plugin_gateway_router(identity, gateway), prefix="/api"
-    )
+    app.include_router(create_plugin_gateway_router(identity, gateway), prefix="/api")
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -52,9 +50,7 @@ async def test_plugin_selection_is_project_scoped_and_idempotent() -> None:
         project_id = created.json()["id"]
         before = await alice.get(f"/api/projects/{project_id}/plugins")
         enabled = await alice.put(f"/api/projects/{project_id}/plugins/foundation-fixture")
-        repeated_enable = await alice.put(
-            f"/api/projects/{project_id}/plugins/foundation-fixture"
-        )
+        repeated_enable = await alice.put(f"/api/projects/{project_id}/plugins/foundation-fixture")
         after = await alice.get(f"/api/projects/{project_id}/plugins")
         disabled = await alice.delete(f"/api/projects/{project_id}/plugins/foundation-fixture")
         after_disable = await alice.get(f"/api/projects/{project_id}/plugins")

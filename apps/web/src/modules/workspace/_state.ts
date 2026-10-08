@@ -1,3 +1,10 @@
+interface FileProposal {
+  kind: "diff" | "preview";
+  path: string;
+  proposed: string;
+  text: string;
+}
+
 export const activityViews = [
   "chats",
   "artifacts",
@@ -14,6 +21,7 @@ export interface ProjectWorkspaceState {
   mobileSurface: "artifact" | "chat";
   selectedArtifactId: string | null;
   selectedFilePath: string | null;
+  selectedFileProposal: FileProposal | null;
   selectedScratchThreadId: string | null;
   selectedSourceId: string | null;
   selectedThreadId: string | null;
@@ -29,6 +37,7 @@ export type WorkspaceAction =
   | { activity: ActivityView; type: "selectActivity" }
   | { artifactId: string | null; type: "openArtifact" }
   | { path: string | null; type: "openProjectFile" }
+  | { proposal: FileProposal; type: "openFileProposal" }
   | { path: string | null; threadId: string; type: "openScratchFile" }
   | { type: "showChat" }
   | { threadId: string | null; type: "selectThread" };
@@ -39,6 +48,7 @@ function initialProjectState(): ProjectWorkspaceState {
     mobileSurface: "chat",
     selectedArtifactId: null,
     selectedFilePath: null,
+    selectedFileProposal: null,
     selectedScratchThreadId: null,
     selectedSourceId: null,
     selectedThreadId: null,
@@ -75,6 +85,7 @@ export function workspaceReducer(
         [state.selectedProjectId]: {
           ...state.projects[state.selectedProjectId],
           selectedThreadId: action.threadId,
+          selectedFileProposal: null,
         },
       },
     };
@@ -88,8 +99,25 @@ export function workspaceReducer(
           ...state.projects[state.selectedProjectId],
           selectedArtifactId: null,
           selectedFilePath: action.path,
+          selectedFileProposal: null,
           selectedScratchThreadId: null,
           mobileSurface: action.path === null ? "chat" : "artifact",
+        },
+      },
+    };
+  }
+  if (action.type === "openFileProposal") {
+    return {
+      ...state,
+      projects: {
+        ...state.projects,
+        [state.selectedProjectId]: {
+          ...state.projects[state.selectedProjectId],
+          selectedArtifactId: null,
+          selectedFilePath: null,
+          selectedFileProposal: action.proposal,
+          selectedScratchThreadId: null,
+          mobileSurface: "artifact",
         },
       },
     };
@@ -103,6 +131,7 @@ export function workspaceReducer(
           ...state.projects[state.selectedProjectId],
           selectedArtifactId: null,
           selectedFilePath: action.path,
+          selectedFileProposal: null,
           selectedScratchThreadId:
             action.path === null ? null : action.threadId,
           mobileSurface: action.path === null ? "chat" : "artifact",
@@ -131,6 +160,7 @@ export function workspaceReducer(
           ...state.projects[state.selectedProjectId],
           selectedArtifactId: action.artifactId,
           selectedFilePath: null,
+          selectedFileProposal: null,
           selectedScratchThreadId: null,
           mobileSurface: action.artifactId === null ? "chat" : "artifact",
         },
