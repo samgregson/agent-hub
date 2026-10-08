@@ -822,6 +822,17 @@ test("a Project File Binding can be inspected and rebound after its source chang
   });
 });
 
+test("selection planning and runs reach the Project API through the browser", async ({ request }) => {
+  for (const endpoint of ["selection-plan", "selection-runs"]) {
+    const response = await request.post(
+      `/api/projects/missing/transforms/missing/${endpoint}`,
+      { data: {} },
+    );
+    expect(response.status()).toBe(422);
+    expect(response.headers()["content-type"]).toContain("application/json");
+  }
+});
+
 test("a reviewed Dataset selection starts one captured Transform Run", async ({
   page,
 }) => {
