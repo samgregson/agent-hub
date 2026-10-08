@@ -25,6 +25,14 @@ def create_fixture_server() -> FastMCP:
             "source": "agent-hub-foundation-fixture",
         }
 
+    @mcp.tool(
+        name="render_template_value",
+        annotations={"readOnlyHint": True, "idempotentHint": True},
+    )
+    async def render_template_value(template: str, value: float) -> dict[str, str]:
+        """Replace a value marker in text; the Plugin owns this example operation."""
+        return {"rendered": template.replace("{{value}}", str(value))}
+
     @mcp.resource(
         uri=FIXTURE_APP_RESOURCE_URI,
         name="Foundation status view",

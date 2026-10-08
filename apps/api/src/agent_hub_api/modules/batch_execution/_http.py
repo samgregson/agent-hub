@@ -8,11 +8,13 @@ from pydantic.alias_generators import to_camel
 from agent_hub_api.modules.batch_execution._application import (
     BatchExecutionModule,
     BatchRun,
+    BatchRunIdempotencyConflict,
     BatchRunNotArchivable,
     BatchRunNotFound,
     BatchRunOrder,
     BatchRunStatus,
 )
+from agent_hub_api.modules.bindings import BindingUnavailable
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
@@ -52,6 +54,10 @@ class BatchRunResponse(_Model):
     succeeded_count: int
     failed_count: int
     updated_at: str
+
+
+class BatchRunDetailResponse(BatchRunResponse):
+    definition_snapshot: dict[str, object]
 
 
 class BatchRunPageResponse(_Model):
@@ -157,14 +163,21 @@ def create_batch_execution_router(
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
         except TransformExecutionError as error:
             raise HTTPException(status_code=422, detail=error.code) from error
+        except BindingUnavailable as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except BatchRunIdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
-    @router.get("/{run_id}", response_model=BatchRunResponse)
-    async def load(project_id: str, run_id: str, request_context: Context) -> BatchRunResponse:
+    @router.get("/{run_id}", response_model=BatchRunDetailResponse)
+    async def load(
+        project_id: str, run_id: str, request_context: Context
+    ) -> BatchRunDetailResponse:
         try:
-            return _response(
-                await batches.load(
-                    ProjectAccess(subject=request_context.subject), project_id, run_id
-                )
+            run = await batches.load(
+                ProjectAccess(subject=request_context.subject), project_id, run_id
+            )
+            return BatchRunDetailResponse(
+                **_response(run).model_dump(), definition_snapshot=dict(run.definition_snapshot)
             )
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run not found") from error
@@ -232,13 +245,13 @@ def create_batch_execution_router(
         )
 
     @router.post("/{run_id}/archive", response_model=BatchRunResponse)
-    async def archive(
-        project_id: str, run_id: str, request_context: Context
-    ) -> BatchRunResponse:
+    async def archive(project_id: str, run_id: str, request_context: Context) -> BatchRunResponse:
         try:
-            return _response(await batches.archive(
-                ProjectAccess(subject=request_context.subject), project_id, run_id
-            ))
+            return _response(
+                await batches.archive(
+                    ProjectAccess(subject=request_context.subject), project_id, run_id
+                )
+            )
         except BatchRunNotFound as error:
             raise HTTPException(status_code=404, detail="Batch Run not found") from error
         except BatchRunNotArchivable as error:
@@ -259,5 +272,9 @@ def create_batch_execution_router(
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
         except TransformExecutionError as error:
             raise HTTPException(status_code=422, detail=error.code) from error
+        except BindingUnavailable as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except BatchRunIdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     return router

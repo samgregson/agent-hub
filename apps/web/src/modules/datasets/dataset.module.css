@@ -15,7 +15,8 @@
 }
 
 .form input,
-.form textarea {
+.form textarea,
+.form select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: var(--radius-control);
@@ -23,6 +24,17 @@
   color: var(--text-strong);
   font: inherit;
   padding: var(--space-3);
+}
+
+.boundContent {
+  max-height: 18rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
 }
 
 .formActions {

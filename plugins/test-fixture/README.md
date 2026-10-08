@@ -1,7 +1,7 @@
 # Test fixture Plugin
 
 A deliberately small portable FastMCP 4 server used to verify Agent Hub's Plugin
-Gateway. It exposes one read-only `foundation_status` tool with concise text
+Gateway. It exposes the read-only `foundation_status` tool with concise text
 and structured output, plus a standards-compatible `ui://` MCP App resource.
 The App only verifies discovery and sandboxed rendering. It has no Artifact
 operations or domain/calculation behaviour; the separate reference-calculation

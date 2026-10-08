@@ -15,7 +15,7 @@ from agent_hub_foundation_fixture._server import (
 async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
     async with Client(create_fixture_server(), timeout=1, init_timeout=1) as client:
         tools = await client.list_tools()
-        assert [tool.name for tool in tools] == [FIXTURE_TOOL_NAME]
+        assert [tool.name for tool in tools] == [FIXTURE_TOOL_NAME, "render_template_value"]
         fixture_tool = tools[0]
         assert fixture_tool.annotations is not None
         assert fixture_tool.annotations.read_only_hint is True
@@ -25,6 +25,10 @@ async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
             "source": "agent-hub-foundation-fixture",
             "status": "available",
         }
+        rendered = await client.call_tool(
+            "render_template_value", {"template": "value={{value}}", "value": 2.5}
+        )
+        assert rendered.data == {"rendered": "value=2.5"}
 
         resources = await client.list_resources()
         assert any(str(resource.uri) == FIXTURE_APP_RESOURCE_URI for resource in resources)

@@ -24,6 +24,7 @@ test("Plugins are available through the browser-facing Project API", async ({
         name: "Foundation fixture",
         tools: expect.arrayContaining([
           { name: "foundation_status", readOnly: true },
+          { name: "render_template_value", readOnly: true },
         ]),
         version: "0.1.0",
       }),
@@ -698,6 +699,127 @@ test("an Artifact App receives its saved tool result through the MCP App bridge"
   await expect(preview.locator("#length")).toHaveValue("6.5");
   await expect(preview.locator("#load")).toHaveValue("12.5");
   await expect(preview.locator("#result")).toHaveText("81.3 kN·m");
+});
+
+test("a Project File Binding can be inspected and rebound after its source changes", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-24T00:00:00.000Z",
+    id: "project-binding",
+    name: "Template project",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+  };
+  const definition = {
+    id: "definition-binding",
+    datasetId: "dataset-binding",
+    datasetAvailable: true,
+    name: "Render values",
+    pluginId: "foundation-fixture",
+    toolName: "render_template_value",
+    transformDefinitionId: null,
+    fileArgument: "template",
+    argumentMappings: { value: "/value" },
+  };
+  let fileVersion = 1;
+  let bindingVersion = 0;
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({ json: { artifacts: [] } });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          files: [{ path: "/project/template.txt", version: fileVersion }],
+        },
+      });
+    },
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({
+      json: [{ id: definition.datasetId, name: "Values", records: [] }],
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/transforms`,
+    async (route) => {
+      await route.fulfill({ json: [] });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/batch-definitions`,
+    async (route) => {
+      await route.fulfill({ json: [definition] });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/batch-definitions/${definition.id}/file-binding`,
+    async (route) => {
+      if (route.request().method() === "GET") {
+        if (bindingVersion === 0) {
+          await route.fulfill({ status: 404 });
+          return;
+        }
+      } else {
+        writes.push(route.request().postDataJSON() as Record<string, unknown>);
+        bindingVersion += 1;
+      }
+      await route.fulfill({
+        json: {
+          id: "binding-1",
+          definitionId: definition.id,
+          argument: "template",
+          sourcePath: "/project/template.txt",
+          expectedFileVersion: fileVersion,
+          cardinality: "scalar-to-selected-records",
+          version: bindingVersion,
+        },
+        status: route.request().method() === "POST" ? 201 : 200,
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/batch-runs?**`,
+    async (route) => {
+      await route.fulfill({ json: { items: [], nextOffset: null } });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Batch Definitions" }).click();
+  await page
+    .getByRole("button", { name: "Inspect Batch Definition Render values" })
+    .click();
+  const panel = page.getByRole("region", { name: "Project File Binding" });
+  await expect(panel.getByText("No file bound yet.")).toBeVisible();
+  await panel.getByLabel("Project File").selectOption("/project/template.txt");
+  await panel.getByRole("button", { name: "Bind Project File" }).click();
+  await expect(panel.getByText(/Binding v1/)).toBeVisible();
+  expect(writes[0]).toMatchObject({
+    sourcePath: "/project/template.txt",
+    expectedFileVersion: 1,
+  });
+
+  fileVersion = 2;
+  await panel.getByRole("button", { name: "Refresh Project Files" }).click();
+  await expect(panel.getByRole("option", { name: /v2/ })).toHaveCount(1);
+  await panel
+    .getByRole("button", { name: "Rebind current file version" })
+    .click();
+  await expect(panel.getByText(/Binding v2/)).toBeVisible();
+  expect(writes[1]).toMatchObject({
+    sourcePath: "/project/template.txt",
+    expectedFileVersion: 2,
+    expectedBindingVersion: 1,
+  });
 });
 
 test.describe("at phone width", () => {

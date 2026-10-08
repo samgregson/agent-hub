@@ -7,10 +7,11 @@ from enum import StrEnum
 from typing import Protocol, cast
 from uuid import uuid4
 
-from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
+from agent_hub_api.modules.bindings import BindingModule, BindingUnavailable, CapturedFileBinding
 from agent_hub_api.modules.datasets import (
     BatchDefinition,
     DatasetModule,
@@ -25,6 +26,8 @@ from agent_hub_api.modules.transforms import (
     TransformNotFound,
 )
 from agent_hub_api.settings import Settings
+
+MAX_FILE_BOUND_INVOCATIONS = 100
 
 
 class BatchRunStatus(StrEnum):
@@ -102,12 +105,19 @@ class BatchRunNotFound(Exception):
     pass
 
 
+class BatchRunIdempotencyConflict(Exception):
+    """An idempotency key already identifies another Batch Definition."""
+
+
 class BatchRunNotArchivable(Exception):
     """A non-terminal Batch Run cannot be archived."""
 
 
 class BatchRunStore(Protocol):
     async def create_or_load(self, run: BatchRun) -> tuple[BatchRun, bool]: ...
+    async def load_by_idempotency_key(
+        self, project_id: str, idempotency_key: str
+    ) -> BatchRun | None: ...
     async def load(self, project_id: str, run_id: str) -> BatchRun | None: ...
     async def list(
         self,
@@ -135,6 +145,7 @@ class BatchExecutionModule:
         store: BatchRunStore,
         max_concurrency: int = 4,
         transforms: TransformModule | None = None,
+        bindings: BindingModule | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least one")
@@ -146,6 +157,7 @@ class BatchExecutionModule:
         )
         self._max_concurrency = max_concurrency
         self._transforms = transforms
+        self._bindings = bindings
         self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
 
     async def define_transform_batch(
@@ -197,7 +209,11 @@ class BatchExecutionModule:
         initiation: BatchInitiation | None = None,
     ) -> BatchRun:
         await self._authorize(access, project_id)
+        existing = await self._idempotent_existing(project_id, definition_id, idempotency_key)
+        if existing is not None:
+            return existing
         definition = await self._datasets.load_definition(access, project_id, definition_id)
+        binding = await self._capture_binding(access, project_id, definition)
         snapshot = await self._definition_snapshot(access, project_id, definition)
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         record = next((item for item in dataset.records if item.id == record_id), None)
@@ -206,7 +222,7 @@ class BatchExecutionModule:
         arguments = (
             dict(record.value)
             if definition.transform_definition_id
-            else _arguments(record.value, definition)
+            else _bound_arguments(record.value, definition, binding)
         )
         now = datetime.now(UTC)
         run = BatchRun(
@@ -214,7 +230,11 @@ class BatchExecutionModule:
             project_id,
             definition.id,
             BatchRunStatus.queued,
-            {**snapshot, **_dataset_snapshot(dataset.id, dataset.version, (record,))},
+            {
+                **snapshot,
+                **_dataset_snapshot(dataset.id, dataset.version, (record,)),
+                **({"fileBinding": binding.snapshot()} if binding else {}),
+            },
             (ResultRecord(record.id, arguments),),
             now,
             now,
@@ -223,6 +243,8 @@ class BatchExecutionModule:
             initiation=_initiation_snapshot(initiation),
         )
         run, created = await self._store.create_or_load(run)
+        if run.definition_id != definition_id:
+            raise BatchRunIdempotencyConflict("This idempotency key identifies another Batch Run.")
         return run
 
     async def start_all(
@@ -250,18 +272,24 @@ class BatchExecutionModule:
     ) -> BatchRun:
         """Execute a captured Dataset after its first record succeeds."""
         await self._authorize(access, project_id)
+        existing = await self._idempotent_existing(project_id, definition_id, idempotency_key)
+        if existing is not None:
+            return existing
         definition = await self._datasets.load_definition(access, project_id, definition_id)
+        binding = await self._capture_binding(access, project_id, definition)
         snapshot = await self._definition_snapshot(access, project_id, definition)
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         if not dataset.records:
             raise BatchRunNotFound
+        if binding is not None and len(dataset.records) > MAX_FILE_BOUND_INVOCATIONS:
+            raise BindingUnavailable("A file-bound Batch Run is limited to 100 Records.")
         now = datetime.now(UTC)
         captured = tuple(
             (
                 record.id,
                 dict(record.value)
                 if definition.transform_definition_id
-                else _arguments(record.value, definition),
+                else _bound_arguments(record.value, definition, binding),
             )
             for record in dataset.records
         )
@@ -273,6 +301,7 @@ class BatchExecutionModule:
             {
                 **snapshot,
                 **_dataset_snapshot(dataset.id, dataset.version, dataset.records),
+                **({"fileBinding": binding.snapshot()} if binding else {}),
                 "maxConcurrency": self._max_concurrency,
                 "recordIds": [record_id for record_id, _ in captured],
             },
@@ -284,7 +313,19 @@ class BatchExecutionModule:
             initiation=_initiation_snapshot(initiation),
         )
         run, created = await self._store.create_or_load(run)
+        if run.definition_id != definition_id:
+            raise BatchRunIdempotencyConflict("This idempotency key identifies another Batch Run.")
         return run
+
+    async def _idempotent_existing(
+        self, project_id: str, definition_id: str, idempotency_key: str | None
+    ) -> BatchRun | None:
+        if idempotency_key is None:
+            return None
+        existing = await self._store.load_by_idempotency_key(project_id, idempotency_key)
+        if existing is not None and existing.definition_id != definition_id:
+            raise BatchRunIdempotencyConflict("This idempotency key identifies another Batch Run.")
+        return existing
 
     async def execute(self, access: ProjectAccess, project_id: str, run_id: str) -> BatchRun:
         run = await self.load(access, project_id, run_id)
@@ -552,6 +593,15 @@ class BatchExecutionModule:
         )
         return _snapshot(definition, schema)
 
+    async def _capture_binding(
+        self, access: ProjectAccess, project_id: str, definition: BatchDefinition
+    ) -> CapturedFileBinding | None:
+        if definition.file_argument is None:
+            return None
+        if self._bindings is None:
+            raise BindingUnavailable("File Bindings are unavailable.")
+        return await self._bindings.capture(access, project_id, definition)
+
 
 class MemoryBatchRunStore:
     def __init__(self) -> None:
@@ -567,6 +617,12 @@ class MemoryBatchRunStore:
         if run.idempotency_key is not None:
             self._idempotency_keys[(run.project_id, run.idempotency_key)] = run.id
         return run, True
+
+    async def load_by_idempotency_key(
+        self, project_id: str, idempotency_key: str
+    ) -> BatchRun | None:
+        run_id = self._idempotency_keys.get((project_id, idempotency_key))
+        return self._runs.get((project_id, run_id)) if run_id is not None else None
 
     async def load(self, project_id: str, run_id: str) -> BatchRun | None:
         return self._runs.get((project_id, run_id))
@@ -674,6 +730,19 @@ class PostgresBatchRunStore:
         connection = await self._connect()
         async with connection:
             return await _load(connection, project_id, run_id)
+
+    async def load_by_idempotency_key(
+        self, project_id: str, idempotency_key: str
+    ) -> BatchRun | None:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """SELECT batch_run_id FROM batch_runs
+                WHERE project_id=%s AND idempotency_key=%s""",
+                (project_id, idempotency_key),
+            )
+            row = await cursor.fetchone()
+            return await _load(connection, project_id, str(row["batch_run_id"])) if row else None
 
     async def list(
         self,
@@ -887,6 +956,23 @@ def _arguments(value: Mapping[str, object], definition: BatchDefinition) -> Mapp
     return {name: _select(value, pointer) for name, pointer in definition.argument_mappings.items()}
 
 
+def _bound_arguments(
+    value: Mapping[str, object],
+    definition: BatchDefinition,
+    binding: CapturedFileBinding | None,
+) -> Mapping[str, object]:
+    arguments = dict(_arguments(value, definition))
+    if binding is not None:
+        arguments[binding.argument] = binding.content
+        try:
+            Draft202012Validator(definition.input_schema).validate(arguments)
+        except ValidationError as error:
+            raise BindingUnavailable(
+                "Bound arguments do not satisfy the MCP input schema."
+            ) from error
+    return arguments
+
+
 def _validate_result_path(path: str) -> None:
     if not (path.startswith(("/input/", "/structuredOutput/")) or path == "/error"):
         raise ValueError("Result paths must select input, structuredOutput, or error.")
@@ -983,7 +1069,13 @@ def create_postgres_batch_execution_module(
     datasets: DatasetModule,
     gateway: PluginGatewayModule,
     transforms: TransformModule | None = None,
+    bindings: BindingModule | None = None,
 ) -> BatchExecutionModule:
     return BatchExecutionModule(
-        projects, datasets, gateway, PostgresBatchRunStore(settings), transforms=transforms
+        projects,
+        datasets,
+        gateway,
+        PostgresBatchRunStore(settings),
+        transforms=transforms,
+        bindings=bindings,
     )

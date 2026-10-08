@@ -115,6 +115,51 @@ async def test_batch_definition_validates_each_dataset_record_against_tool_schem
 
 
 @pytest.mark.asyncio
+async def test_definition_declares_file_argument_without_dataset_placeholder() -> None:
+    class TemplateSchemas:
+        async def input_schema(self, *_: object) -> Mapping[str, object]:
+            return {
+                "type": "object",
+                "required": ["template", "tip_load_kn"],
+                "properties": {
+                    "template": {"type": "string"},
+                    "tip_load_kn": {"type": "number"},
+                },
+            }
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Bridge")
+    project_id = project.id
+    datasets = DatasetModule(projects, MemoryDatasetStore(), TemplateSchemas())
+    dataset = await datasets.create_dataset(
+        access, project_id, "Loads", [DatasetRecordInput({"load": 12.5})]
+    )
+    definition = await datasets.create_definition(
+        access,
+        project_id,
+        dataset.id,
+        "With file input",
+        "reference-calculation",
+        "calculate_cantilever_tip_load",
+        {"tip_load_kn": "/load"},
+        file_argument="template",
+    )
+    assert definition.file_argument == "template"
+    with pytest.raises(DatasetValidationError, match="file argument"):
+        await datasets.create_definition(
+            access,
+            project_id,
+            dataset.id,
+            "Duplicate",
+            "reference-calculation",
+            "calculate_cantilever_tip_load",
+            {"tip_load_kn": "/load", "template": "/load"},
+            file_argument="template",
+        )
+
+
+@pytest.mark.asyncio
 async def test_deleting_a_dataset_keeps_its_definition_visible_but_unavailable() -> None:
     access, project_id, datasets = await create_module()
     dataset = await datasets.create_dataset(
