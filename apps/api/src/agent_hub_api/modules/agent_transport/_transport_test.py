@@ -75,6 +75,12 @@ class InterruptedHistoryRunner(DeterministicRunner):
         )
 
 
+class UnconfiguredRunner(DeterministicRunner):
+    async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        del thread_id, project_id
+        raise RuntimeError("AGENT_HUB_OPENAI_API_KEY is required to run the agent")
+
+
 class ScratchPreviewRunner(DeterministicRunner):
     async def load_scratch_file(self, thread_id: str, *, project_id: str, path: str) -> ScratchFile:
         del thread_id, project_id
@@ -156,6 +162,33 @@ async def test_agent_stream_requires_owned_matching_thread() -> None:
 
 
 @pytest.mark.asyncio
+async def test_new_thread_history_is_empty_without_starting_an_unconfigured_agent() -> None:
+    settings = Settings(environment="test", fixed_identity_subject="subject-a")
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="subject-a")
+    project = await projects.create(access, "First")
+    thread = await projects.create_thread(access, project.id, "New Thread 1")
+    app = FastAPI()
+    app.include_router(
+        create_agent_transport_router(
+            create_identity_module(settings),
+            AgentTransportModule(
+                projects,
+                create_memory_agent_execution(UnconfiguredRunner()),
+                create_memory_project_files(projects),
+            ),
+        ),
+        prefix="/api",
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        history = await client.get(f"/api/projects/{project.id}/threads/{thread.id}/history")
+
+    assert history.status_code == 200
+    assert history.json() == {"interrupts": [], "messages": []}
+
+
+@pytest.mark.asyncio
 async def test_history_returns_pending_interrupts_for_approval_restoration() -> None:
     settings = Settings(environment="test", fixed_identity_subject="subject-a")
     projects = create_memory_project_module()
@@ -176,6 +209,11 @@ async def test_history_returns_pending_interrupts_for_approval_restoration() -> 
     )
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post(
+            f"/api/projects/{project.id}/threads/{thread.id}/agent",
+            json=run_body(thread.id),
+            headers={"accept": "text/event-stream"},
+        )
         history = await client.get(f"/api/projects/{project.id}/threads/{thread.id}/history")
 
     assert history.status_code == 200

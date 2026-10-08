@@ -213,6 +213,8 @@ class AgentExecutionModule:
         return await self._store.list(thread_id)
 
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
+        if not await self._store.list(thread_id):
+            return AgentThreadState(messages=(), interrupts=())
         return await self._runner.load_thread_state(thread_id, project_id=project_id)
 
     async def load_scratch_file(self, thread_id: str, *, project_id: str, path: str) -> ScratchFile:
