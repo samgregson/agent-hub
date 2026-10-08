@@ -1,3 +1,5 @@
+from collections.abc import Mapping
+
 import pytest
 
 from agent_hub_api.modules.artifacts import (
@@ -5,9 +7,14 @@ from agent_hub_api.modules.artifacts import (
     ArtifactUserActionAccess,
     create_memory_artifact_module,
 )
-from agent_hub_api.modules.datasets import DatasetModule, MemoryDatasetStore
+from agent_hub_api.modules.datasets import (
+    DatasetModule,
+    DatasetRecordInput,
+    MemoryDatasetStore,
+)
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
+    DatasetSelection,
     MemoryTransformStore,
     TransformInitiation,
     TransformModule,
@@ -15,6 +22,89 @@ from agent_hub_api.modules.transforms import (
     TransformRuntimeIdentity,
     TransformValidationError,
 )
+
+
+@pytest.mark.asyncio
+async def test_dataset_selection_is_reviewed_and_captured_before_one_transform_run() -> None:
+    from agent_hub_api.modules.transforms import MemoryTransformRunStore
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Selected values")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _NoToolSchema())
+    data = await datasets.create_dataset(
+        owner,
+        project.id,
+        "Inputs",
+        [
+            DatasetRecordInput({"group": "A", "score": 1}),
+            DatasetRecordInput({"group": "B", "score": 9}),
+            DatasetRecordInput({"group": "A", "score": 3}),
+        ],
+    )
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert inputs["items"] == [
+                {"group": "A", "score": 3},
+                {"group": "A", "score": 1},
+            ]
+            return {"count": 2}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(), datasets
+    )
+    definition = await transforms.define(
+        owner,
+        project.id,
+        "Summarize selection",
+        "def transform(inputs, parameters):\n    return {'count': len(inputs['items'])}\n",
+        {"items": "/selection/values"},
+        {"type": "object", "required": ["count"]},
+    )
+    choice = DatasetSelection(
+        dataset_id=data.id,
+        expected_version=data.version,
+        expected_definition_revision=definition.revision,
+        filter_path="/group",
+        equals="A",
+        sort_path="/score",
+        descending=True,
+        limit=2,
+    )
+    plan = await transforms.plan_dataset_selection(owner, project.id, definition.id, choice)
+    assert plan.selected_count == 2
+    assert plan.invocation_count == 1
+    assert [item.id for item in plan.records] == [data.records[2].id, data.records[0].id]
+
+    run = await transforms.start_selected_run(
+        owner, project.id, definition.id, choice, {}
+    )
+    assert run.status == "succeeded"
+    assert run.output == {"count": 2}
+    snapshot = run.definition_snapshot["selection"]
+    assert isinstance(snapshot, Mapping)
+    assert snapshot["datasetVersion"] == data.version
+    assert snapshot["recordIds"] == [
+        data.records[2].id,
+        data.records[0].id,
+    ]
+    await datasets.update_dataset(
+        owner, project.id, data.id, "Changed",
+        [DatasetRecordInput({"group": "A", "score": 100}, id=data.records[0].id)],
+        expected_version=data.version,
+    )
+    assert (await transforms.load_run(owner, project.id, run.id)).output == {"count": 2}
+    with pytest.raises(TransformValidationError, match="version"):
+        await transforms.start_selected_run(owner, project.id, definition.id, choice, {})
+    assert len(await datasets.list_datasets(owner, project.id)) == 1
+
+
+class _NoToolSchema:
+    async def input_schema(self, *_: object) -> dict[str, object]:
+        return {"type": "object"}
 
 
 class _PinnedRunner:

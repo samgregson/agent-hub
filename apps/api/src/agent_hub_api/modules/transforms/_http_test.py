@@ -1,9 +1,11 @@
+from collections.abc import Sized
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from agent_hub_api.modules.artifacts import create_memory_artifact_module
-from agent_hub_api.modules.datasets import DatasetModule, MemoryDatasetStore
+from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput, MemoryDatasetStore
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
@@ -19,6 +21,76 @@ from agent_hub_api.settings import Settings
 class _PinnedRunner:
     async def identity(self) -> TransformRuntimeIdentity:
         return TransformRuntimeIdentity("deno:2.9.7;pyodide:314.0.7", "a" * 64)
+
+
+@pytest.mark.asyncio
+async def test_selection_plan_precedes_one_durable_transform_run() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Selection")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _NoToolSchema())
+    data = await datasets.create_dataset(
+        owner, project.id, "Values",
+        [DatasetRecordInput({"score": 1}), DatasetRecordInput({"score": 3})],
+    )
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            items = inputs["items"]
+            assert isinstance(items, Sized)
+            return {"count": len(items)}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(), datasets
+    )
+    definition = await transforms.define(
+        owner, project.id, "Count",
+        "def transform(inputs, parameters):\n    return {'count': len(inputs['items'])}\n",
+        {"items": "/selection/values"}, {"type": "object"},
+    )
+    app = FastAPI()
+    app.include_router(
+        create_transform_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            transforms,
+        ),
+        prefix="/api",
+    )
+    root = f"/api/projects/{project.id}/transforms/{definition.id}"
+    body = {
+        "datasetId": data.id,
+        "expectedVersion": data.version,
+        "expectedDefinitionRevision": definition.revision,
+        "sortPath": "/score",
+        "descending": True,
+        "limit": 1,
+        "parameters": {},
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        plan = await client.post(f"{root}/selection-plan", json=body)
+        assert plan.status_code == 200
+        assert plan.json()["selectedCount"] == 1
+        assert plan.json()["invocationCount"] == 1
+        assert plan.json()["selection"]["recordIds"] == [data.records[1].id]
+        started = await client.post(f"{root}/selection-runs", json=body)
+        assert started.status_code == 201
+        assert started.json()["output"] == {"count": 1}
+        assert started.json()["definitionSnapshot"]["selection"]["recordIds"] == [
+            data.records[1].id
+        ]
+        await datasets.update_dataset(
+            owner, project.id, data.id, "Changed", [], expected_version=data.version
+        )
+        stale = await client.post(f"{root}/selection-runs", json=body)
+        assert stale.status_code == 422
+        assert "version" in stale.json()["detail"]
+
+
+class _NoToolSchema:
+    async def input_schema(self, *_: object) -> dict[str, object]:
+        return {"type": "object"}
 
 
 @pytest.mark.asyncio

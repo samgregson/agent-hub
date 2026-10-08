@@ -2,7 +2,7 @@ from typing import Annotated
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
 from agent_hub_api.modules.artifacts import ArtifactDocument, ArtifactUserActionAccess
@@ -15,6 +15,7 @@ from agent_hub_api.modules.identity import (
 )
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms._application import (
+    DatasetSelection,
     TransformDefinition,
     TransformExecutionError,
     TransformModule,
@@ -58,6 +59,38 @@ class PreviewResponse(_Model):
     output: object
     runtime: str
     source_hash: str
+
+
+class DatasetSelectionRequest(_Model):
+    dataset_id: str
+    expected_version: int = Field(ge=1)
+    expected_definition_revision: int = Field(ge=1)
+    filter_path: str | None = None
+    equals: str | int | float | bool | None = None
+    sort_path: str | None = None
+    descending: bool = False
+    limit: int | None = Field(default=None, ge=1, le=100)
+    parameters: dict[str, object] = Field(default_factory=dict)
+
+
+class DatasetSelectionPlanResponse(_Model):
+    selection: dict[str, object]
+    selected_count: int
+    invocation_count: int
+    output_location: str
+
+
+def _selection(body: DatasetSelectionRequest) -> DatasetSelection:
+    return DatasetSelection(
+        dataset_id=body.dataset_id,
+        expected_version=body.expected_version,
+        expected_definition_revision=body.expected_definition_revision,
+        filter_path=body.filter_path,
+        equals=body.equals,
+        sort_path=body.sort_path,
+        descending=body.descending,
+        limit=body.limit,
+    )
 
 
 class RunResponse(_Model):
@@ -250,6 +283,43 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
             return _run_response(run)
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error
+
+    @router.post(
+        "/{definition_id}/selection-plan", response_model=DatasetSelectionPlanResponse
+    )
+    async def plan_selection(
+        project_id: str, definition_id: str, body: DatasetSelectionRequest,
+        request_context: Context,
+    ) -> DatasetSelectionPlanResponse:
+        try:
+            plan = await transforms.plan_dataset_selection(
+                access(request_context), project_id, definition_id,
+                _selection(body), body.parameters,
+            )
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+        return DatasetSelectionPlanResponse(
+            selection=dict(plan.snapshot()), selected_count=plan.selected_count,
+            invocation_count=plan.invocation_count,
+            output_location="Transform Run output",
+        )
+
+    @router.post(
+        "/{definition_id}/selection-runs", response_model=RunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def start_selected_run(
+        project_id: str, definition_id: str, body: DatasetSelectionRequest,
+        request_context: Context,
+    ) -> RunResponse:
+        try:
+            run = await transforms.start_selected_run(
+                access(request_context), project_id, definition_id,
+                _selection(body), body.parameters,
+            )
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+        return _run_response(run)
 
     @router.get("/runs/{run_id}", response_model=RunResponse)
     async def load_run(

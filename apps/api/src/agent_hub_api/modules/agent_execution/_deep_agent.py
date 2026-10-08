@@ -45,7 +45,7 @@ from agent_hub_api.modules.plugin_gateway import (
 )
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transforms import TransformInitiation, TransformModule
+from agent_hub_api.modules.transforms import DatasetSelection, TransformInitiation, TransformModule
 from agent_hub_api.settings import Settings
 
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
@@ -282,6 +282,10 @@ class PostgresDeepAgentRunner:
                     "allowed_decisions": ["approve", "reject"],
                     "description": "Save this Transform Run output as an Artifact?",
                 }
+            interrupt_on["start_project_transform_selection_run"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Run the reviewed Dataset selection through this Transform?",
+            }
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
@@ -756,6 +760,13 @@ class PostgresDeepAgentRunner:
                 raise ValueError("Expected a JSON object")
             return value
 
+        def dataset_selection(raw: str) -> DatasetSelection:
+            value = object_json(raw)
+            try:
+                return DatasetSelection(**value)
+            except TypeError as error:
+                raise ValueError("Dataset selection fields are invalid.") from error
+
         @tool
         async def discover_project_transforms() -> str:
             """List the saved Transform Definitions in this Project."""
@@ -814,6 +825,7 @@ class PostgresDeepAgentRunner:
                     "runtime": run.runtime,
                     "packageHash": run.package_hash,
                     "sourceHash": run.source_hash,
+                    "selection": run.definition_snapshot.get("selection"),
                 }
             )
 
@@ -879,6 +891,32 @@ class PostgresDeepAgentRunner:
             return f"Transform Run {run.id} {run.status}."
 
         @tool
+        async def plan_project_transform_selection(
+            definition_id: str, selection_json: str, parameters_json: str = "{}"
+        ) -> str:
+            """Review a bounded Dataset selection before one Transform invocation."""
+            plan = await transforms.plan_dataset_selection(
+                access, project_id, definition_id,
+                dataset_selection(selection_json), object_json(parameters_json),
+            )
+            return json.dumps(plan.snapshot())
+
+        @tool
+        async def start_project_transform_selection_run(
+            definition_id: str, selection_json: str, parameters_json: str = "{}"
+        ) -> str:
+            """Run an explicitly versioned Dataset selection after user approval."""
+            run = await transforms.start_selected_run(
+                access, project_id, definition_id,
+                dataset_selection(selection_json), object_json(parameters_json),
+                initiation=TransformInitiation(
+                    kind="agentRun", approval="approved",
+                    thread_id=thread_id, agent_run_id=agent_run_id,
+                ),
+            )
+            return f"Transform Run {run.id} {run.status}."
+
+        @tool
         async def save_project_transform_run_as_dataset(run_id: str, name: str) -> str:
             """Save a successful Transform Run output as a Dataset after user approval."""
             dataset = await transforms.save_run_as_dataset(access, project_id, run_id, name)
@@ -893,6 +931,8 @@ class PostgresDeepAgentRunner:
             update_project_transform,
             delete_project_transform,
             start_project_transform_run,
+            plan_project_transform_selection,
+            start_project_transform_selection_run,
             save_project_transform_run_as_dataset,
         ]
         if thread_id is not None and agent_run_id is not None:

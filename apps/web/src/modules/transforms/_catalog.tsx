@@ -26,6 +26,15 @@ interface Run {
     source: string;
     input_selectors: Record<string, string>;
     revision: number;
+    selection?: {
+      datasetId: string;
+      datasetVersion: number;
+      datasetPath: string;
+      recordIds: string[];
+      rule: Record<string, unknown>;
+      selectedCount: number;
+      invocationCount: number;
+    };
   };
   inputs: Record<string, unknown>;
   parameters: Record<string, unknown>;
@@ -59,6 +68,37 @@ interface Preview {
   output: unknown;
   runtime: string;
   sourceHash: string;
+}
+
+interface DatasetOption {
+  id: string;
+  name: string;
+  version: number;
+}
+
+interface SelectionRequest {
+  datasetId: string;
+  expectedVersion: number;
+  expectedDefinitionRevision: number;
+  filterPath: string | null;
+  equals: string | number | boolean | null;
+  sortPath: string | null;
+  descending: boolean;
+  limit: number | null;
+  parameters: Record<string, unknown>;
+}
+
+interface SelectionPlan {
+  selection: {
+    datasetId: string;
+    datasetVersion: number;
+    recordIds: string[];
+    records: Array<{ id: string; value: Record<string, unknown> }>;
+    rule: Record<string, unknown>;
+  };
+  selectedCount: number;
+  invocationCount: number;
+  outputLocation: string;
 }
 
 async function responseError(
@@ -97,6 +137,18 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
   const [isEditing, setIsEditing] = useState(false);
   const [recordJson, setRecordJson] = useState('{"load": 3}');
   const [parametersJson, setParametersJson] = useState("{}");
+  const [inputMode, setInputMode] = useState<"record" | "dataset">("record");
+  const [datasetOptions, setDatasetOptions] = useState<DatasetOption[]>([]);
+  const [selectionDatasetId, setSelectionDatasetId] = useState("");
+  const [filterPath, setFilterPath] = useState("");
+  const [filterEquals, setFilterEquals] = useState("");
+  const [sortPath, setSortPath] = useState("");
+  const [descending, setDescending] = useState(false);
+  const [selectionLimit, setSelectionLimit] = useState("");
+  const [selectionPlan, setSelectionPlan] = useState<{
+    plan: SelectionPlan;
+    request: SelectionRequest;
+  } | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [saveName, setSaveName] = useState("Transform output");
   const [busy, setBusy] = useState<string | null>(null);
@@ -107,6 +159,33 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
     (item) => item.id === selectedDefinitionId,
   );
   const selectedRun = runs?.find((item) => item.id === selectedRunId);
+
+  async function refreshDatasets() {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/datasets`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) throw new Error("Datasets could not be loaded.");
+    setDatasetOptions((await response.json()) as DatasetOption[]);
+  }
+
+  useEffect(() => {
+    let active = true;
+    void fetch(`/api/projects/${encodeURIComponent(projectId)}/datasets`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Datasets could not be loaded.");
+        const available = (await response.json()) as DatasetOption[];
+        if (active) setDatasetOptions(available);
+      })
+      .catch(() => {
+        if (active) setError("Datasets could not be loaded.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     let active = true;
@@ -186,6 +265,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
       setSelectedDefinitionId(saved.id);
       setIsEditing(false);
       setPreview(null);
+      setSelectionPlan(null);
       setNotice(`${saved.name} saved as revision ${saved.revision}.`);
     } catch (cause) {
       setError(
@@ -223,6 +303,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
       );
       setSelectedDefinitionId(null);
       setPreview(null);
+      setSelectionPlan(null);
       setNotice("Definition deleted. Its Runs remain available below.");
     } catch (cause) {
       setError(
@@ -275,6 +356,107 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
           ? cause.message
           : "Transform could not be executed.",
       );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function selectionRequest(): SelectionRequest {
+    if (!selectedDefinition) throw new Error("Select a Transform Definition.");
+    const dataset = datasetOptions.find(
+      (item) => item.id === selectionDatasetId,
+    );
+    if (!dataset) throw new Error("Select a Dataset.");
+    let equals: SelectionRequest["equals"] = null;
+    if (filterPath.trim()) {
+      if (!filterEquals.trim()) throw new Error("Enter a JSON equality value.");
+      const parsed: unknown = JSON.parse(filterEquals);
+      if (
+        parsed !== null &&
+        !["string", "number", "boolean"].includes(typeof parsed)
+      )
+        throw new Error("Equality value must be a JSON scalar.");
+      equals = parsed as SelectionRequest["equals"];
+    }
+    return {
+      datasetId: dataset.id,
+      expectedVersion: dataset.version,
+      expectedDefinitionRevision: selectedDefinition.revision,
+      filterPath: filterPath.trim() || null,
+      equals,
+      sortPath: sortPath.trim() || null,
+      descending,
+      limit: selectionLimit.trim() ? Number(selectionLimit) : null,
+      parameters: jsonObject(parametersJson, "Parameters"),
+    };
+  }
+
+  async function reviewSelection() {
+    if (!selectedDefinition) return;
+    setBusy("selection-plan");
+    setError(null);
+    setSelectionPlan(null);
+    try {
+      const request = selectionRequest();
+      const response = await fetch(
+        `${root}/${encodeURIComponent(selectedDefinition.id)}/selection-plan`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(request),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          await responseError(response, "Selection could not be reviewed."),
+        );
+      setSelectionPlan({
+        plan: (await response.json()) as SelectionPlan,
+        request,
+      });
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Selection could not be reviewed.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runSelection() {
+    if (!selectedDefinition || !selectionPlan) return;
+    setBusy("selection-run");
+    setError(null);
+    try {
+      const response = await fetch(
+        `${root}/${encodeURIComponent(selectedDefinition.id)}/selection-runs`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(selectionPlan.request),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          await responseError(response, "Selected Run could not be started."),
+        );
+      const run = (await response.json()) as Run;
+      setRuns((current) => [
+        run,
+        ...(current ?? []).filter((item) => item.id !== run.id),
+      ]);
+      setSelectedRunId(run.id);
+      setSelectionPlan(null);
+      setNotice(`Run ${shortId(run.id)} ${run.status}.`);
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Selected Run could not be started.",
+      );
+      setSelectionPlan(null);
     } finally {
       setBusy(null);
     }
@@ -383,6 +565,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
             setSelectedDefinitionId(null);
             setIsEditing(true);
             setPreview(null);
+            setSelectionPlan(null);
           }}
           variant="primary"
         >
@@ -419,6 +602,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                     setSelectedDefinitionId(item.id);
                     setIsEditing(false);
                     setPreview(null);
+                    setSelectionPlan(null);
                   }}
                   type="button"
                 >
@@ -537,39 +721,205 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                   )}
                 </pre>
               </details>
-              <div className={styles.formGrid}>
-                <Field label="Input record (JSON object)">
-                  <textarea
-                    onChange={(event) => setRecordJson(event.target.value)}
-                    rows={5}
-                    spellCheck={false}
-                    value={recordJson}
-                  />
-                </Field>
-                <Field label="Parameters (JSON object)">
-                  <textarea
-                    onChange={(event) => setParametersJson(event.target.value)}
-                    rows={5}
-                    spellCheck={false}
-                    value={parametersJson}
-                  />
-                </Field>
-              </div>
-              <div className={styles.actions}>
-                <Button
-                  disabled={busy !== null}
-                  onClick={() => void execute("preview")}
+              <Field label="Input source">
+                <select
+                  onChange={(event) => {
+                    setInputMode(event.target.value as "record" | "dataset");
+                    setSelectionPlan(null);
+                  }}
+                  value={inputMode}
                 >
-                  {busy === "preview" ? "Previewing…" : "Preview output"}
-                </Button>
-                <Button
-                  disabled={busy !== null}
-                  onClick={() => void execute("runs")}
-                  variant="primary"
-                >
-                  {busy === "runs" ? "Running…" : "Start durable Run"}
-                </Button>
-              </div>
+                  <option value="record">Single input record</option>
+                  <option value="dataset">Selected Dataset Records</option>
+                </select>
+              </Field>
+              {inputMode === "record" ? (
+                <>
+                  <div className={styles.formGrid}>
+                    <Field label="Input record (JSON object)">
+                      <textarea
+                        onChange={(event) => setRecordJson(event.target.value)}
+                        rows={5}
+                        spellCheck={false}
+                        value={recordJson}
+                      />
+                    </Field>
+                    <Field label="Parameters (JSON object)">
+                      <textarea
+                        onChange={(event) =>
+                          setParametersJson(event.target.value)
+                        }
+                        rows={5}
+                        spellCheck={false}
+                        value={parametersJson}
+                      />
+                    </Field>
+                  </div>
+                  <div className={styles.actions}>
+                    <Button
+                      disabled={busy !== null}
+                      onClick={() => void execute("preview")}
+                    >
+                      {busy === "preview" ? "Previewing…" : "Preview output"}
+                    </Button>
+                    <Button
+                      disabled={busy !== null}
+                      onClick={() => void execute("runs")}
+                      variant="primary"
+                    >
+                      {busy === "runs" ? "Running…" : "Start durable Run"}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <section aria-label="Dataset selection" className={styles.form}>
+                  <p>
+                    Select records in source order, or add a filter, sort, and
+                    limit. The reviewed records become one Transform input.
+                  </p>
+                  <div className={styles.actions}>
+                    <Field label="Dataset">
+                      <select
+                        onChange={(event) => {
+                          setSelectionDatasetId(event.target.value);
+                          setSelectionPlan(null);
+                        }}
+                        value={selectionDatasetId}
+                      >
+                        <option value="">Select Dataset</option>
+                        {datasetOptions.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name} · v{item.version}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Button
+                      onClick={() =>
+                        void refreshDatasets()
+                          .then(() => setSelectionPlan(null))
+                          .catch(() =>
+                            setError("Datasets could not be loaded."),
+                          )
+                      }
+                    >
+                      Refresh Datasets
+                    </Button>
+                  </div>
+                  <div className={styles.formGrid}>
+                    <Field label="Filter path (JSON Pointer, optional)">
+                      <input
+                        onChange={(event) => {
+                          setFilterPath(event.target.value);
+                          setSelectionPlan(null);
+                        }}
+                        placeholder="/group"
+                        value={filterPath}
+                      />
+                    </Field>
+                    <Field label="Equals (JSON scalar)">
+                      <input
+                        onChange={(event) => {
+                          setFilterEquals(event.target.value);
+                          setSelectionPlan(null);
+                        }}
+                        placeholder='"A"'
+                        value={filterEquals}
+                      />
+                    </Field>
+                    <Field label="Sort path (JSON Pointer, optional)">
+                      <input
+                        onChange={(event) => {
+                          setSortPath(event.target.value);
+                          setSelectionPlan(null);
+                        }}
+                        placeholder="/score"
+                        value={sortPath}
+                      />
+                    </Field>
+                    <Field label="Maximum records (optional)">
+                      <input
+                        min={1}
+                        max={100}
+                        onChange={(event) => {
+                          setSelectionLimit(event.target.value);
+                          setSelectionPlan(null);
+                        }}
+                        type="number"
+                        value={selectionLimit}
+                      />
+                    </Field>
+                  </div>
+                  <label>
+                    <input
+                      checked={descending}
+                      onChange={(event) => {
+                        setDescending(event.target.checked);
+                        setSelectionPlan(null);
+                      }}
+                      type="checkbox"
+                    />{" "}
+                    Descending order
+                  </label>
+                  <Field label="Parameters (JSON object)">
+                    <textarea
+                      onChange={(event) => {
+                        setParametersJson(event.target.value);
+                        setSelectionPlan(null);
+                      }}
+                      rows={3}
+                      spellCheck={false}
+                      value={parametersJson}
+                    />
+                  </Field>
+                  <Button
+                    disabled={busy !== null || !selectionDatasetId}
+                    onClick={() => void reviewSelection()}
+                  >
+                    {busy === "selection-plan"
+                      ? "Reviewing…"
+                      : "Review selection"}
+                  </Button>
+                  {selectionPlan ? (
+                    <section
+                      aria-label="Selection plan"
+                      className={styles.preview}
+                    >
+                      <strong>
+                        {selectionPlan.plan.selectedCount} records ·{" "}
+                        {selectionPlan.plan.invocationCount} Transform
+                        invocation
+                      </strong>
+                      <p>
+                        Dataset v{selectionPlan.plan.selection.datasetVersion} →{" "}
+                        {selectionPlan.plan.outputLocation}
+                      </p>
+                      <details>
+                        <summary>Selected record IDs and values</summary>
+                        <pre>
+                          {JSON.stringify(
+                            selectionPlan.plan.selection.records,
+                            null,
+                            2,
+                          )}
+                        </pre>
+                      </details>
+                      <Button
+                        disabled={
+                          busy !== null ||
+                          selectionPlan.plan.selectedCount === 0
+                        }
+                        onClick={() => void runSelection()}
+                        variant="primary"
+                      >
+                        {busy === "selection-run"
+                          ? "Running…"
+                          : "Start selected Run"}
+                      </Button>
+                    </section>
+                  ) : null}
+                </section>
+              )}
               {preview ? (
                 <section aria-label="Preview output" className={styles.preview}>
                   <strong>Preview · not saved</strong>
@@ -640,6 +990,20 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
               >
                 <section>
                   <h4>Selected inputs</h4>
+                  {selectedRun.definitionSnapshot.selection ? (
+                    <p>
+                      Dataset{" "}
+                      {shortId(
+                        selectedRun.definitionSnapshot.selection.datasetId,
+                      )}{" "}
+                      · v
+                      {selectedRun.definitionSnapshot.selection.datasetVersion}{" "}
+                      · {selectedRun.definitionSnapshot.selection.selectedCount}{" "}
+                      Records ·{" "}
+                      {selectedRun.definitionSnapshot.selection.invocationCount}{" "}
+                      invocation
+                    </p>
+                  ) : null}
                   <pre>{JSON.stringify(selectedRun.inputs, null, 2)}</pre>
                   <small>Input {shortId(selectedRun.inputHash)}</small>
                 </section>
@@ -663,6 +1027,18 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                   ) : null}
                 </section>
               </div>
+              {selectedRun.definitionSnapshot.selection ? (
+                <details>
+                  <summary>Selection rule and source Records</summary>
+                  <pre>
+                    {JSON.stringify(
+                      selectedRun.definitionSnapshot.selection,
+                      null,
+                      2,
+                    )}
+                  </pre>
+                </details>
+              ) : null}
               <p className={styles.provenance}>
                 {selectedRun.runtime ?? "Runtime unavailable"} · package{" "}
                 {selectedRun.packageHash

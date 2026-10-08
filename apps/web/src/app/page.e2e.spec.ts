@@ -822,6 +822,135 @@ test("a Project File Binding can be inspected and rebound after its source chang
   });
 });
 
+test("a reviewed Dataset selection starts one captured Transform Run", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-selection",
+    name: "Selection review",
+    createdAt: "2026-10-08T00:00:00Z",
+    updatedAt: "2026-10-08T00:00:00Z",
+  };
+  const definition = {
+    id: "transform-1",
+    name: "Aggregate values",
+    source: "def transform(inputs, parameters): pass",
+    inputSelectors: { items: "/selection/values" },
+    outputSchema: { type: "object" },
+    runtime: "pyodide",
+    packageHash: "abc",
+    revision: 3,
+  };
+  const selection = {
+    datasetId: "dataset-1",
+    datasetVersion: 2,
+    datasetPath: "/.datasets/dataset-1.json",
+    recordIds: ["record-2"],
+    records: [{ id: "record-2", value: { score: 3 } }],
+    rule: { sortPath: "/score", descending: true, limit: 1 },
+    selectedCount: 1,
+    invocationCount: 1,
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({
+      json: [{ id: "dataset-1", name: "Measurements", version: 2 }],
+    }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [definition] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/selection-plan`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          selection,
+          selectedCount: 1,
+          invocationCount: 1,
+          outputLocation: "Transform Run output",
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/selection-runs`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        status: 201,
+        json: {
+          id: "run-selection",
+          definitionId: definition.id,
+          status: "succeeded",
+          definitionSnapshot: {
+            name: definition.name,
+            source: definition.source,
+            input_selectors: definition.inputSelectors,
+            revision: 3,
+            selection,
+          },
+          inputs: { items: [{ score: 3 }] },
+          parameters: {},
+          inputHash: "inputhash",
+          sourceHash: "sourcehash",
+          packageHash: "abc",
+          runtime: "pyodide",
+          output: { total: 3 },
+          outputManifest: {},
+          error: null,
+          initiation: {
+            kind: "directUser",
+            approval: "notRequired",
+            threadId: null,
+            agentRunId: null,
+          },
+          limits: {},
+          createdAt: "2026-10-08T00:00:00Z",
+        },
+      });
+    },
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Transforms" }).click();
+  await page.getByLabel("Input source").selectOption("dataset");
+  await page
+    .getByRole("combobox", { name: "Dataset", exact: true })
+    .selectOption("dataset-1");
+  await page.getByLabel("Sort path (JSON Pointer, optional)").fill("/score");
+  await page.getByLabel("Descending order").check();
+  await page.getByLabel("Maximum records (optional)").fill("1");
+  await page.getByRole("button", { name: "Review selection" }).click();
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText("1 records · 1 Transform invocation");
+  await page.getByRole("button", { name: "Start selected Run" }).click();
+  await expect(
+    page.getByRole("article", { name: "Run dataflow" }),
+  ).toContainText("Dataset dataset- · v2 · 1 Records");
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toMatchObject({
+    datasetId: "dataset-1",
+    expectedVersion: 2,
+    expectedDefinitionRevision: 3,
+    sortPath: "/score",
+    descending: true,
+    limit: 1,
+  });
+  expect(writes[1]).toEqual(writes[0]);
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 
