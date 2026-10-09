@@ -969,6 +969,129 @@ test("a reviewed Dataset selection starts one captured Transform Run", async ({
   expect(writes[1]).toEqual(writes[0]);
 });
 
+test("a retained Transform output selection shows its source and selected values", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-output-selection",
+    name: "Output selection",
+    createdAt: "2026-10-08T00:00:00Z",
+    updatedAt: "2026-10-08T00:00:00Z",
+  };
+  const definition = {
+    id: "transform-consumer",
+    name: "Consume values",
+    source: "def transform(inputs, parameters): pass",
+    inputSelectors: { items: "/selection/values" },
+    outputSchema: { type: "object" },
+    runtime: "pyodide",
+    packageHash: "abc",
+    revision: 3,
+  };
+  const upstream = {
+    id: "transform-source-run",
+    definitionId: "transform-producer",
+    status: "succeeded",
+    definitionSnapshot: { name: "Produce values", source: "", revision: 1 },
+    inputs: {},
+    parameters: {},
+    inputHash: "inputhash",
+    sourceHash: "sourcehash",
+    packageHash: "abc",
+    runtime: "pyodide",
+    output: { items: [{ score: 1 }, { score: 3 }] },
+    outputManifest: {},
+    error: null,
+    initiation: { kind: "directUser", approval: "notRequired" },
+    limits: {},
+    createdAt: "2026-10-08T00:00:00Z",
+  };
+  const selection = {
+    sourceKind: "transformRun",
+    sourceRunId: upstream.id,
+    outputPath: "/items",
+    outputHash: "outputhash",
+    positions: [1],
+    values: [{ score: 3 }],
+    rule: { sortPath: "/score", limit: 1 },
+    selectedCount: 1,
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [definition] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    (route) => route.fulfill({ json: { items: [upstream], nextOffset: null } }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/output-selection-plan`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          selection,
+          selectedCount: 1,
+          invocationCount: 1,
+          outputLocation: "Transform Run output",
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/output-selection-runs`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        status: 201,
+        json: {
+          ...upstream,
+          id: "transform-downstream-run",
+          definitionId: definition.id,
+          definitionSnapshot: { ...definition, selection },
+          inputs: { items: [{ score: 3 }] },
+          output: { total: 3 },
+        },
+      });
+    },
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Transforms" }).click();
+  await page.getByLabel("Input source").selectOption("output");
+  await page
+    .getByRole("combobox", { name: "Transform Run", exact: true })
+    .selectOption(upstream.id);
+  await page.getByLabel("Output path (JSON Pointer)").fill("/items");
+  await page.getByLabel("Sort path (JSON Pointer, optional)").fill("/score");
+  await page.getByLabel("Maximum records (optional)").fill("1");
+  await page.getByRole("button", { name: "Review selection" }).click();
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText("Transform Run transfor → Transform Run output");
+  await page.getByRole("button", { name: "Start selected Run" }).click();
+  await expect(
+    page.getByRole("article", { name: "Run dataflow" }),
+  ).toContainText("Transform Run transfor · 1 values");
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toMatchObject({
+    sourceRunId: upstream.id,
+    outputPath: "/items",
+    expectedDefinitionRevision: 3,
+    sortPath: "/score",
+    limit: 1,
+  });
+  expect(writes[1]).toEqual(writes[0]);
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 

@@ -27,13 +27,15 @@ interface Run {
     input_selectors: Record<string, string>;
     revision: number;
     selection?: {
-      datasetId: string;
-      datasetVersion: number;
-      datasetPath: string;
-      recordIds: string[];
+      sourceKind?: string;
+      datasetId?: string;
+      datasetVersion?: number;
+      datasetPath?: string;
+      recordIds?: string[];
+      sourceRunId?: string;
+      outputPath?: string;
       rule: Record<string, unknown>;
       selectedCount: number;
-      invocationCount: number;
     };
   };
   inputs: Record<string, unknown>;
@@ -76,9 +78,7 @@ interface DatasetOption {
   version: number;
 }
 
-interface SelectionRequest {
-  datasetId: string;
-  expectedVersion: number;
+interface SelectionRuleRequest {
   expectedDefinitionRevision: number;
   filterPath: string | null;
   equals: string | number | boolean | null;
@@ -88,12 +88,28 @@ interface SelectionRequest {
   parameters: Record<string, unknown>;
 }
 
+interface DatasetSelectionRequest extends SelectionRuleRequest {
+  datasetId: string;
+  expectedVersion: number;
+}
+
+interface OutputSelectionRequest extends SelectionRuleRequest {
+  sourceRunId: string;
+  outputPath: string;
+}
+
+type SelectionRequest = DatasetSelectionRequest | OutputSelectionRequest;
+
 interface SelectionPlan {
   selection: {
-    datasetId: string;
-    datasetVersion: number;
-    recordIds: string[];
-    records: Array<{ id: string; value: Record<string, unknown> }>;
+    sourceKind?: string;
+    datasetId?: string;
+    datasetVersion?: number;
+    sourceRunId?: string;
+    outputPath?: string;
+    recordIds?: string[];
+    records?: Array<{ id: string; value: Record<string, unknown> }>;
+    values?: Array<Record<string, unknown>>;
     rule: Record<string, unknown>;
   };
   selectedCount: number;
@@ -137,9 +153,13 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
   const [isEditing, setIsEditing] = useState(false);
   const [recordJson, setRecordJson] = useState('{"load": 3}');
   const [parametersJson, setParametersJson] = useState("{}");
-  const [inputMode, setInputMode] = useState<"record" | "dataset">("record");
+  const [inputMode, setInputMode] = useState<"record" | "dataset" | "output">(
+    "record",
+  );
   const [datasetOptions, setDatasetOptions] = useState<DatasetOption[]>([]);
   const [selectionDatasetId, setSelectionDatasetId] = useState("");
+  const [selectionRunId, setSelectionRunId] = useState("");
+  const [outputPath, setOutputPath] = useState("");
   const [filterPath, setFilterPath] = useState("");
   const [filterEquals, setFilterEquals] = useState("");
   const [sortPath, setSortPath] = useState("");
@@ -148,6 +168,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
   const [selectionPlan, setSelectionPlan] = useState<{
     plan: SelectionPlan;
     request: SelectionRequest;
+    endpoint: string;
   } | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [saveName, setSaveName] = useState("Transform output");
@@ -363,10 +384,6 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
 
   function selectionRequest(): SelectionRequest {
     if (!selectedDefinition) throw new Error("Select a Transform Definition.");
-    const dataset = datasetOptions.find(
-      (item) => item.id === selectionDatasetId,
-    );
-    if (!dataset) throw new Error("Select a Dataset.");
     let equals: SelectionRequest["equals"] = null;
     if (filterPath.trim()) {
       if (!filterEquals.trim()) throw new Error("Enter a JSON equality value.");
@@ -378,9 +395,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
         throw new Error("Equality value must be a JSON scalar.");
       equals = parsed as SelectionRequest["equals"];
     }
-    return {
-      datasetId: dataset.id,
-      expectedVersion: dataset.version,
+    const rule = {
       expectedDefinitionRevision: selectedDefinition.revision,
       filterPath: filterPath.trim() || null,
       equals,
@@ -388,6 +403,24 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
       descending,
       limit: selectionLimit.trim() ? Number(selectionLimit) : null,
       parameters: jsonObject(parametersJson, "Parameters"),
+    };
+    if (inputMode === "output") {
+      if (!selectionRunId) throw new Error("Select a completed Transform Run.");
+      if (!outputPath.trim()) throw new Error("Enter an output JSON Pointer.");
+      return {
+        ...rule,
+        sourceRunId: selectionRunId,
+        outputPath: outputPath.trim(),
+      };
+    }
+    const dataset = datasetOptions.find(
+      (item) => item.id === selectionDatasetId,
+    );
+    if (!dataset) throw new Error("Select a Dataset.");
+    return {
+      ...rule,
+      datasetId: dataset.id,
+      expectedVersion: dataset.version,
     };
   }
 
@@ -398,8 +431,10 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
     setSelectionPlan(null);
     try {
       const request = selectionRequest();
+      const endpoint =
+        inputMode === "output" ? "output-selection" : "selection";
       const response = await fetch(
-        `${root}/${encodeURIComponent(selectedDefinition.id)}/selection-plan`,
+        `${root}/${encodeURIComponent(selectedDefinition.id)}/${endpoint}-plan`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -413,6 +448,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
       setSelectionPlan({
         plan: (await response.json()) as SelectionPlan,
         request,
+        endpoint,
       });
     } catch (cause) {
       setError(
@@ -431,7 +467,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
     setError(null);
     try {
       const response = await fetch(
-        `${root}/${encodeURIComponent(selectedDefinition.id)}/selection-runs`,
+        `${root}/${encodeURIComponent(selectedDefinition.id)}/${selectionPlan.endpoint}-runs`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -724,13 +760,16 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
               <Field label="Input source">
                 <select
                   onChange={(event) => {
-                    setInputMode(event.target.value as "record" | "dataset");
+                    setInputMode(
+                      event.target.value as "record" | "dataset" | "output",
+                    );
                     setSelectionPlan(null);
                   }}
                   value={inputMode}
                 >
                   <option value="record">Single input record</option>
                   <option value="dataset">Selected Dataset Records</option>
+                  <option value="output">Selected Transform Run output</option>
                 </select>
               </Field>
               {inputMode === "record" ? (
@@ -772,40 +811,77 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                   </div>
                 </>
               ) : (
-                <section aria-label="Dataset selection" className={styles.form}>
+                <section aria-label="Value selection" className={styles.form}>
                   <p>
-                    Select records in source order, or add a filter, sort, and
-                    limit. The reviewed records become one Transform input.
+                    Select values in source order, or add a filter, sort, and
+                    limit. The reviewed values become one Transform input.
+                    {inputMode === "output"
+                      ? " The output path must select a list of JSON objects."
+                      : null}
                   </p>
-                  <div className={styles.actions}>
-                    <Field label="Dataset">
-                      <select
-                        onChange={(event) => {
-                          setSelectionDatasetId(event.target.value);
-                          setSelectionPlan(null);
-                        }}
-                        value={selectionDatasetId}
+                  {inputMode === "dataset" ? (
+                    <div className={styles.actions}>
+                      <Field label="Dataset">
+                        <select
+                          onChange={(event) => {
+                            setSelectionDatasetId(event.target.value);
+                            setSelectionPlan(null);
+                          }}
+                          value={selectionDatasetId}
+                        >
+                          <option value="">Select Dataset</option>
+                          {datasetOptions.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name} · v{item.version}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Button
+                        onClick={() =>
+                          void refreshDatasets()
+                            .then(() => setSelectionPlan(null))
+                            .catch(() =>
+                              setError("Datasets could not be loaded."),
+                            )
+                        }
                       >
-                        <option value="">Select Dataset</option>
-                        {datasetOptions.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name} · v{item.version}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                    <Button
-                      onClick={() =>
-                        void refreshDatasets()
-                          .then(() => setSelectionPlan(null))
-                          .catch(() =>
-                            setError("Datasets could not be loaded."),
-                          )
-                      }
-                    >
-                      Refresh Datasets
-                    </Button>
-                  </div>
+                        Refresh Datasets
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className={styles.formGrid}>
+                      <Field label="Transform Run">
+                        <select
+                          onChange={(event) => {
+                            setSelectionRunId(event.target.value);
+                            setSelectionPlan(null);
+                          }}
+                          value={selectionRunId}
+                        >
+                          <option value="">Select completed Run</option>
+                          {(runs ?? [])
+                            .filter((run) => run.status === "succeeded")
+                            .map((run) => (
+                              <option key={run.id} value={run.id}>
+                                {run.definitionSnapshot.name} ·{" "}
+                                {shortId(run.id)}
+                              </option>
+                            ))}
+                        </select>
+                      </Field>
+                      <Field label="Output path (JSON Pointer)">
+                        <input
+                          onChange={(event) => {
+                            setOutputPath(event.target.value);
+                            setSelectionPlan(null);
+                          }}
+                          placeholder="/items"
+                          value={outputPath}
+                        />
+                      </Field>
+                    </div>
+                  )}
                   <div className={styles.formGrid}>
                     <Field label="Filter path (JSON Pointer, optional)">
                       <input
@@ -873,7 +949,12 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                     />
                   </Field>
                   <Button
-                    disabled={busy !== null || !selectionDatasetId}
+                    disabled={
+                      busy !== null ||
+                      (inputMode === "dataset"
+                        ? !selectionDatasetId
+                        : !selectionRunId)
+                    }
                     onClick={() => void reviewSelection()}
                   >
                     {busy === "selection-plan"
@@ -886,19 +967,23 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                       className={styles.preview}
                     >
                       <strong>
-                        {selectionPlan.plan.selectedCount} records ·{" "}
+                        {selectionPlan.plan.selectedCount}{" "}
+                        {inputMode === "dataset" ? "records" : "values"} ·{" "}
                         {selectionPlan.plan.invocationCount} Transform
                         invocation
                       </strong>
                       <p>
-                        Dataset v{selectionPlan.plan.selection.datasetVersion} →{" "}
-                        {selectionPlan.plan.outputLocation}
+                        {selectionPlan.plan.selection.sourceRunId
+                          ? `Transform Run ${shortId(selectionPlan.plan.selection.sourceRunId)}`
+                          : `Dataset v${selectionPlan.plan.selection.datasetVersion}`}{" "}
+                        → {selectionPlan.plan.outputLocation}
                       </p>
                       <details>
-                        <summary>Selected record IDs and values</summary>
+                        <summary>Selected source values</summary>
                         <pre>
                           {JSON.stringify(
-                            selectionPlan.plan.selection.records,
+                            selectionPlan.plan.selection.records ??
+                              selectionPlan.plan.selection.values,
                             null,
                             2,
                           )}
@@ -992,16 +1077,10 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                   <h4>Selected inputs</h4>
                   {selectedRun.definitionSnapshot.selection ? (
                     <p>
-                      Dataset{" "}
-                      {shortId(
-                        selectedRun.definitionSnapshot.selection.datasetId,
-                      )}{" "}
-                      · v
-                      {selectedRun.definitionSnapshot.selection.datasetVersion}{" "}
-                      · {selectedRun.definitionSnapshot.selection.selectedCount}{" "}
-                      Records ·{" "}
-                      {selectedRun.definitionSnapshot.selection.invocationCount}{" "}
-                      invocation
+                      {selectedRun.definitionSnapshot.selection.sourceRunId
+                        ? `Transform Run ${shortId(selectedRun.definitionSnapshot.selection.sourceRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
+                        : `Dataset ${shortId(selectedRun.definitionSnapshot.selection.datasetId ?? "")} · v${selectedRun.definitionSnapshot.selection.datasetVersion} · ${selectedRun.definitionSnapshot.selection.selectedCount} Records`}{" "}
+                      · 1 invocation
                     </p>
                   ) : null}
                   <pre>{JSON.stringify(selectedRun.inputs, null, 2)}</pre>
@@ -1029,7 +1108,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
               </div>
               {selectedRun.definitionSnapshot.selection ? (
                 <details>
-                  <summary>Selection rule and source Records</summary>
+                  <summary>Selection rule and source values</summary>
                   <pre>
                     {JSON.stringify(
                       selectedRun.definitionSnapshot.selection,
