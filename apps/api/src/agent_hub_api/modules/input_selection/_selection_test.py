@@ -4,6 +4,7 @@ from agent_hub_api.modules.input_selection import (
     SelectionRule,
     SelectionValidationError,
     SelectionValue,
+    project_value,
     select_values,
 )
 
@@ -42,3 +43,14 @@ def test_selection_rule_preserves_scalar_values_without_requiring_an_object_sour
     )
 
     assert select_values(source, SelectionRule(limit=1)) == (source[0],)
+
+
+def test_projection_uses_a_json_pointer_or_the_entire_source_value() -> None:
+    value = {"items": [{"load": 2}, {"load": 4}]}
+
+    assert project_value(value, "/items/1/load") == 4
+    assert project_value(value, "") == value
+    with pytest.raises(SelectionValidationError, match="JSON Pointer"):
+        project_value(value, "items")
+    with pytest.raises(SelectionValidationError, match="did not match"):
+        project_value(value, "/missing")

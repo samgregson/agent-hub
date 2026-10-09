@@ -42,6 +42,10 @@ from agent_hub_api.modules.projects import (
     create_project_router,
 )
 from agent_hub_api.modules.request_limits import RequestBodyLimitMiddleware
+from agent_hub_api.modules.transform_inputs import (
+    TransformInputModule,
+    create_transform_input_router,
+)
 from agent_hub_api.modules.transforms import (
     create_postgres_transform_module,
     create_transform_router,
@@ -92,6 +96,7 @@ def create_app(
         transforms=resolved_transforms,
         bindings=resolved_bindings,
     )
+    resolved_transform_inputs = TransformInputModule(resolved_batches, resolved_transforms)
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
@@ -103,6 +108,7 @@ def create_app(
             resolved_batches,
             resolved_transforms,
             resolved_bindings,
+            resolved_transform_inputs,
         )
         resolved_agent_execution = create_postgres_agent_execution(
             resolved_settings, deep_agent_runner
@@ -154,6 +160,10 @@ def create_app(
     )
     application.include_router(
         create_transform_router(resolved_identity, resolved_transforms), prefix="/api"
+    )
+    application.include_router(
+        create_transform_input_router(resolved_identity, resolved_transform_inputs),
+        prefix="/api",
     )
     application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),

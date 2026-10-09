@@ -33,6 +33,7 @@ interface Run {
       datasetPath?: string;
       recordIds?: string[];
       sourceRunId?: string;
+      batchRunId?: string;
       outputPath?: string;
       rule: Record<string, unknown>;
       selectedCount: number;
@@ -78,6 +79,14 @@ interface DatasetOption {
   version: number;
 }
 
+interface BatchRunOption {
+  id: string;
+  definitionId: string;
+  status: string;
+  succeededCount: number;
+  failedCount: number;
+}
+
 interface SelectionRuleRequest {
   expectedDefinitionRevision: number;
   filterPath: string | null;
@@ -106,10 +115,12 @@ interface SelectionPlan {
     datasetId?: string;
     datasetVersion?: number;
     sourceRunId?: string;
+    batchRunId?: string;
     outputPath?: string;
     recordIds?: string[];
     records?: Array<{ id: string; value: Record<string, unknown> }>;
     values?: Array<Record<string, unknown>>;
+    selectedRecords?: Array<{ datasetRecordId: string; input: Record<string, unknown>; value: unknown }>;
     rule: Record<string, unknown>;
   };
   selectedCount: number;
@@ -153,12 +164,14 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
   const [isEditing, setIsEditing] = useState(false);
   const [recordJson, setRecordJson] = useState('{"load": 3}');
   const [parametersJson, setParametersJson] = useState("{}");
-  const [inputMode, setInputMode] = useState<"record" | "dataset" | "output">(
+  const [inputMode, setInputMode] = useState<"record" | "dataset" | "output" | "resultSet">(
     "record",
   );
   const [datasetOptions, setDatasetOptions] = useState<DatasetOption[]>([]);
+  const [batchRunOptions, setBatchRunOptions] = useState<BatchRunOption[]>([]);
   const [selectionDatasetId, setSelectionDatasetId] = useState("");
   const [selectionRunId, setSelectionRunId] = useState("");
+  const [selectionBatchRunId, setSelectionBatchRunId] = useState("");
   const [outputPath, setOutputPath] = useState("");
   const [filterPath, setFilterPath] = useState("");
   const [filterEquals, setFilterEquals] = useState("");
@@ -188,6 +201,16 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
     );
     if (!response.ok) throw new Error("Datasets could not be loaded.");
     setDatasetOptions((await response.json()) as DatasetOption[]);
+  }
+
+  async function refreshBatchRuns() {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/batch-runs?limit=100&include_archived=true`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) throw new Error("Batch Runs could not be loaded.");
+    const page = (await response.json()) as { items: BatchRunOption[] };
+    setBatchRunOptions(page.items);
   }
 
   useEffect(() => {
@@ -413,6 +436,14 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
         outputPath: outputPath.trim(),
       };
     }
+    if (inputMode === "resultSet") {
+      if (!selectionBatchRunId) throw new Error("Select a completed Batch Run.");
+      return {
+        ...rule,
+        sourceRunId: selectionBatchRunId,
+        outputPath: outputPath.trim(),
+      };
+    }
     const dataset = datasetOptions.find(
       (item) => item.id === selectionDatasetId,
     );
@@ -431,8 +462,8 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
     setSelectionPlan(null);
     try {
       const request = selectionRequest();
-      const endpoint =
-        inputMode === "output" ? "output-selection" : "selection";
+      const endpoint = inputMode === "output" ? "output-selection"
+        : inputMode === "resultSet" ? "result-set-selection" : "selection";
       const response = await fetch(
         `${root}/${encodeURIComponent(selectedDefinition.id)}/${endpoint}-plan`,
         {
@@ -478,7 +509,15 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
         throw new Error(
           await responseError(response, "Selected Run could not be started."),
         );
-      const run = (await response.json()) as Run;
+      let run = (await response.json()) as Run;
+      if (selectionPlan.endpoint === "result-set-selection") {
+        const detail = await fetch(
+          `${root}/runs/${encodeURIComponent(run.id)}`,
+          { cache: "no-store" },
+        );
+        if (!detail.ok) throw new Error("Run started, but its details could not be loaded.");
+        run = (await detail.json()) as Run;
+      }
       setRuns((current) => [
         run,
         ...(current ?? []).filter((item) => item.id !== run.id),
@@ -761,15 +800,19 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                 <select
                   onChange={(event) => {
                     setInputMode(
-                      event.target.value as "record" | "dataset" | "output",
+                      event.target.value as "record" | "dataset" | "output" | "resultSet",
                     );
                     setSelectionPlan(null);
+                    if (event.target.value === "resultSet") {
+                      void refreshBatchRuns().catch(() => setError("Batch Runs could not be loaded."));
+                    }
                   }}
                   value={inputMode}
                 >
                   <option value="record">Single input record</option>
                   <option value="dataset">Selected Dataset Records</option>
                   <option value="output">Selected Transform Run output</option>
+                  <option value="resultSet">Selected Batch Result Set values</option>
                 </select>
               </Field>
               {inputMode === "record" ? (
@@ -849,7 +892,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                         Refresh Datasets
                       </Button>
                     </div>
-                  ) : (
+                  ) : inputMode === "output" ? (
                     <div className={styles.formGrid}>
                       <Field label="Transform Run">
                         <select
@@ -880,6 +923,40 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                           value={outputPath}
                         />
                       </Field>
+                    </div>
+                  ) : (
+                    <div className={styles.formGrid}>
+                      <Field label="Batch Run Result Set">
+                        <select
+                          onChange={(event) => {
+                            setSelectionBatchRunId(event.target.value);
+                            setSelectionPlan(null);
+                          }}
+                          value={selectionBatchRunId}
+                        >
+                          <option value="">Select completed Batch Run</option>
+                          {batchRunOptions
+                            .filter((run) => run.status === "succeeded" || run.status === "partial")
+                            .map((run) => (
+                              <option key={run.id} value={run.id}>
+                                {shortId(run.definitionId)} · {shortId(run.id)} · {run.succeededCount} results
+                              </option>
+                            ))}
+                        </select>
+                      </Field>
+                      <Field label="Value path in each result (JSON Pointer; empty uses whole output)">
+                        <input
+                          onChange={(event) => {
+                            setOutputPath(event.target.value);
+                            setSelectionPlan(null);
+                          }}
+                          placeholder="/value"
+                          value={outputPath}
+                        />
+                      </Field>
+                      <Button onClick={() => void refreshBatchRuns().catch(() => setError("Batch Runs could not be loaded."))}>
+                        Refresh Batch Runs
+                      </Button>
                     </div>
                   )}
                   <div className={styles.formGrid}>
@@ -951,9 +1028,8 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                   <Button
                     disabled={
                       busy !== null ||
-                      (inputMode === "dataset"
-                        ? !selectionDatasetId
-                        : !selectionRunId)
+                      (inputMode === "dataset" ? !selectionDatasetId
+                        : inputMode === "output" ? !selectionRunId : !selectionBatchRunId)
                     }
                     onClick={() => void reviewSelection()}
                   >
@@ -973,7 +1049,9 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                         invocation
                       </strong>
                       <p>
-                        {selectionPlan.plan.selection.sourceRunId
+                        {selectionPlan.plan.selection.batchRunId
+                          ? `Batch Result Set ${shortId(selectionPlan.plan.selection.batchRunId)}`
+                          : selectionPlan.plan.selection.sourceRunId
                           ? `Transform Run ${shortId(selectionPlan.plan.selection.sourceRunId)}`
                           : `Dataset v${selectionPlan.plan.selection.datasetVersion}`}{" "}
                         → {selectionPlan.plan.outputLocation}
@@ -983,7 +1061,8 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                         <pre>
                           {JSON.stringify(
                             selectionPlan.plan.selection.records ??
-                              selectionPlan.plan.selection.values,
+                              selectionPlan.plan.selection.values ??
+                              selectionPlan.plan.selection.selectedRecords,
                             null,
                             2,
                           )}
@@ -1077,7 +1156,9 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                   <h4>Selected inputs</h4>
                   {selectedRun.definitionSnapshot.selection ? (
                     <p>
-                      {selectedRun.definitionSnapshot.selection.sourceRunId
+                      {selectedRun.definitionSnapshot.selection.batchRunId
+                        ? `Batch Result Set ${shortId(selectedRun.definitionSnapshot.selection.batchRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
+                        : selectedRun.definitionSnapshot.selection.sourceRunId
                         ? `Transform Run ${shortId(selectedRun.definitionSnapshot.selection.sourceRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
                         : `Dataset ${shortId(selectedRun.definitionSnapshot.selection.datasetId ?? "")} · v${selectedRun.definitionSnapshot.selection.datasetVersion} · ${selectedRun.definitionSnapshot.selection.selectedCount} Records`}{" "}
                       · 1 invocation

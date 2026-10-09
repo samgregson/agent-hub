@@ -61,14 +61,14 @@ def select_values(
     if rule.filter_path is not None:
         matching: list[SelectionValue] = []
         for item in selected:
-            value = _pointer(item.value, rule.filter_path)
+            value = project_value(item.value, rule.filter_path)
             if not isinstance(value, (str, int, float, bool, type(None))):
                 raise SelectionValidationError("Filter path must select a scalar value.")
             if _same_scalar(value, rule.equals):
                 matching.append(item)
         selected = matching
     if rule.sort_path is not None:
-        keys = [_pointer(item.value, rule.sort_path) for item in selected]
+        keys = [project_value(item.value, rule.sort_path) for item in selected]
         if keys and (
             any(
                 isinstance(value, bool) or not isinstance(value, (str, int, float))
@@ -78,7 +78,9 @@ def select_values(
         ):
             raise SelectionValidationError("Sort path must select comparable strings or numbers.")
         selected.sort(
-            key=lambda item: cast(str | int | float, _pointer(item.value, rule.sort_path or "")),
+            key=lambda item: cast(
+                str | int | float, project_value(item.value, rule.sort_path or "")
+            ),
             reverse=rule.descending,
         )
     if rule.limit is not None:
@@ -88,11 +90,16 @@ def select_values(
     return tuple(selected)
 
 
-def _pointer(value: object, path: str) -> object:
+def project_value(value: object, path: str) -> object:
+    """Project one JSON value through an explicit JSON Pointer."""
+    if path == "":
+        return value
+    if not path.startswith("/") or re.search(r"~(?![01])", path) is not None:
+        raise SelectionValidationError("Projection path must be a JSON Pointer.")
     current: object = value
     for raw in path[1:].split("/"):
         key = raw.replace("~1", "/").replace("~0", "~")
-        if isinstance(current, dict) and key in current:
+        if isinstance(current, Mapping) and key in current:
             current = current[key]
         elif isinstance(current, list) and key.isdecimal() and int(key) < len(current):
             current = current[int(key)]

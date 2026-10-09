@@ -428,8 +428,14 @@ class TransformModule:
         initiation: TransformInitiation | None = None,
     ) -> TransformRun:
         return await self._start_run(
-            access, project_id, definition_id, record, parameters, initiation,
-            selection_snapshot=None, expected_revision=None,
+            access,
+            project_id,
+            definition_id,
+            record,
+            parameters,
+            initiation,
+            selection_snapshot=None,
+            expected_revision=None,
         )
 
     async def plan_dataset_selection(
@@ -479,8 +485,13 @@ class TransformModule:
         if not plan.records:
             raise TransformValidationError("Selection has no Records to run.")
         return await self._start_run(
-            access, project_id, definition_id, plan.input_record(), parameters,
-            initiation, selection_snapshot=plan.snapshot(),
+            access,
+            project_id,
+            definition_id,
+            plan.input_record(),
+            parameters,
+            initiation,
+            selection_snapshot=plan.snapshot(),
             expected_revision=selection.expected_definition_revision,
         )
 
@@ -497,9 +508,10 @@ class TransformModule:
             raise TransformValidationError(
                 "Transform Definition revision changed; review it again."
             )
-        if not selection.output_path.startswith("/") or re.search(
-            r"~(?![01])", selection.output_path
-        ) is not None:
+        if (
+            not selection.output_path.startswith("/")
+            or re.search(r"~(?![01])", selection.output_path) is not None
+        ):
             raise TransformValidationError("Output path must be a JSON Pointer.")
         try:
             source = await self.load_run(access, project_id, selection.source_run_id)
@@ -518,8 +530,11 @@ class TransformModule:
             selection,
         )
         plan = OutputSelectionPlan(
-            source.id, selection.output_path,
-            hashlib.sha256(_canonical(source.output)).hexdigest(), records, selection,
+            source.id,
+            selection.output_path,
+            hashlib.sha256(_canonical(source.output)).hexdigest(),
+            records,
+            selection,
         )
         _inputs(definition, plan.input_record(), parameters or {})
         return plan
@@ -539,9 +554,55 @@ class TransformModule:
         if not plan.records:
             raise TransformValidationError("Selection has no values to run.")
         return await self._start_run(
-            access, project_id, definition_id, plan.input_record(), parameters,
-            initiation, selection_snapshot=plan.snapshot(),
+            access,
+            project_id,
+            definition_id,
+            plan.input_record(),
+            parameters,
+            initiation,
+            selection_snapshot=plan.snapshot(),
             expected_revision=selection.expected_definition_revision,
+        )
+
+    async def validate_captured_input(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        record: Mapping[str, object],
+        parameters: Mapping[str, object],
+        *,
+        expected_revision: int,
+    ) -> None:
+        """Validate a selected input supplied by a trusted source-owning Module."""
+        definition = await self.load(access, project_id, definition_id)
+        if definition.revision != expected_revision:
+            raise TransformValidationError(
+                "Transform Definition revision changed; review it again."
+            )
+        _inputs(definition, record, parameters)
+
+    async def start_captured_run(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        record: Mapping[str, object],
+        parameters: Mapping[str, object],
+        selection_snapshot: Mapping[str, object],
+        expected_revision: int,
+        initiation: TransformInitiation | None = None,
+    ) -> TransformRun:
+        """Retain source provenance supplied by a trusted cross-source Module."""
+        return await self._start_run(
+            access,
+            project_id,
+            definition_id,
+            record,
+            parameters,
+            initiation,
+            selection_snapshot=selection_snapshot,
+            expected_revision=expected_revision,
         )
 
     async def _start_run(
@@ -575,29 +636,43 @@ class TransformModule:
         input_bytes = _canonical({"inputs": inputs, "parameters": parameter_values})
         now = datetime.now(UTC)
         context = initiation or TransformInitiation("directUser", "notRequired")
-        run = await self._run_store.create(TransformRun(
-            id=str(uuid4()), project_id=project_id, definition_id=definition_id,
-            status="running", definition_snapshot={
-                "name": definition.name, "source": definition.source,
-                "input_selectors": dict(definition.input_selectors),
-                "output_schema": dict(definition.output_schema),
-                "revision": definition.revision,
-                "runtime": identity.runtime,
-                "package_hash": identity.package_hash,
-                **({"selection": dict(selection_snapshot)} if selection_snapshot else {}),
-            },
-            inputs=inputs, parameters=parameter_values,
-            input_hash=hashlib.sha256(input_bytes).hexdigest(),
-            source_hash=definition.source_hash, runtime=identity.runtime,
-            package_hash=identity.package_hash, output=None,
-            output_manifest={}, error=None, initiator_subject=access.subject,
-            initiation={
-                "kind": context.kind, "approval": context.approval,
-                "threadId": context.thread_id, "agentRunId": context.agent_run_id,
-            },
-            limits=dict(identity.limits),
-            created_at=now, completed_at=None,
-        ))
+        run = await self._run_store.create(
+            TransformRun(
+                id=str(uuid4()),
+                project_id=project_id,
+                definition_id=definition_id,
+                status="running",
+                definition_snapshot={
+                    "name": definition.name,
+                    "source": definition.source,
+                    "input_selectors": dict(definition.input_selectors),
+                    "output_schema": dict(definition.output_schema),
+                    "revision": definition.revision,
+                    "runtime": identity.runtime,
+                    "package_hash": identity.package_hash,
+                    **({"selection": dict(selection_snapshot)} if selection_snapshot else {}),
+                },
+                inputs=inputs,
+                parameters=parameter_values,
+                input_hash=hashlib.sha256(input_bytes).hexdigest(),
+                source_hash=definition.source_hash,
+                runtime=identity.runtime,
+                package_hash=identity.package_hash,
+                output=None,
+                output_manifest={},
+                error=None,
+                initiator_subject=access.subject,
+                initiation={
+                    "kind": context.kind,
+                    "approval": context.approval,
+                    "threadId": context.thread_id,
+                    "agentRunId": context.agent_run_id,
+                },
+                limits=dict(identity.limits),
+                created_at=now,
+                completed_at=None,
+            )
+        )
         try:
             output, runtime = await self._runner.execute(
                 definition.source, inputs, parameter_values
@@ -763,7 +838,8 @@ def _selected_values(
 ) -> tuple[SelectionValue, ...]:
     if (
         selection.expected_definition_revision < 1
-        or isinstance(selection, DatasetSelection) and selection.expected_version < 1
+        or isinstance(selection, DatasetSelection)
+        and selection.expected_version < 1
     ):
         raise TransformValidationError("Selection versions must be positive.")
     try:

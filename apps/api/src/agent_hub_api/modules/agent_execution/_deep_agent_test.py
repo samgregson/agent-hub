@@ -25,6 +25,7 @@ from agent_hub_api.modules.datasets import (
     MemoryDatasetStore,
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
+from agent_hub_api.modules.transform_inputs import ResultSetSelection
 from agent_hub_api.modules.transforms import DatasetSelection, OutputSelection, TransformInitiation
 
 
@@ -164,6 +165,7 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     runner._datasets = cast(Any, object())
     runner._batches = cast(Any, object())
     runner._transforms = cast(Any, object())
+    runner._transform_inputs = cast(Any, object())
     runner._settings = cast(
         Any,
         SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False),
@@ -195,10 +197,13 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "start_project_transform_run" in captured["interrupt_on"]
     assert "start_project_transform_selection_run" in captured["interrupt_on"]
     assert "start_project_transform_output_selection_run" in captured["interrupt_on"]
+    assert "start_project_transform_result_set_selection_run" in captured["interrupt_on"]
     assert "plan_project_transform_selection" in names
     assert "plan_project_transform_output_selection" in names
+    assert "plan_project_transform_result_set_selection" in names
     assert "plan_project_transform_selection" not in captured["interrupt_on"]
     assert "plan_project_transform_output_selection" not in captured["interrupt_on"]
+    assert "plan_project_transform_result_set_selection" not in captured["interrupt_on"]
     assert "save_project_transform_run_as_dataset" in captured["interrupt_on"]
 
 
@@ -555,15 +560,23 @@ async def test_agent_reviews_and_starts_a_versioned_dataset_selection() -> None:
             self.started: tuple[DatasetSelection, TransformInitiation] | None = None
 
         async def plan_dataset_selection(
-            self, _access: object, _project_id: str, _definition_id: str,
-            selection: DatasetSelection, _parameters: dict[str, object],
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: DatasetSelection,
+            _parameters: dict[str, object],
         ) -> object:
             assert selection.expected_version == 2
             return SimpleNamespace(snapshot=lambda: {"recordIds": ["record-2"]})
 
         async def start_selected_run(
-            self, _access: object, _project_id: str, _definition_id: str,
-            selection: DatasetSelection, _parameters: dict[str, object],
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: DatasetSelection,
+            _parameters: dict[str, object],
             initiation: TransformInitiation,
         ) -> object:
             self.started = (selection, initiation)
@@ -576,8 +589,15 @@ async def test_agent_reviews_and_starts_a_versioned_dataset_selection() -> None:
             cast(Any, transforms), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
-    choice = json.dumps({"dataset_id": "dataset-1", "expected_version": 2,
-                         "expected_definition_revision": 3, "sort_path": "/score", "limit": 1})
+    choice = json.dumps(
+        {
+            "dataset_id": "dataset-1",
+            "expected_version": 2,
+            "expected_definition_revision": 3,
+            "sort_path": "/score",
+            "limit": 1,
+        }
+    )
     plan = await tools["plan_project_transform_selection"].ainvoke(
         {"definition_id": "transform-1", "selection_json": choice}
     )
@@ -599,15 +619,23 @@ async def test_agent_reviews_and_starts_a_retained_transform_output_selection() 
             self.started: tuple[OutputSelection, TransformInitiation] | None = None
 
         async def plan_output_selection(
-            self, _access: object, _project_id: str, _definition_id: str,
-            selection: OutputSelection, _parameters: dict[str, object],
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: OutputSelection,
+            _parameters: dict[str, object],
         ) -> object:
             assert selection.source_run_id == "source-run-1"
             return SimpleNamespace(snapshot=lambda: {"positions": [1]})
 
         async def start_output_selected_run(
-            self, _access: object, _project_id: str, _definition_id: str,
-            selection: OutputSelection, _parameters: dict[str, object],
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: OutputSelection,
+            _parameters: dict[str, object],
             initiation: TransformInitiation,
         ) -> object:
             self.started = (selection, initiation)
@@ -620,10 +648,15 @@ async def test_agent_reviews_and_starts_a_retained_transform_output_selection() 
             cast(Any, transforms), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
-    choice = json.dumps({
-        "source_run_id": "source-run-1", "output_path": "/items",
-        "expected_definition_revision": 3, "sort_path": "/score", "limit": 1,
-    })
+    choice = json.dumps(
+        {
+            "source_run_id": "source-run-1",
+            "output_path": "/items",
+            "expected_definition_revision": 3,
+            "sort_path": "/score",
+            "limit": 1,
+        }
+    )
     plan = await tools["plan_project_transform_output_selection"].ainvoke(
         {"definition_id": "transform-1", "selection_json": choice}
     )
@@ -634,6 +667,64 @@ async def test_agent_reviews_and_starts_a_retained_transform_output_selection() 
     assert started == "Transform Run run-3 succeeded."
     assert transforms.started == (
         OutputSelection("source-run-1", "/items", 3, sort_path="/score", limit=1),
+        TransformInitiation("agentRun", "approved", "thread-1", "agent-run-1"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_reviews_and_starts_a_result_set_selection() -> None:
+    class Inputs:
+        def __init__(self) -> None:
+            self.started: tuple[object, TransformInitiation] | None = None
+
+        async def plan_result_set_selection(
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: object,
+            _parameters: dict[str, object],
+        ) -> object:
+            assert selection == ResultSetSelection("batch-run-1", "/score", 3, limit=2)
+            return SimpleNamespace(snapshot=lambda: {"selectedCount": 2})
+
+        async def start_result_set_run(
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: object,
+            _parameters: dict[str, object],
+            initiation: TransformInitiation,
+        ) -> object:
+            self.started = (selection, initiation)
+            return SimpleNamespace(id="run-4", status="succeeded")
+
+    inputs = Inputs()
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._transform_input_tools(
+            cast(Any, inputs), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    choice = json.dumps(
+        {
+            "source_run_id": "batch-run-1",
+            "output_path": "/score",
+            "expected_definition_revision": 3,
+            "limit": 2,
+        }
+    )
+    plan = await tools["plan_project_transform_result_set_selection"].ainvoke(
+        {"definition_id": "transform-1", "selection_json": choice}
+    )
+    started = await tools["start_project_transform_result_set_selection_run"].ainvoke(
+        {"definition_id": "transform-1", "selection_json": choice}
+    )
+    assert json.loads(plan) == {"selectedCount": 2}
+    assert started == "Transform Run run-4 succeeded."
+    assert inputs.started == (
+        ResultSetSelection("batch-run-1", "/score", 3, limit=2),
         TransformInitiation("agentRun", "approved", "thread-1", "agent-run-1"),
     )
 

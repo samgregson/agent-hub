@@ -830,6 +830,8 @@ test("selection planning and runs reach the Project API through the browser", as
     "selection-runs",
     "output-selection-plan",
     "output-selection-runs",
+    "result-set-selection-plan",
+    "result-set-selection-runs",
   ]) {
     const response = await request.post(
       `/api/projects/missing/transforms/missing/${endpoint}`,
@@ -1088,6 +1090,77 @@ test("a retained Transform output selection shows its source and selected values
     expectedDefinitionRevision: 3,
     sortPath: "/score",
     limit: 1,
+  });
+  expect(writes[1]).toEqual(writes[0]);
+});
+
+test("a Batch Result Set selection keeps row lineage in the Transform Run", async ({ page }) => {
+  const project = {
+    id: "project-result-selection", name: "Result selection",
+    createdAt: "2026-10-08T00:00:00Z", updatedAt: "2026-10-08T00:00:00Z",
+  };
+  const definition = {
+    id: "transform-consumer", name: "Consume results",
+    source: "def transform(inputs, parameters): pass",
+    inputSelectors: { items: "/selection/values" },
+    outputSchema: { type: "object" }, runtime: "pyodide",
+    packageHash: "abc", revision: 3,
+  };
+  const selection = {
+    sourceKind: "resultSet", batchRunId: "batch-source-run",
+    outputPath: "/score", selectedCount: 1,
+    selectedRecords: [{ datasetRecordId: "row-1", position: 0, input: { beam: "A" }, value: 5 }],
+    rule: { limit: 1 },
+  };
+  const retained = {
+    id: "transform-result-run", definitionId: definition.id, status: "succeeded",
+    definitionSnapshot: { ...definition, selection }, inputs: { items: [5] },
+    parameters: {}, inputHash: "inputhash", sourceHash: "sourcehash",
+    packageHash: "abc", runtime: "pyodide", output: { total: 5 },
+    outputManifest: {}, error: null,
+    initiation: { kind: "directUser", approval: "notRequired" },
+    limits: {}, createdAt: "2026-10-08T00:00:00Z",
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", (route) => route.fulfill({ json: [project] }));
+  await page.route(`**/api/projects/${project.id}/threads`, (route) => route.fulfill({ json: [] }));
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) => route.fulfill({ json: [] }));
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) => route.fulfill({ json: [definition] }));
+  await page.route(`**/api/projects/${project.id}/transforms/runs?**`, (route) =>
+    route.fulfill({ json: { items: [], nextOffset: null } }));
+  await page.route(`**/api/projects/${project.id}/batch-runs?**`, (route) =>
+    route.fulfill({ json: { items: [{
+      id: "batch-source-run", definitionId: "batch-definition-1", status: "partial",
+      succeededCount: 1, failedCount: 1,
+    }], nextOffset: null } }));
+  await page.route(`**/api/projects/${project.id}/transforms/${definition.id}/result-set-selection-plan`, (route) => {
+    writes.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ json: {
+      selection, selectedCount: 1, invocationCount: 1, outputLocation: "Transform Run output",
+    } });
+  });
+  await page.route(`**/api/projects/${project.id}/transforms/${definition.id}/result-set-selection-runs`, (route) => {
+    writes.push(route.request().postDataJSON() as Record<string, unknown>);
+    return route.fulfill({ status: 201, json: { id: retained.id, status: "succeeded" } });
+  });
+  await page.route(`**/api/projects/${project.id}/transforms/runs/${retained.id}`, (route) =>
+    route.fulfill({ json: retained }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Transforms" }).click();
+  await page.getByLabel("Input source").selectOption("resultSet");
+  await page.getByRole("combobox", { name: "Batch Run Result Set" }).selectOption("batch-source-run");
+  await page.getByLabel(/Value path in each result/).fill("/score");
+  await page.getByLabel("Maximum records (optional)").fill("1");
+  await page.getByRole("button", { name: "Review selection" }).click();
+  await expect(page.getByRole("region", { name: "Selection plan" }))
+    .toContainText("Batch Result Set batch-so → Transform Run output");
+  await page.getByRole("button", { name: "Start selected Run" }).click();
+  await expect(page.getByRole("article", { name: "Run dataflow" }))
+    .toContainText("Batch Result Set batch-so · 1 values");
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toMatchObject({
+    sourceRunId: "batch-source-run", outputPath: "/score",
+    expectedDefinitionRevision: 3, limit: 1,
   });
   expect(writes[1]).toEqual(writes[0]);
 });
