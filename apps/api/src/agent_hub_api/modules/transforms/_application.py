@@ -25,8 +25,13 @@ from agent_hub_api.modules.datasets import (
     Dataset,
     DatasetModule,
     DatasetNotFound,
-    DatasetRecord,
     DatasetRecordInput,
+)
+from agent_hub_api.modules.input_selection import (
+    SelectionRule,
+    SelectionValidationError,
+    SelectionValue,
+    select_values,
 )
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.settings import Settings
@@ -128,7 +133,7 @@ class OutputSelectionPlan:
     source_run_id: str
     output_path: str
     output_hash: str
-    records: tuple[DatasetRecord, ...]
+    records: tuple[SelectionValue, ...]
     rule: OutputSelection
 
     @property
@@ -140,7 +145,7 @@ class OutputSelectionPlan:
         return 1
 
     def input_record(self) -> Mapping[str, object]:
-        return {"selection": {"values": [dict(item.value) for item in self.records]}}
+        return {"selection": {"values": [_snapshot_value(item.value) for item in self.records]}}
 
     def snapshot(self) -> Mapping[str, object]:
         return {
@@ -149,14 +154,8 @@ class OutputSelectionPlan:
             "outputPath": self.output_path,
             "outputHash": self.output_hash,
             "positions": [item.position for item in self.records],
-            "values": [dict(item.value) for item in self.records],
-            "rule": {
-                "filterPath": self.rule.filter_path,
-                "equals": self.rule.equals,
-                "sortPath": self.rule.sort_path,
-                "descending": self.rule.descending,
-                "limit": self.rule.limit,
-            },
+            "values": [_snapshot_value(item.value) for item in self.records],
+            "rule": dict(_rule(self.rule).snapshot()),
             "selectedCount": self.selected_count,
         }
 
@@ -165,7 +164,7 @@ class OutputSelectionPlan:
 class DatasetSelectionPlan:
     dataset_id: str
     dataset_version: int
-    records: tuple[DatasetRecord, ...]
+    records: tuple[SelectionValue, ...]
     rule: DatasetSelection
 
     @property
@@ -177,7 +176,7 @@ class DatasetSelectionPlan:
         return 1
 
     def input_record(self) -> Mapping[str, object]:
-        return {"selection": {"values": [dict(item.value) for item in self.records]}}
+        return {"selection": {"values": [_snapshot_value(item.value) for item in self.records]}}
 
     def snapshot(self) -> Mapping[str, object]:
         return {
@@ -191,17 +190,11 @@ class DatasetSelectionPlan:
                     "id": item.id,
                     "position": item.position,
                     "sourceKey": item.source_key,
-                    "value": dict(item.value),
+                    "value": _snapshot_value(item.value),
                 }
                 for item in self.records
             ],
-            "rule": {
-                "filterPath": self.rule.filter_path,
-                "equals": self.rule.equals,
-                "sortPath": self.rule.sort_path,
-                "descending": self.rule.descending,
-                "limit": self.rule.limit,
-            },
+            "rule": dict(_rule(self.rule).snapshot()),
             "selectedCount": self.selected_count,
             "invocationCount": self.invocation_count,
         }
@@ -460,7 +453,13 @@ class TransformModule:
             raise TransformValidationError("Selected Dataset is unavailable.") from error
         if dataset.version != selection.expected_version:
             raise TransformValidationError("Dataset version changed; review the selection again.")
-        records = _select_dataset_records(dataset.records, selection)
+        records = _selected_values(
+            tuple(
+                SelectionValue(item.id, item.position, item.value, item.source_key)
+                for item in dataset.records
+            ),
+            selection,
+        )
         plan = DatasetSelectionPlan(dataset.id, dataset.version, records, selection)
         _inputs(definition, plan.input_record(), parameters or {})
         return plan
@@ -511,9 +510,9 @@ class TransformModule:
         values = _select(source.output, selection.output_path)
         if not isinstance(values, list) or any(not isinstance(value, dict) for value in values):
             raise TransformValidationError("Output path must select a list of JSON objects.")
-        records = _select_dataset_records(
+        records = _selected_values(
             tuple(
-                DatasetRecord(f"{source.id}:{index}", index, value, None)
+                SelectionValue(f"{source.id}:{index}", index, value)
                 for index, value in enumerate(values)
             ),
             selection,
@@ -755,71 +754,32 @@ def _canonical(value: object) -> bytes:
     ).encode()
 
 
-def _select_dataset_records(
-    records: Sequence[DatasetRecord], selection: DatasetSelection | OutputSelection
-) -> tuple[DatasetRecord, ...]:
+def _snapshot_value(value: object) -> object:
+    return json.loads(_canonical(value))
+
+
+def _selected_values(
+    records: Sequence[SelectionValue], selection: DatasetSelection | OutputSelection
+) -> tuple[SelectionValue, ...]:
     if (
         selection.expected_definition_revision < 1
         or isinstance(selection, DatasetSelection) and selection.expected_version < 1
     ):
         raise TransformValidationError("Selection versions must be positive.")
-    if selection.limit is not None and not 1 <= selection.limit <= 100:
-        raise TransformValidationError("Selection limit must be between 1 and 100.")
-    for pointer in (selection.filter_path, selection.sort_path):
-        if pointer is not None and (
-            not pointer.startswith("/") or re.search(r"~(?![01])", pointer) is not None
-        ):
-            raise TransformValidationError("Selection paths must be JSON Pointers.")
-    if selection.filter_path is None and selection.equals is not None:
-        raise TransformValidationError("A filter value requires a filter path.")
-    if selection.filter_path is not None:
-        if selection.equals is not None and not isinstance(
-            selection.equals, (str, int, float, bool)
-        ):
-            raise TransformValidationError("Filter equality must be a JSON scalar.")
-        try:
-            _canonical(selection.equals)
-        except (TypeError, ValueError) as error:
-            raise TransformValidationError("Filter equality must be a JSON scalar.") from error
-    selected = list(records)
-    if selection.filter_path is not None:
-        matching: list[DatasetRecord] = []
-        for record in selected:
-            value = _select(record.value, selection.filter_path)
-            if not isinstance(value, (str, int, float, bool, type(None))):
-                raise TransformValidationError("Filter path must select a scalar value.")
-            if _same_scalar(value, selection.equals):
-                matching.append(record)
-        selected = matching
-    if selection.sort_path is not None:
-        keys = [_select(record.value, selection.sort_path) for record in selected]
-        if keys and (
-            any(
-                isinstance(value, bool) or not isinstance(value, (str, int, float))
-                for value in keys
-            )
-            or any(isinstance(value, str) != isinstance(keys[0], str) for value in keys)
-        ):
-            raise TransformValidationError("Sort path must select comparable strings or numbers.")
-        selected.sort(
-            key=lambda record: cast(
-                str | int | float, _select(record.value, selection.sort_path or "")
-            ),
-            reverse=selection.descending,
-        )
-    if selection.limit is not None:
-        selected = selected[: selection.limit]
-    if len(selected) > 100:
-        raise TransformValidationError("Selection exceeds 100 Records; add an explicit limit.")
-    return tuple(selected)
+    try:
+        return select_values(records, _rule(selection))
+    except SelectionValidationError as error:
+        raise TransformValidationError(str(error)) from error
 
 
-def _same_scalar(left: object, right: object) -> bool:
-    if isinstance(left, bool) or isinstance(right, bool):
-        return type(left) is type(right) and left == right
-    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-        return left == right
-    return type(left) is type(right) and left == right
+def _rule(selection: DatasetSelection | OutputSelection) -> SelectionRule:
+    return SelectionRule(
+        filter_path=selection.filter_path,
+        equals=selection.equals,
+        sort_path=selection.sort_path,
+        descending=selection.descending,
+        limit=selection.limit,
+    )
 
 
 def _inputs(

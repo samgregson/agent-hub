@@ -38,6 +38,7 @@ apps/api/src/agent_hub_api/
     agent_transport/           # Project-authorized AG-UI orchestration and transport
     project_files/             # project-scoped Deep Agents filesystem
     bindings/                  # host-owned Project File to MCP argument rules
+    input_selection/           # bounded source-neutral value selection rules
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
     transforms/                # Project Transform Definitions, previews, and durable Runs
@@ -86,6 +87,7 @@ Additionally:
 
 - a Module cannot import another Module's implementation;
 - API Modules import another API Module only through its package root; a subpath is an implementation import even when it does not begin with an underscore;
+- production Modules form an acyclic import graph; a Module that needs two existing Modules is composed above them rather than adding a reverse import;
 - web Modules cannot import from `app/`;
 - API Modules cannot import the FastAPI application instance;
 - generated contracts do not import application code;
@@ -93,6 +95,8 @@ Additionally:
 - `shared/`, `utils/`, `helpers/`, `services/`, and `common/` must not become ownership-free dumping grounds. Code remains with its owning Module until there are multiple stable consumers.
 
 These directions should be enforced by TypeScript restricted-import rules, Python import checks, and contract tests as the corresponding Modules appear.
+
+`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Input Selection is a lower Module containing only source-neutral selection rules and value identities. Dataset, Transform, and Batch Execution keep authority over their own records, authorization, and durable Runs; a later cross-source execution Module may import their Interfaces without moving those decisions into `main.py`.
 
 ## Frontend ownership
 

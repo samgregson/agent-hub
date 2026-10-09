@@ -66,6 +66,11 @@ async def test_completed_transform_output_can_feed_a_captured_selected_run() -> 
     assert plan.selected_count == 2
     assert plan.invocation_count == 1
     assert plan.snapshot()["positions"] == [1, 2]
+    reviewed_values = plan.snapshot()["values"]
+    assert isinstance(reviewed_values, list)
+    assert isinstance(reviewed_values[0], dict)
+    reviewed_values[0]["score"] = -100
+    assert plan.snapshot()["values"] == [{"score": 9}, {"score": 3}]
 
     run = await transforms.start_output_selected_run(owner, project.id, consumer.id, choice, {})
     assert run.output == {"total": 12}

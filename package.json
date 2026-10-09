@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@12.4.1",
   "scripts": {
-    "architecture:check": "node scripts/check-architecture.mjs",
+    "architecture:check": "node --test scripts/*architecture*.test.mjs scripts/module-import-graph.test.mjs && node scripts/check-architecture.mjs",
     "ui:check": "node scripts/check-ui-design.mjs",
     "build": "pnpm --recursive --if-present build",
     "contracts:check": "node scripts/generate-contracts.mjs --check",
