@@ -16,6 +16,7 @@ from agent_hub_api.modules.identity import (
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms._application import (
     DatasetSelection,
+    OutputSelection,
     TransformDefinition,
     TransformExecutionError,
     TransformModule,
@@ -78,6 +79,31 @@ class DatasetSelectionPlanResponse(_Model):
     selected_count: int
     invocation_count: int
     output_location: str
+
+
+class OutputSelectionRequest(_Model):
+    source_run_id: str
+    output_path: str
+    expected_definition_revision: int = Field(ge=1)
+    filter_path: str | None = None
+    equals: str | int | float | bool | None = None
+    sort_path: str | None = None
+    descending: bool = False
+    limit: int | None = Field(default=None, ge=1, le=100)
+    parameters: dict[str, object] = Field(default_factory=dict)
+
+
+def _output_selection(body: OutputSelectionRequest) -> OutputSelection:
+    return OutputSelection(
+        source_run_id=body.source_run_id,
+        output_path=body.output_path,
+        expected_definition_revision=body.expected_definition_revision,
+        filter_path=body.filter_path,
+        equals=body.equals,
+        sort_path=body.sort_path,
+        descending=body.descending,
+        limit=body.limit,
+    )
 
 
 def _selection(body: DatasetSelectionRequest) -> DatasetSelection:
@@ -346,6 +372,44 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
             run = await transforms.start_selected_run(
                 access(request_context), project_id, definition_id,
                 _selection(body), body.parameters,
+            )
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+        return _run_response(run)
+
+    @router.post(
+        "/{definition_id}/output-selection-plan",
+        response_model=DatasetSelectionPlanResponse,
+    )
+    async def plan_output_selection(
+        project_id: str, definition_id: str, body: OutputSelectionRequest,
+        request_context: Context,
+    ) -> DatasetSelectionPlanResponse:
+        try:
+            plan = await transforms.plan_output_selection(
+                access(request_context), project_id, definition_id,
+                _output_selection(body), body.parameters,
+            )
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+        return DatasetSelectionPlanResponse(
+            selection=dict(plan.snapshot()), selected_count=plan.selected_count,
+            invocation_count=plan.invocation_count,
+            output_location="Transform Run output",
+        )
+
+    @router.post(
+        "/{definition_id}/output-selection-runs", response_model=RunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def start_output_selected_run(
+        project_id: str, definition_id: str, body: OutputSelectionRequest,
+        request_context: Context,
+    ) -> RunResponse:
+        try:
+            run = await transforms.start_output_selected_run(
+                access(request_context), project_id, definition_id,
+                _output_selection(body), body.parameters,
             )
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error

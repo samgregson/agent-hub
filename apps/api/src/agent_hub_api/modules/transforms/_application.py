@@ -112,6 +112,56 @@ class DatasetSelection:
 
 
 @dataclass(frozen=True, slots=True)
+class OutputSelection:
+    source_run_id: str
+    output_path: str
+    expected_definition_revision: int
+    filter_path: str | None = None
+    equals: str | int | float | bool | None = None
+    sort_path: str | None = None
+    descending: bool = False
+    limit: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutputSelectionPlan:
+    source_run_id: str
+    output_path: str
+    output_hash: str
+    records: tuple[DatasetRecord, ...]
+    rule: OutputSelection
+
+    @property
+    def selected_count(self) -> int:
+        return len(self.records)
+
+    @property
+    def invocation_count(self) -> int:
+        return 1
+
+    def input_record(self) -> Mapping[str, object]:
+        return {"selection": {"values": [dict(item.value) for item in self.records]}}
+
+    def snapshot(self) -> Mapping[str, object]:
+        return {
+            "sourceKind": "transformRun",
+            "sourceRunId": self.source_run_id,
+            "outputPath": self.output_path,
+            "outputHash": self.output_hash,
+            "positions": [item.position for item in self.records],
+            "values": [dict(item.value) for item in self.records],
+            "rule": {
+                "filterPath": self.rule.filter_path,
+                "equals": self.rule.equals,
+                "sortPath": self.rule.sort_path,
+                "descending": self.rule.descending,
+                "limit": self.rule.limit,
+            },
+            "selectedCount": self.selected_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class DatasetSelectionPlan:
     dataset_id: str
     dataset_version: int
@@ -435,6 +485,66 @@ class TransformModule:
             expected_revision=selection.expected_definition_revision,
         )
 
+    async def plan_output_selection(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        selection: OutputSelection,
+        parameters: Mapping[str, object] | None = None,
+    ) -> OutputSelectionPlan:
+        definition = await self.load(access, project_id, definition_id)
+        if definition.revision != selection.expected_definition_revision:
+            raise TransformValidationError(
+                "Transform Definition revision changed; review it again."
+            )
+        if not selection.output_path.startswith("/") or re.search(
+            r"~(?![01])", selection.output_path
+        ) is not None:
+            raise TransformValidationError("Output path must be a JSON Pointer.")
+        try:
+            source = await self.load_run(access, project_id, selection.source_run_id)
+        except TransformNotFound as error:
+            raise TransformValidationError("Selected Transform Run is unavailable.") from error
+        if source.status != "succeeded" or not isinstance(source.output, dict):
+            raise TransformValidationError("Selected Transform Run has no inspectable output.")
+        values = _select(source.output, selection.output_path)
+        if not isinstance(values, list) or any(not isinstance(value, dict) for value in values):
+            raise TransformValidationError("Output path must select a list of JSON objects.")
+        records = _select_dataset_records(
+            tuple(
+                DatasetRecord(f"{source.id}:{index}", index, value, None)
+                for index, value in enumerate(values)
+            ),
+            selection,
+        )
+        plan = OutputSelectionPlan(
+            source.id, selection.output_path,
+            hashlib.sha256(_canonical(source.output)).hexdigest(), records, selection,
+        )
+        _inputs(definition, plan.input_record(), parameters or {})
+        return plan
+
+    async def start_output_selected_run(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        selection: OutputSelection,
+        parameters: Mapping[str, object],
+        initiation: TransformInitiation | None = None,
+    ) -> TransformRun:
+        plan = await self.plan_output_selection(
+            access, project_id, definition_id, selection, parameters
+        )
+        if not plan.records:
+            raise TransformValidationError("Selection has no values to run.")
+        return await self._start_run(
+            access, project_id, definition_id, plan.input_record(), parameters,
+            initiation, selection_snapshot=plan.snapshot(),
+            expected_revision=selection.expected_definition_revision,
+        )
+
     async def _start_run(
         self,
         access: ProjectAccess,
@@ -646,9 +756,12 @@ def _canonical(value: object) -> bytes:
 
 
 def _select_dataset_records(
-    records: Sequence[DatasetRecord], selection: DatasetSelection
+    records: Sequence[DatasetRecord], selection: DatasetSelection | OutputSelection
 ) -> tuple[DatasetRecord, ...]:
-    if selection.expected_version < 1 or selection.expected_definition_revision < 1:
+    if (
+        selection.expected_definition_revision < 1
+        or isinstance(selection, DatasetSelection) and selection.expected_version < 1
+    ):
         raise TransformValidationError("Selection versions must be positive.")
     if selection.limit is not None and not 1 <= selection.limit <= 100:
         raise TransformValidationError("Selection limit must be between 1 and 100.")

@@ -16,12 +16,66 @@ from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_
 from agent_hub_api.modules.transforms import (
     DatasetSelection,
     MemoryTransformStore,
+    OutputSelection,
     TransformInitiation,
     TransformModule,
     TransformNotFound,
     TransformRuntimeIdentity,
     TransformValidationError,
 )
+
+
+@pytest.mark.asyncio
+async def test_completed_transform_output_can_feed_a_captured_selected_run() -> None:
+    from agent_hub_api.modules.transforms import MemoryTransformRunStore
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Retained values")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            if "produce" in source:
+                return (
+                    {"items": [{"score": 1}, {"score": 9}, {"score": 3}]},
+                    "deno:2.9.7;pyodide:314.0.7",
+                )
+            assert inputs["items"] == [{"score": 9}, {"score": 3}]
+            return {"total": 12}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+    )
+    producer = await transforms.define(
+        owner, project.id, "Produce", "def produce(inputs, parameters):\n    return {}\n",
+        {"seed": "/seed"}, {"type": "object"},
+    )
+    upstream = await transforms.start_run(owner, project.id, producer.id, {"seed": 1}, {})
+    consumer = await transforms.define(
+        owner, project.id, "Consume", "def transform(inputs, parameters):\n    return {}\n",
+        {"items": "/selection/values"}, {"type": "object"},
+    )
+    choice = OutputSelection(
+        source_run_id=upstream.id, output_path="/items",
+        expected_definition_revision=consumer.revision,
+        sort_path="/score", descending=True, limit=2,
+    )
+    plan = await transforms.plan_output_selection(owner, project.id, consumer.id, choice)
+    assert plan.selected_count == 2
+    assert plan.invocation_count == 1
+    assert plan.snapshot()["positions"] == [1, 2]
+
+    run = await transforms.start_output_selected_run(owner, project.id, consumer.id, choice, {})
+    assert run.output == {"total": 12}
+    assert run.inputs == {"items": [{"score": 9}, {"score": 3}]}
+    snapshot = run.definition_snapshot["selection"]
+    assert isinstance(snapshot, Mapping)
+    assert snapshot["sourceKind"] == "transformRun"
+    assert snapshot["sourceRunId"] == upstream.id
+    assert snapshot["positions"] == [1, 2]
+    assert snapshot["values"] == [{"score": 9}, {"score": 3}]
 
 
 @pytest.mark.asyncio

@@ -24,6 +24,60 @@ class _PinnedRunner:
 
 
 @pytest.mark.asyncio
+async def test_completed_transform_run_output_is_reviewed_through_project_api() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Output selection")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            if "produce" in source:
+                return {"items": [{"score": 1}, {"score": 3}]}, "deno:2.9.7;pyodide:314.0.7"
+            return {"count": 1}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+    )
+    producer = await transforms.define(
+        owner, project.id, "Produce", "def produce(inputs, parameters):\n    return {}\n",
+        {"seed": "/seed"}, {"type": "object"},
+    )
+    upstream = await transforms.start_run(owner, project.id, producer.id, {"seed": 1}, {})
+    consumer = await transforms.define(
+        owner, project.id, "Consume", "def transform(inputs, parameters):\n    return {}\n",
+        {"items": "/selection/values"}, {"type": "object"},
+    )
+    app = FastAPI()
+    app.include_router(
+        create_transform_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            transforms,
+        ),
+        prefix="/api",
+    )
+    root = f"/api/projects/{project.id}/transforms/{consumer.id}"
+    body = {
+        "sourceRunId": upstream.id,
+        "outputPath": "/items",
+        "expectedDefinitionRevision": consumer.revision,
+        "sortPath": "/score",
+        "descending": True,
+        "limit": 1,
+        "parameters": {},
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        plan = await client.post(f"{root}/output-selection-plan", json=body)
+        assert plan.status_code == 200
+        assert plan.json()["selection"]["positions"] == [1]
+        assert plan.json()["invocationCount"] == 1
+        started = await client.post(f"{root}/output-selection-runs", json=body)
+        assert started.status_code == 201
+        assert started.json()["definitionSnapshot"]["selection"]["sourceRunId"] == upstream.id
+
+
+@pytest.mark.asyncio
 async def test_selection_plan_precedes_one_durable_transform_run() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="sam")

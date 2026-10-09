@@ -825,7 +825,12 @@ test("a Project File Binding can be inspected and rebound after its source chang
 test("selection planning and runs reach the Project API through the browser", async ({
   request,
 }) => {
-  for (const endpoint of ["selection-plan", "selection-runs"]) {
+  for (const endpoint of [
+    "selection-plan",
+    "selection-runs",
+    "output-selection-plan",
+    "output-selection-runs",
+  ]) {
     const response = await request.post(
       `/api/projects/missing/transforms/missing/${endpoint}`,
       { data: {} },
