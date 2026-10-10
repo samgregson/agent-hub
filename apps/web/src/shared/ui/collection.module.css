@@ -78,6 +78,7 @@
 
   .actions {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: space-between;
     border-top: 1px solid var(--line-strong);
   }
@@ -91,6 +92,7 @@
 
   .actions {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: space-between;
     border-top: 1px solid var(--line-strong);
   }

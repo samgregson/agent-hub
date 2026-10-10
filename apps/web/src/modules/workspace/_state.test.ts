@@ -135,3 +135,30 @@ test("activity changes are ignored until a Project is selected", () => {
     state,
   );
 });
+
+test("Operations choice is restored per Project", () => {
+  let state = workspaceReducer(createWorkspaceState(), {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  state = workspaceReducer(state, {
+    activity: "operations",
+    type: "selectActivity",
+  });
+  state = workspaceReducer(state, {
+    operationKind: "transforms",
+    type: "selectOperationKind",
+  });
+  state = workspaceReducer(state, {
+    projectId: "project-b",
+    type: "selectProject",
+  });
+
+  assert.equal(state.projects["project-b"].operationKind, "batchDefinitions");
+  state = workspaceReducer(state, {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  assert.equal(state.projects["project-a"].activity, "operations");
+  assert.equal(state.projects["project-a"].operationKind, "transforms");
+});

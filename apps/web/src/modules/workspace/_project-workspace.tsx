@@ -39,6 +39,7 @@ import {
 } from "./_thread-title";
 import {
   type ActivityView,
+  type OperationKind,
   activityViews,
   createWorkspaceState,
   workspaceReducer,
@@ -47,9 +48,8 @@ import { LibraryCatalog } from "./_library-catalog";
 
 const activityLabels = {
   artifacts: "Library",
-  batchDefinitions: "Batch Definitions",
   chats: "Chats",
-  transforms: "Transforms",
+  operations: "Operations",
   plugins: "Plugins",
   sources: "Sources",
 } as const;
@@ -117,12 +117,9 @@ export function ProjectWorkspace() {
     ? workspace.projects[workspace.selectedProjectId]
     : undefined;
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
-  const isExplorerActivity = [
-    "batchDefinitions",
-    "transforms",
-    "plugins",
-    "sources",
-  ].includes(selectedActivity);
+  const isExplorerActivity = ["operations", "plugins", "sources"].includes(
+    selectedActivity,
+  );
   const selectedThreads = workspace.selectedProjectId
     ? (threadsByProject[workspace.selectedProjectId] ?? [])
     : [];
@@ -420,6 +417,7 @@ export function ProjectWorkspace() {
       <aside className={styles.navigator}>
         <ProjectNavigator
           libraryRefreshKey={libraryRefreshKey}
+          operationKind={selectedWorkspace?.operationKind ?? "batchDefinitions"}
           onCreateThread={() => void handleCreateThread()}
           onDeleteThread={(thread) => void handleDeleteThread(thread)}
           onOpenArtifact={(artifactId) =>
@@ -428,6 +426,9 @@ export function ProjectWorkspace() {
           onRenameThread={(thread) => void handleRenameThread(thread)}
           onOpenProjectFile={(path) =>
             dispatch({ path, type: "openProjectFile" })
+          }
+          onSelectOperationKind={(operationKind) =>
+            dispatch({ operationKind, type: "selectOperationKind" })
           }
           onSelectThread={(threadId) =>
             dispatch({ threadId, type: "selectThread" })
@@ -449,7 +450,7 @@ export function ProjectWorkspace() {
           />
           <aside
             aria-label="Project navigation"
-            className={`${styles.mobileNavigationDrawer} ${selectedActivity === "transforms" ? styles.mobileNavigationDrawerWide : ""}`}
+            className={`${styles.mobileNavigationDrawer} ${selectedActivity === "operations" && selectedWorkspace?.operationKind === "transforms" ? styles.mobileNavigationDrawerWide : ""}`}
             id="mobile-project-navigation"
             role="dialog"
           >
@@ -481,6 +482,9 @@ export function ProjectWorkspace() {
             <div className={styles.mobileNavigatorContent}>
               <ProjectNavigator
                 libraryRefreshKey={libraryRefreshKey}
+                operationKind={
+                  selectedWorkspace?.operationKind ?? "batchDefinitions"
+                }
                 onCreateThread={() => void handleCreateThread()}
                 onDeleteThread={(thread) => void handleDeleteThread(thread)}
                 onOpenArtifact={(artifactId) => {
@@ -492,6 +496,9 @@ export function ProjectWorkspace() {
                   dispatch({ path, type: "openProjectFile" });
                   setIsMobileNavigationOpen(false);
                 }}
+                onSelectOperationKind={(operationKind) =>
+                  dispatch({ operationKind, type: "selectOperationKind" })
+                }
                 onSelectThread={(threadId) => {
                   dispatch({ threadId, type: "selectThread" });
                   setIsMobileNavigationOpen(false);
@@ -610,10 +617,12 @@ export function ProjectWorkspace() {
 
 interface ProjectNavigatorProps {
   libraryRefreshKey: number;
+  operationKind: OperationKind;
   onCreateThread: () => void;
   onDeleteThread: (thread: Thread) => void;
   onOpenArtifact: (artifactId: string) => void;
   onOpenProjectFile: (path: string) => void;
+  onSelectOperationKind: (operationKind: OperationKind) => void;
   onRenameThread: (thread: Thread) => void;
   onSelectThread: (threadId: string) => void;
   project: Project | undefined;
@@ -624,10 +633,12 @@ interface ProjectNavigatorProps {
 
 function ProjectNavigator({
   libraryRefreshKey,
+  operationKind,
   onCreateThread,
   onDeleteThread,
   onOpenArtifact,
   onOpenProjectFile,
+  onSelectOperationKind,
   onRenameThread,
   onSelectThread,
   project,
@@ -637,9 +648,7 @@ function ProjectNavigator({
 }: ProjectNavigatorProps) {
   return (
     <>
-      {selectedActivity !== "transforms" ? (
-        <strong>{activityLabels[selectedActivity]}</strong>
-      ) : null}
+      <strong>{activityLabels[selectedActivity]}</strong>
       {selectedActivity === "chats" && project ? (
         <>
           <button
@@ -684,10 +693,12 @@ function ProjectNavigator({
           projectId={project.id}
           refreshKey={libraryRefreshKey}
         />
-      ) : selectedActivity === "batchDefinitions" && project ? (
-        <DatasetCatalog mode="definitions" projectId={project.id} />
-      ) : selectedActivity === "transforms" && project ? (
-        <TransformCatalog key={project.id} projectId={project.id} />
+      ) : selectedActivity === "operations" && project ? (
+        <OperationsCatalog
+          onSelectKind={onSelectOperationKind}
+          operationKind={operationKind}
+          projectId={project.id}
+        />
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />
       ) : (
@@ -696,6 +707,46 @@ function ProjectNavigator({
             ? `${activityLabels[selectedActivity]} in ${project.name}`
             : "Create or select a Project to begin."}
         </p>
+      )}
+    </>
+  );
+}
+
+function OperationsCatalog({
+  onSelectKind,
+  operationKind,
+  projectId,
+}: {
+  onSelectKind: (operationKind: OperationKind) => void;
+  operationKind: OperationKind;
+  projectId: string;
+}) {
+  return (
+    <>
+      <nav aria-label="Operation types" className={styles.operationTypes}>
+        <button
+          aria-pressed={operationKind === "batchDefinitions"}
+          onClick={() => onSelectKind("batchDefinitions")}
+          type="button"
+        >
+          Batch Definitions
+        </button>
+        <button
+          aria-pressed={operationKind === "transforms"}
+          onClick={() => onSelectKind("transforms")}
+          type="button"
+        >
+          Transforms
+        </button>
+      </nav>
+      {operationKind === "batchDefinitions" ? (
+        <DatasetCatalog
+          key={projectId}
+          mode="definitions"
+          projectId={projectId}
+        />
+      ) : (
+        <TransformCatalog key={projectId} projectId={projectId} />
       )}
     </>
   );

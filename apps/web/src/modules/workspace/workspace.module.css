@@ -215,6 +215,37 @@
   border-right: 1px solid var(--line-subtle);
 }
 
+.operationTypes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 24px;
+}
+
+.operationTypes button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-subtle);
+  cursor: pointer;
+  font-size: var(--font-size-label);
+}
+
+.operationTypes button:hover,
+.operationTypes button:focus-visible {
+  border-color: var(--line-strong);
+  color: var(--text-strong);
+}
+
+.operationTypes button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--surface-selected);
+  color: var(--accent);
+  font-weight: 700;
+}
+
 .artifact {
   grid-area: artifact;
   border-left: 1px solid var(--line-subtle);

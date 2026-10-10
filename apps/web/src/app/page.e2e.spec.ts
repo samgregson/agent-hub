@@ -393,6 +393,88 @@ test("Library identifies Artifacts, Datasets, and Project Files without duplicat
   ).toHaveCount(0);
 });
 
+test("Operations keeps Batch and Transform actions under one Project destination", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-18T00:00:00.000Z",
+    id: "project-operations",
+    name: "Design review",
+    updatedAt: "2026-09-18T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
+    await route.fulfill({ json: { artifacts: [] } });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/batch-definitions`,
+    async (route) => {
+      await route.fulfill({ json: [] });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/batch-runs?**`,
+    async (route) => {
+      await route.fulfill({ json: { items: [], nextOffset: null } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms`,
+    async (route) => {
+      await route.fulfill({ json: [] });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    async (route) => {
+      await route.fulfill({ json: { items: [], nextOffset: null } });
+    },
+  );
+
+  await page.goto("/");
+  const projectViews = page.getByRole("navigation", { name: "Project views" });
+  await expect(
+    projectViews.getByRole("button", { name: "Operations" }),
+  ).toBeVisible();
+  await expect(
+    projectViews.getByRole("button", { name: "Transforms" }),
+  ).toHaveCount(0);
+  await expect(
+    projectViews.getByRole("button", { name: "Batch Definitions" }),
+  ).toHaveCount(0);
+
+  await projectViews.getByRole("button", { name: "Operations" }).click();
+  const operationTypes = page.getByRole("navigation", {
+    name: "Operation types",
+  });
+  await expect(
+    page.getByRole("button", { name: "+ New Batch Definition" }),
+  ).toBeVisible();
+  await operationTypes.getByRole("button", { name: "Transforms" }).click();
+  await expect(
+    page.getByRole("button", { name: "New Transform" }),
+  ).toBeVisible();
+  await projectViews.getByRole("button", { name: "Library" }).click();
+  await projectViews.getByRole("button", { name: "Operations" }).click();
+  await expect(
+    operationTypes.getByRole("button", { name: "Transforms" }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
 test("Library opens a registered Dataset in its table viewer and saves through Dataset commands", async ({
   page,
 }) => {
@@ -1001,7 +1083,11 @@ test.describe("at phone width", () => {
       drawer.getByRole("button", { name: "Load cases actions" }),
     ).toBeVisible();
 
-    await drawer.getByRole("button", { name: "Batch Definitions" }).click();
+    await drawer.getByRole("button", { name: "Operations" }).click();
+    await drawer
+      .getByRole("navigation", { name: "Operation types" })
+      .getByRole("button", { name: "Batch Definitions" })
+      .click();
     const recordSelector = drawer.getByLabel("Cantilever check Dataset Record");
     await expect(recordSelector).toBeVisible();
     await expect(recordSelector).toHaveCSS(
@@ -1009,6 +1095,16 @@ test.describe("at phone width", () => {
       "rgb(27, 33, 26)",
     );
     await expect(recordSelector).toHaveCSS("color", "rgb(251, 253, 246)");
+    const runAllBounds = await drawer
+      .getByRole("button", { name: "Run all records" })
+      .boundingBox();
+    const selectorBounds = await recordSelector.boundingBox();
+    expect(runAllBounds).not.toBeNull();
+    expect(selectorBounds).not.toBeNull();
+    expect(selectorBounds!.y).toBeGreaterThan(
+      runAllBounds!.y + runAllBounds!.height,
+    );
+    expect(selectorBounds!.width).toBeGreaterThan(200);
   });
 });
 
