@@ -1,7 +1,7 @@
-"""Persist Project File Bindings for MCP Batch Definitions.
+"""Add Project File Bindings for MCP Batch Definitions.
 
 Revision ID: 0023_file_bindings
-Revises: 0022_file_binding_argument
+Revises: 0022_artifact_audit_events
 """
 
 from collections.abc import Sequence
@@ -10,12 +10,13 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0023_file_bindings"
-down_revision = "0022_file_binding_argument"
+down_revision = "0022_artifact_audit_events"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    op.add_column("batch_definitions", sa.Column("file_argument", sa.Text(), nullable=True))
     op.create_table(
         "file_bindings",
         sa.Column("project_id", sa.String(length=36), nullable=False),
@@ -24,6 +25,7 @@ def upgrade() -> None:
         sa.Column("argument", sa.Text(), nullable=False),
         sa.Column("source_path", sa.Text(), nullable=False),
         sa.Column("expected_file_version", sa.Integer(), nullable=False),
+        sa.Column("version", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("project_id", "binding_id"),
         sa.UniqueConstraint("project_id", "batch_definition_id"),
@@ -33,8 +35,10 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.CheckConstraint("expected_file_version > 0"),
+        sa.CheckConstraint("version > 0"),
     )
 
 
 def downgrade() -> None:
     op.drop_table("file_bindings")
+    op.drop_column("batch_definitions", "file_argument")

@@ -513,10 +513,6 @@ async def _write_dataset(
             "UPDATE datasets SET name=%s, updated_at=%s WHERE project_id=%s AND dataset_id=%s",
             (dataset.name, dataset.updated_at, dataset.project_id, dataset.id),
         )
-        await connection.execute(
-            "DELETE FROM dataset_records WHERE project_id=%s AND dataset_id=%s",
-            (dataset.project_id, dataset.id),
-        )
     else:
         await connection.execute(
             """INSERT INTO datasets
@@ -539,22 +535,6 @@ async def _write_dataset(
                 content,
                 dataset.created_at,
                 dataset.updated_at,
-            ),
-        )
-    # The legacy table remains a query/rollback projection, updated in the
-    # same transaction. Dataset reads always use the Project File document.
-    for record in dataset.records:
-        await connection.execute(
-            """INSERT INTO dataset_records
-            (project_id,dataset_id,record_id,position,source_key,value)
-            VALUES (%s,%s,%s,%s,%s,%s)""",
-            (
-                dataset.project_id,
-                dataset.id,
-                record.id,
-                record.position,
-                record.source_key,
-                json.dumps(record.value, allow_nan=False),
             ),
         )
 
