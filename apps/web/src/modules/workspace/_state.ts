@@ -8,7 +8,6 @@ interface FileProposal {
 export const activityViews = [
   "chats",
   "artifacts",
-  "datasets",
   "batchDefinitions",
   "transforms",
   "sources",

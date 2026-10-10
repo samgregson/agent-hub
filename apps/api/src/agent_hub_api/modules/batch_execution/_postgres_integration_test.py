@@ -169,6 +169,17 @@ async def test_postgres_batch_run_retains_captured_records_in_dataset_order() ->
             {"load": 1},
             {"load": 2},
         ]
+        assert loaded.definition_snapshot["datasetVersion"] == dataset.version
+        assert loaded.definition_snapshot["datasetPath"] == f"/.datasets/{dataset.id}.json"
+        assert loaded.definition_snapshot["datasetRecords"] == [
+            {
+                "id": record.id,
+                "position": record.position,
+                "sourceKey": record.source_key,
+                "value": record.value,
+            }
+            for record in dataset.records
+        ]
         assert completed.status is BatchRunStatus.succeeded
         assert repeated.id == queued.id
         assert loaded.initiation == queued.initiation
@@ -197,6 +208,31 @@ async def test_postgres_batch_run_retains_captured_records_in_dataset_order() ->
         assert [record.input for record in filtered.items] == [{"load": 2}]
         assert filtered.summary.total_count == 2
         assert filtered.summary.numeric_sum == 5
+        await datasets.update_dataset(
+            access,
+            project.id,
+            dataset.id,
+            "Changed loads",
+            [DatasetRecordInput({"load": 99}, id=dataset.records[0].id)],
+            expected_version=dataset.version,
+        )
+        await datasets.delete_dataset(access, project.id, dataset.id)
+        historical = await batches.load(access, project.id, queued.id)
+        assert historical.definition_snapshot["datasetVersion"] == 1
+        assert historical.definition_snapshot["datasetRecords"] == [
+            {
+                "id": record.id,
+                "position": record.position,
+                "sourceKey": record.source_key,
+                "value": record.value,
+            }
+            for record in dataset.records
+        ]
+        assert [record.structured_output for record in historical.records] == [
+            {"result": 3},
+            {"result": 1},
+            {"result": 2},
+        ]
     finally:
         connection = await AsyncConnection.connect(str(settings.database_url))
         async with connection:

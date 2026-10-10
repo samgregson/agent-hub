@@ -11,7 +11,12 @@ from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from agent_hub_api.modules.datasets import BatchDefinition, DatasetModule, DatasetValidationError
+from agent_hub_api.modules.datasets import (
+    BatchDefinition,
+    DatasetModule,
+    DatasetRecord,
+    DatasetValidationError,
+)
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.modules.transforms import (
@@ -209,7 +214,7 @@ class BatchExecutionModule:
             project_id,
             definition.id,
             BatchRunStatus.queued,
-            snapshot,
+            {**snapshot, **_dataset_snapshot(dataset.id, dataset.version, (record,))},
             (ResultRecord(record.id, arguments),),
             now,
             now,
@@ -267,6 +272,7 @@ class BatchExecutionModule:
             BatchRunStatus.queued,
             {
                 **snapshot,
+                **_dataset_snapshot(dataset.id, dataset.version, dataset.records),
                 "maxConcurrency": self._max_concurrency,
                 "recordIds": [record_id for record_id, _ in captured],
             },
@@ -950,6 +956,24 @@ def _snapshot(
         "argumentMappings": definition.argument_mappings,
         "inputSchema": definition.input_schema,
         "outputSchema": dict(output_schema),
+    }
+
+
+def _dataset_snapshot(
+    dataset_id: str, version: int, records: tuple[DatasetRecord, ...]
+) -> Mapping[str, object]:
+    return {
+        "datasetPath": f"/.datasets/{dataset_id}.json",
+        "datasetVersion": version,
+        "datasetRecords": [
+            {
+                "id": record.id,
+                "position": record.position,
+                "sourceKey": record.source_key,
+                "value": dict(record.value),
+            }
+            for record in records
+        ],
     }
 
 

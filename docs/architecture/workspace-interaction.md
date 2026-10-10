@@ -72,7 +72,7 @@ Project selection sits above the workspace. The activity rail changes the projec
 
 ## Decision
 
-Adopt alternative D: a project-scoped, chat-centred workbench with an explicit Artifact focus mode.
+Adopt alternative D: a project-scoped, chat-centred workbench with an explicit Artifact focus mode. ADR 0009 later makes an active Workflow the Project entry point; ADR 0010 names the project content destination Library and includes typed Datasets there. The panel interaction model here still applies.
 
 The product borrows the stable navigation/chat/inspector structure from Codex and VS Code, but differs in two important respects: Project selection is above the workspace, and the right workspace is Project-persistent and can expand into the primary surface because Artifacts are first-class project work products rather than transient tool output.
 

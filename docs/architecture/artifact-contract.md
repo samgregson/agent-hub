@@ -14,6 +14,8 @@ The Plugin remains stateless with respect to saved Artifact instances.
 
 A Project File is not automatically an Artifact. Files can be linked from chat and opened in a safe host-provided preview without changing their lifecycle or adding them to the Artifact catalog.
 
+A registered Dataset is also stored as a typed Project File under ADR 0010. It has a dedicated Dataset viewer and validated Dataset Module writes; viewing or using it does not elevate it to an Artifact.
+
 A `/scratch/**` file is Thread-local checkpointed working state rather than a Project File. It can be linked and safely previewed only from its owning Thread, and is never added to the Project file or Artifact catalog.
 
 Creating an Artifact from a Project File is an explicit elevation operation. Initially it can be initiated in either of two ways:

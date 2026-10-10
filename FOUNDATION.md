@@ -74,7 +74,7 @@ Use Next.js with React and TypeScript. assistant-ui should supply the conversati
 
 The frontend should not receive MCP credentials. A backend route or the Python API should act as the MCP client and authorization boundary. MCP-provided UI must run in an appropriately sandboxed frame with a narrow host bridge and explicit capabilities.
 
-The selected Project sits above the workspace. A left activity rail switches between project-scoped Chats, Artifacts, Sources, Plugin management, and optional reviewed Plugin views; the adjacent navigator shows the selected collection. Thread chat remains central and the Artifact/Sources workspace opens on the right. The right workspace remains selected across Thread switches inside the same Project and can enter an explicit Artifact focus mode. Detailed small-screen interaction is deferred, with one primary surface visible at a time and workspace state preserved. The decision is recorded in `docs/architecture/workspace-interaction.md`.
+The selected Project sits above the workspace. The target Project entry point is its active Workflow overview. A left activity rail leads to Chats, Library, Operations, Sources, Plugin management, and optional reviewed Plugin views; the adjacent navigator shows the selected collection. Library groups ordinary Project Files, registered typed Datasets, and Artifacts while preserving their separate ownership and viewers. Thread chat remains central and the preview workspace opens on the right. The right workspace remains selected across Thread switches inside the same Project and can enter an explicit Artifact focus mode. On narrow screens, one primary surface is visible at a time and workspace state is preserved. The original panel decision is recorded in `docs/architecture/workspace-interaction.md`; later navigation decisions are in ADRs 0009 and 0010. Datasets now have one primary home in Library and a canonical Project File; the current rail still has separate Batch Definition and Transform destinations pending issue #37.
 
 ### Backend
 
@@ -157,7 +157,7 @@ For engineering artifacts, numerical values should never be represented as untyp
 - **Plugin selection:** a catalogued MCP Plugin enabled for a Project with its configuration and policy.
 - **Artifact:** a stable logical work product represented by one current portable Artifact Document.
 - **Artifact relation:** typed lineage or reference between Artifacts.
-- **Dataset:** a first-class Project record containing structured working inputs.
+- **Dataset:** a registered, typed Project File containing structured working inputs, with Dataset-owned identity, Record IDs, validation, and edits.
 - **Batch Definition:** a reusable Project record mapping Dataset values to one Plugin tool's ordinary MCP arguments.
 - **Batch Run / Result Set:** one host-orchestrated execution and its durable, queryable outcomes; neither is automatically an Artifact.
 

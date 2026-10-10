@@ -60,9 +60,9 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
     assert "The approval card is shown automatically after the tool call." in _AGENT_SYSTEM_PROMPT
 
 
-def test_datasets_are_not_project_files_in_the_agent_instructions() -> None:
-    assert "Datasets and Batch Definitions are durable Project records" in _AGENT_SYSTEM_PROMPT
-    assert "Do not write a Dataset as a JSON file under /project." in _AGENT_SYSTEM_PROMPT
+def test_agent_instructions_treat_datasets_as_registered_project_files() -> None:
+    assert "Datasets are registered, typed Project Files" in _AGENT_SYSTEM_PROMPT
+    assert "Use the Project Dataset tools for Dataset mutations" in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio

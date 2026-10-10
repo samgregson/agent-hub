@@ -14,6 +14,7 @@ from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, Project
 from agent_hub_api.settings import Settings
 
 ARTIFACT_ROOT = "/.artifacts"
+DATASET_ROOT = "/.datasets"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +90,7 @@ class ProjectFileAlreadyExists(ProjectFileError):
 
 
 class ReservedProjectFilePath(ProjectFileError):
-    """Only the Artifact Module may mutate the reserved Artifact namespace."""
+    """A registered Project File can only be changed through its owning Module."""
 
 
 class ProjectFileStore(Protocol):
@@ -143,6 +144,10 @@ def _require_mutable(path: str) -> None:
     if path == ARTIFACT_ROOT or path.startswith(f"{ARTIFACT_ROOT}/"):
         raise ReservedProjectFilePath(
             "Artifact paths can only be changed through the Artifact Module"
+        )
+    if path == DATASET_ROOT or path.startswith(f"{DATASET_ROOT}/"):
+        raise ReservedProjectFilePath(
+            "Dataset paths can only be changed through the Dataset Module"
         )
 
 
