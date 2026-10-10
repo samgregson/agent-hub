@@ -812,6 +812,8 @@ class TransformModule:
 
 def _select(record: Mapping[str, object], pointer: str) -> object:
     value: object = record
+    if pointer == "":
+        return value
     for raw in pointer[1:].split("/"):
         key = raw.replace("~1", "/").replace("~0", "~")
         if isinstance(value, dict) and key in value:
@@ -939,7 +941,9 @@ def _validate_definition(
         not selectors
         or len(selectors) > 32
         or any(
-            not key.isidentifier() or not isinstance(pointer, str) or not pointer.startswith("/")
+            not key.isidentifier()
+            or not isinstance(pointer, str)
+            or (pointer != "" and not pointer.startswith("/"))
             for key, pointer in selectors.items()
         )
     ):

@@ -285,6 +285,32 @@ async def test_failed_run_cannot_create_artifact_and_other_project_user_cannot_s
 
 
 @pytest.mark.asyncio
+async def test_transform_can_select_the_whole_record_with_root_json_pointer() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Copy records")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert inputs == {"record": {"load": 3}}
+            return {"load": 3, "copied": True}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(projects, MemoryTransformStore(), Runner())
+    definition = await transforms.define(
+        owner,
+        project.id,
+        "Copy",
+        "def transform(inputs, parameters):\n    return {**inputs['record'], 'copied': True}\n",
+        {"record": ""},
+        {"type": "object"},
+    )
+    preview = await transforms.preview(owner, project.id, definition.id, {"load": 3}, {})
+    assert preview.output == {"load": 3, "copied": True}
+
+
+@pytest.mark.asyncio
 async def test_preview_resolves_selectors_and_validates_runner_output() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="sam")

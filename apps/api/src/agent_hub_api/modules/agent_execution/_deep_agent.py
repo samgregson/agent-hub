@@ -55,6 +55,7 @@ from agent_hub_api.modules.transforms import (
     OutputSelection,
     TransformInitiation,
     TransformModule,
+    TransformValidationError,
 )
 from agent_hub_api.settings import Settings
 
@@ -78,7 +79,12 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Dataset and Batch Definition mutations use the approval card automatically.",
         "Transform Definitions and Runs are durable Project records. Use the Project "
         "Transform tools to inspect or change them; Definition changes, Run starts, and "
-        "output saves use the approval card automatically.",
+        "output saves use the approval card automatically. Transform source is Python "
+        "executed by Pyodide and must define transform(inputs, parameters). The "
+        "input_selectors_json argument is a JSON object mapping input names to JSON "
+        'pointers: {"record":""} selects the whole record and {"value":"/value"} '
+        "selects one field. Each input name becomes a key in inputs. "
+        "output_schema_json is a JSON Schema object.",
         "Never claim access to the host filesystem. When referring to a virtual file in "
         "a response, link it as Markdown using its absolute /project or /scratch path.",
     )
@@ -852,6 +858,18 @@ class PostgresDeepAgentRunner:
                 raise ValueError("Expected a JSON object")
             return value
 
+        def selector_json(raw: str) -> dict[str, str]:
+            try:
+                value = json.loads(raw)
+            except json.JSONDecodeError as error:
+                raise ValueError("input_selectors_json must be a JSON object") from error
+            if not isinstance(value, dict) or any(
+                not isinstance(key, str) or not isinstance(pointer, str)
+                for key, pointer in value.items()
+            ):
+                raise ValueError("input_selectors_json must be a JSON object of names to pointers")
+            return cast(dict[str, str], value)
+
         def dataset_selection(raw: str) -> DatasetSelection:
             value = object_json(raw)
             try:
@@ -932,15 +950,26 @@ class PostgresDeepAgentRunner:
         async def create_project_transform(
             name: str, source: str, input_selectors_json: str, output_schema_json: str
         ) -> str:
-            """Create a Project Transform Definition after user approval."""
-            item = await transforms.define(
-                access,
-                project_id,
-                name,
-                source,
-                cast(dict[str, str], object_json(input_selectors_json)),
-                object_json(output_schema_json),
-            )
+            """Create a Project Transform Definition after approval.
+
+            source is Python defining transform(inputs, parameters). input_selectors_json
+            is a JSON object such as {"record":""} for the whole input record or
+            {"value":"/value"} for one field. output_schema_json is a JSON Schema object.
+            """
+            try:
+                item = await transforms.define(
+                    access,
+                    project_id,
+                    name,
+                    source,
+                    selector_json(input_selectors_json),
+                    object_json(output_schema_json),
+                )
+            except (ValueError, TransformValidationError) as error:
+                return (
+                    f"Transform Definition was not created: {error}. "
+                    "Propose a corrected change for approval."
+                )
             return f"Created Transform Definition {item.name} ({item.id})."
 
         @tool
@@ -951,16 +980,26 @@ class PostgresDeepAgentRunner:
             input_selectors_json: str,
             output_schema_json: str,
         ) -> str:
-            """Revise a Project Transform Definition after user approval."""
-            item = await transforms.revise(
-                access,
-                project_id,
-                definition_id,
-                name,
-                source,
-                cast(dict[str, str], object_json(input_selectors_json)),
-                object_json(output_schema_json),
-            )
+            """Revise a Project Transform Definition after approval.
+
+            source is Python defining transform(inputs, parameters). input_selectors_json
+            maps names to JSON pointers; an empty pointer selects the whole record.
+            """
+            try:
+                item = await transforms.revise(
+                    access,
+                    project_id,
+                    definition_id,
+                    name,
+                    source,
+                    selector_json(input_selectors_json),
+                    object_json(output_schema_json),
+                )
+            except (ValueError, TransformValidationError) as error:
+                return (
+                    f"Transform Definition was not updated: {error}. "
+                    "Propose a corrected change for approval."
+                )
             return f"Updated Transform Definition {item.name} ({item.id})."
 
         @tool

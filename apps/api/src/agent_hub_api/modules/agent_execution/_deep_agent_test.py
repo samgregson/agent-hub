@@ -26,7 +26,13 @@ from agent_hub_api.modules.datasets import (
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transform_inputs import ArtifactSelection, ResultSetSelection
-from agent_hub_api.modules.transforms import DatasetSelection, OutputSelection, TransformInitiation
+from agent_hub_api.modules.transforms import (
+    DatasetSelection,
+    MemoryTransformStore,
+    OutputSelection,
+    TransformInitiation,
+    TransformModule,
+)
 
 
 def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:
@@ -65,6 +71,12 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
 def test_agent_instructions_treat_datasets_as_registered_project_files() -> None:
     assert "Datasets are registered, typed Project Files" in _AGENT_SYSTEM_PROMPT
     assert "Use the Project Dataset tools for Dataset mutations" in _AGENT_SYSTEM_PROMPT
+
+
+def test_agent_instructions_describe_transform_language_and_selectors() -> None:
+    assert "Transform source is Python" in _AGENT_SYSTEM_PROMPT
+    assert "transform(inputs, parameters)" in _AGENT_SYSTEM_PROMPT
+    assert '{"record":""}' in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -554,6 +566,63 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
     )
     assert saved == "Saved Dataset Saved (dataset-1) from Transform Run run-1."
     assert transforms.saved == ("run-1", "Saved")
+
+
+@pytest.mark.asyncio
+async def test_invalid_approved_transform_proposal_returns_actionable_tool_error() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Transform proposal")
+    transforms = TransformModule(projects, MemoryTransformStore())
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._transform_tools(
+            transforms, project.id, access.subject, "thread-1", "run-1"
+        )
+    }
+
+    invalid_selectors = await tools["create_project_transform"].ainvoke(
+        {
+            "name": "Copy dataset records",
+            "source": "export default function transform(record, parameters) { return record; }",
+            "input_selectors_json": '[{"path":"$"}]',
+            "output_schema_json": '{"type":"object"}',
+        }
+    )
+    assert "input_selectors_json must be a JSON object" in invalid_selectors
+
+    invalid_source = await tools["create_project_transform"].ainvoke(
+        {
+            "name": "Copy dataset records",
+            "source": "export default function transform(record, parameters) { return record; }",
+            "input_selectors_json": '{"record":""}',
+            "output_schema_json": '{"type":"object"}',
+        }
+    )
+    assert "Transform source is not valid Python" in invalid_source
+    assert await transforms.list(access, project.id) == ()
+
+    created = await tools["create_project_transform"].ainvoke(
+        {
+            "name": "Copy dataset records",
+            "source": "def transform(inputs, parameters):\n    return dict(inputs['record'])\n",
+            "input_selectors_json": '{"record":""}',
+            "output_schema_json": '{"type":"object"}',
+        }
+    )
+    assert created.startswith("Created Transform Definition")
+    definition = (await transforms.list(access, project.id))[0]
+    invalid_revision = await tools["update_project_transform"].ainvoke(
+        {
+            "definition_id": definition.id,
+            "name": "Copy dataset records",
+            "source": "export default function transform(record) { return record; }",
+            "input_selectors_json": '{"record":""}',
+            "output_schema_json": '{"type":"object"}',
+        }
+    )
+    assert "Transform source is not valid Python" in invalid_revision
+    assert (await transforms.load(access, project.id, definition.id)).revision == 1
 
 
 @pytest.mark.asyncio
