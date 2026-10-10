@@ -919,7 +919,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
     updatedAt: "2026-09-21T00:00:00.000Z",
   };
   const artifactId = "artifact-123";
-  let changedInAnotherThread = false;
+  let documentRequests = 0;
   const artifactDocument = (documentVersion: number, threadId: string) => ({
     artifact: {
       documentVersion,
@@ -968,10 +968,12 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   await page.route(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
     async (route) => {
+      documentRequests += 1;
       await route.fulfill({
-        json: changedInAnotherThread
-          ? artifactDocument(2, "thread-b")
-          : artifactDocument(1, "thread-a"),
+        json:
+          documentRequests <= 2
+            ? artifactDocument(1, "thread-a")
+            : artifactDocument(2, "thread-b"),
       });
     },
   );
@@ -993,7 +995,6 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   const changedDocumentResponse = page.waitForResponse(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
   );
-  changedInAnotherThread = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await changedDocumentResponse;
 
@@ -1311,6 +1312,440 @@ test("a Project File Binding can be inspected and rebound after its source chang
   });
 });
 
+test("selection planning and runs reach the Project API through the browser", async ({
+  request,
+}) => {
+  for (const endpoint of [
+    "selection-plan",
+    "selection-runs",
+    "output-selection-plan",
+    "output-selection-runs",
+    "result-set-selection-plan",
+    "result-set-selection-runs",
+  ]) {
+    const response = await request.post(
+      `/api/projects/missing/transforms/missing/${endpoint}`,
+      { data: {} },
+    );
+    expect(response.status()).toBe(422);
+    expect(response.headers()["content-type"]).toContain("application/json");
+  }
+});
+
+test("a reviewed Dataset selection starts one captured Transform Run", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-selection",
+    name: "Selection review",
+    createdAt: "2026-10-08T00:00:00Z",
+    updatedAt: "2026-10-08T00:00:00Z",
+  };
+  const definition = {
+    id: "transform-1",
+    name: "Aggregate values",
+    source: "def transform(inputs, parameters): pass",
+    inputSelectors: { items: "/selection/values" },
+    outputSchema: { type: "object" },
+    runtime: "pyodide",
+    packageHash: "abc",
+    revision: 3,
+  };
+  const selection = {
+    datasetId: "dataset-1",
+    datasetVersion: 2,
+    datasetPath: "/.datasets/dataset-1.json",
+    recordIds: ["record-2"],
+    records: [{ id: "record-2", value: { score: 3 } }],
+    rule: { sortPath: "/score", descending: true, limit: 1 },
+    selectedCount: 1,
+    invocationCount: 1,
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({
+      json: [{ id: "dataset-1", name: "Measurements", version: 2 }],
+    }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [definition] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/selection-plan`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          selection,
+          selectedCount: 1,
+          invocationCount: 1,
+          outputLocation: "Transform Run output",
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/selection-runs`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        status: 201,
+        json: {
+          id: "run-selection",
+          definitionId: definition.id,
+          status: "succeeded",
+          definitionSnapshot: {
+            name: definition.name,
+            source: definition.source,
+            input_selectors: definition.inputSelectors,
+            revision: 3,
+            selection,
+          },
+          inputs: { items: [{ score: 3 }] },
+          parameters: {},
+          inputHash: "inputhash",
+          sourceHash: "sourcehash",
+          packageHash: "abc",
+          runtime: "pyodide",
+          output: { total: 3 },
+          outputManifest: {},
+          error: null,
+          initiation: {
+            kind: "directUser",
+            approval: "notRequired",
+            threadId: null,
+            agentRunId: null,
+          },
+          limits: {},
+          createdAt: "2026-10-08T00:00:00Z",
+        },
+      });
+    },
+  );
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Operation types" })
+    .getByRole("button", { name: "Transforms" })
+    .click();
+  await page.getByLabel("Input source").selectOption("dataset");
+  await page
+    .getByRole("combobox", { name: "Dataset", exact: true })
+    .selectOption("dataset-1");
+  await page.getByLabel("Sort path (JSON Pointer, optional)").fill("/score");
+  await page.getByLabel("Descending order").check();
+  await page.getByLabel("Maximum records (optional)").fill("1");
+  await page.getByRole("button", { name: "Review selection" }).click();
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText("1 records · 1 Transform invocation");
+  await page.getByRole("button", { name: "Start selected Run" }).click();
+  await expect(
+    page.getByRole("article", { name: "Run dataflow" }),
+  ).toContainText("Dataset dataset- · v2 · 1 Records");
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toMatchObject({
+    datasetId: "dataset-1",
+    expectedVersion: 2,
+    expectedDefinitionRevision: 3,
+    sortPath: "/score",
+    descending: true,
+    limit: 1,
+  });
+  expect(writes[1]).toEqual(writes[0]);
+});
+
+test("a retained Transform output selection shows its source and selected values", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-output-selection",
+    name: "Output selection",
+    createdAt: "2026-10-08T00:00:00Z",
+    updatedAt: "2026-10-08T00:00:00Z",
+  };
+  const definition = {
+    id: "transform-consumer",
+    name: "Consume values",
+    source: "def transform(inputs, parameters): pass",
+    inputSelectors: { items: "/selection/values" },
+    outputSchema: { type: "object" },
+    runtime: "pyodide",
+    packageHash: "abc",
+    revision: 3,
+  };
+  const upstream = {
+    id: "transform-source-run",
+    definitionId: "transform-producer",
+    status: "succeeded",
+    definitionSnapshot: { name: "Produce values", source: "", revision: 1 },
+    inputs: {},
+    parameters: {},
+    inputHash: "inputhash",
+    sourceHash: "sourcehash",
+    packageHash: "abc",
+    runtime: "pyodide",
+    output: { items: [{ score: 1 }, { score: 3 }] },
+    outputManifest: {},
+    error: null,
+    initiation: { kind: "directUser", approval: "notRequired" },
+    limits: {},
+    createdAt: "2026-10-08T00:00:00Z",
+  };
+  const selection = {
+    sourceKind: "transformRun",
+    sourceRunId: upstream.id,
+    outputPath: "/items",
+    outputHash: "outputhash",
+    positions: [1],
+    values: [{ score: 3 }],
+    rule: { sortPath: "/score", limit: 1 },
+    selectedCount: 1,
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [definition] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    (route) => route.fulfill({ json: { items: [upstream], nextOffset: null } }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/output-selection-plan`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          selection,
+          selectedCount: 1,
+          invocationCount: 1,
+          outputLocation: "Transform Run output",
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/output-selection-runs`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        status: 201,
+        json: {
+          ...upstream,
+          id: "transform-downstream-run",
+          definitionId: definition.id,
+          definitionSnapshot: { ...definition, selection },
+          inputs: { items: [{ score: 3 }] },
+          output: { total: 3 },
+        },
+      });
+    },
+  );
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Operation types" })
+    .getByRole("button", { name: "Transforms" })
+    .click();
+  await page.getByLabel("Input source").selectOption("output");
+  await page
+    .getByRole("combobox", { name: "Transform Run", exact: true })
+    .selectOption(upstream.id);
+  await page.getByLabel("Output path (JSON Pointer)").fill("/items");
+  await page.getByLabel("Sort path (JSON Pointer, optional)").fill("/score");
+  await page.getByLabel("Maximum records (optional)").fill("1");
+  await page.getByRole("button", { name: "Review selection" }).click();
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText("Transform Run transfor → Transform Run output");
+  await page.getByRole("button", { name: "Start selected Run" }).click();
+  await expect(
+    page.getByRole("article", { name: "Run dataflow" }),
+  ).toContainText("Transform Run transfor · 1 values");
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toMatchObject({
+    sourceRunId: upstream.id,
+    outputPath: "/items",
+    expectedDefinitionRevision: 3,
+    sortPath: "/score",
+    limit: 1,
+  });
+  expect(writes[1]).toEqual(writes[0]);
+});
+
+test("a Batch Result Set selection keeps row lineage in the Transform Run", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-result-selection",
+    name: "Result selection",
+    createdAt: "2026-10-08T00:00:00Z",
+    updatedAt: "2026-10-08T00:00:00Z",
+  };
+  const definition = {
+    id: "transform-consumer",
+    name: "Consume results",
+    source: "def transform(inputs, parameters): pass",
+    inputSelectors: { items: "/selection/values" },
+    outputSchema: { type: "object" },
+    runtime: "pyodide",
+    packageHash: "abc",
+    revision: 3,
+  };
+  const selection = {
+    sourceKind: "resultSet",
+    batchRunId: "batch-source-run",
+    outputPath: "/score",
+    selectedCount: 1,
+    selectedRecords: [
+      { datasetRecordId: "row-1", position: 0, input: { beam: "A" }, value: 5 },
+    ],
+    rule: { limit: 1 },
+  };
+  const retained = {
+    id: "transform-result-run",
+    definitionId: definition.id,
+    status: "succeeded",
+    definitionSnapshot: { ...definition, selection },
+    inputs: { items: [5] },
+    parameters: {},
+    inputHash: "inputhash",
+    sourceHash: "sourcehash",
+    packageHash: "abc",
+    runtime: "pyodide",
+    output: { total: 5 },
+    outputManifest: {},
+    error: null,
+    initiation: { kind: "directUser", approval: "notRequired" },
+    limits: {},
+    createdAt: "2026-10-08T00:00:00Z",
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [definition] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
+  );
+  await page.route(`**/api/projects/${project.id}/batch-runs?**`, (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            id: "batch-source-run",
+            definitionId: "batch-definition-1",
+            definitionName: "Source results",
+            status: "partial",
+            archivedAt: null,
+            createdAt: "2026-10-08T00:00:00Z",
+            updatedAt: "2026-10-08T00:00:00Z",
+            initiatorSubject: "sam",
+            initiation: { kind: "directUser", approval: "notRequired" },
+            recordCount: 2,
+            succeededCount: 1,
+            failedCount: 1,
+          },
+        ],
+        nextOffset: null,
+      },
+    }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/result-set-selection-plan`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          selection,
+          selectedCount: 1,
+          invocationCount: 1,
+          outputLocation: "Transform Run output",
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/result-set-selection-runs`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        status: 201,
+        json: { id: retained.id, status: "succeeded" },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs/${retained.id}`,
+    (route) => route.fulfill({ json: retained }),
+  );
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Operation types" })
+    .getByRole("button", { name: "Transforms" })
+    .click();
+  await page.getByLabel("Input source").selectOption("resultSet");
+  await page
+    .getByRole("combobox", { name: "Batch Run Result Set" })
+    .selectOption("batch-source-run");
+  await page.getByLabel(/Value path in each result/).fill("/score");
+  await page.getByLabel("Maximum records (optional)").fill("1");
+  await page.getByRole("button", { name: "Review selection" }).click();
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText("Batch Result Set batch-so → Transform Run output");
+  await page.getByRole("button", { name: "Start selected Run" }).click();
+  await expect(
+    page.getByRole("article", { name: "Run dataflow" }),
+  ).toContainText("Batch Result Set batch-so · 1 values");
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toMatchObject({
+    sourceRunId: "batch-source-run",
+    outputPath: "/score",
+    expectedDefinitionRevision: 3,
+    limit: 1,
+  });
+  expect(writes[1]).toEqual(writes[0]);
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 
@@ -1522,6 +1957,153 @@ test.describe("at phone width", () => {
   });
 });
 
+test("approving a tool call resumes through the AG-UI transport contract", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "project-123",
+    name: "Design review",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "thread-123",
+    projectId: project.id,
+    title: "New Thread 1",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const resumeRequests: unknown[] = [];
+
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      if (input.resume) {
+        resumeRequests.push(input.resume);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: "assistant-123",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: "assistant-123",
+              delta: "Created [the file](sandbox:/project/example.md).",
+            },
+            { type: "TEXT_MESSAGE_END", messageId: "assistant-123" },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+        return;
+      }
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "tool-123",
+            toolCallName: "write_file",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "tool-123",
+            delta: '{"file_path":"/project/example.md"}',
+          },
+          { type: "TOOL_CALL_END", toolCallId: "tool-123" },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-123",
+                  reason: "tool_call",
+                  toolCallId: "tool-123",
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route("**/api/projects/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/agent")) {
+      await route.fallback();
+      return;
+    }
+    if (url.pathname === "/api/projects") {
+      await route.fulfill({ json: [project] });
+      return;
+    }
+    if (url.pathname.endsWith("/threads")) {
+      await route.fulfill({ json: [thread] });
+      return;
+    }
+    if (url.pathname.endsWith("/history")) {
+      await route.fulfill({ json: { interrupts: [], messages: [] } });
+      return;
+    }
+    if (url.pathname.endsWith("/runs")) {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    if (url.pathname.endsWith("/files")) {
+      await route.fulfill({
+        json: {
+          content: "# Example\n",
+          path: "/project/example.md",
+          version: 1,
+        },
+      });
+      return;
+    }
+    await route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message Agent Hub").fill("Create the file");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(page.getByText("Approve Project File change")).toBeVisible();
+  await expect(page.getByText("write_file", { exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText("write_file", { exact: true })).toBeHidden();
+
+  await expect
+    .poll(() => resumeRequests)
+    .toEqual([
+      [
+        {
+          interruptId: "interrupt-123",
+          payload: { approved: true },
+          status: "resolved",
+        },
+      ],
+    ]);
+  await page.getByRole("button", { name: "the file" }).click();
+  await expect(page.getByText("# Example")).toBeVisible();
+});
+
 test("pending edit_file shows a diff and proposed file in the right preview", async ({
   page,
 }) => {
@@ -1624,231 +2206,6 @@ test("pending edit_file shows a diff and proposed file in the right preview", as
     "# Revised\nKeep this line.",
   );
   await expect(card.getByRole("button", { name: "Approve" })).toBeVisible();
-});
-
-test("approving a tool call resumes through the AG-UI transport contract", async ({
-  page,
-}) => {
-  const project = {
-    createdAt: "2026-09-16T00:00:00.000Z",
-    id: "project-123",
-    name: "Design review",
-    updatedAt: "2026-09-16T00:00:00.000Z",
-  };
-  const thread = {
-    createdAt: "2026-09-16T00:00:00.000Z",
-    id: "thread-123",
-    projectId: project.id,
-    title: "New Thread 1",
-    updatedAt: "2026-09-16T00:00:00.000Z",
-  };
-  const resumeRequests: unknown[] = [];
-  let approved = false;
-
-  await page.route(
-    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
-    async (route) => {
-      const input = route.request().postDataJSON() as {
-        resume?: unknown[];
-        runId: string;
-      };
-      if (input.resume) {
-        resumeRequests.push(input.resume);
-        approved = true;
-        await route.fulfill({
-          contentType: "text/event-stream",
-          body: sse([
-            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
-            {
-              type: "TEXT_MESSAGE_START",
-              messageId: "assistant-123",
-              role: "assistant",
-            },
-            {
-              type: "TEXT_MESSAGE_CONTENT",
-              messageId: "assistant-123",
-              delta: "Created [the file](sandbox:/project/example.md).",
-            },
-            { type: "TEXT_MESSAGE_END", messageId: "assistant-123" },
-            {
-              type: "RUN_FINISHED",
-              threadId: thread.id,
-              runId: input.runId,
-              outcome: { type: "success" },
-            },
-          ]),
-        });
-        return;
-      }
-      await route.fulfill({
-        contentType: "text/event-stream",
-        body: sse([
-          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
-          {
-            type: "TOOL_CALL_START",
-            toolCallId: "tool-123",
-            toolCallName: "write_file",
-          },
-          {
-            type: "TOOL_CALL_ARGS",
-            toolCallId: "tool-123",
-            delta: JSON.stringify({
-              file_path: "/project/example.md",
-              content: "# Example\n",
-            }),
-          },
-          { type: "TOOL_CALL_END", toolCallId: "tool-123" },
-          {
-            type: "RUN_FINISHED",
-            threadId: thread.id,
-            runId: input.runId,
-            outcome: {
-              type: "interrupt",
-              interrupts: [
-                {
-                  id: "interrupt-123",
-                  reason: "tool_call",
-                  toolCallId: "tool-123",
-                },
-              ],
-            },
-          },
-        ]),
-      });
-    },
-  );
-  await page.route("**/api/projects", async (route) => {
-    await route.fulfill({ json: [project] });
-  });
-  await page.route("**/api/projects/**", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.pathname.endsWith("/agent")) {
-      await route.fallback();
-      return;
-    }
-    if (url.pathname === "/api/projects") {
-      await route.fulfill({ json: [project] });
-      return;
-    }
-    if (url.pathname.endsWith("/threads")) {
-      await route.fulfill({ json: [thread] });
-      return;
-    }
-    if (url.pathname.endsWith("/history")) {
-      await route.fulfill({
-        json: approved
-          ? {
-              approvals: [
-                {
-                  approved: true,
-                  decisionRunId: "resume-run",
-                  interruptId: "interrupt-123",
-                  resolution: null,
-                  sourceRunId: "initial-run",
-                  toolCallId: "tool-123",
-                },
-              ],
-              interrupts: [],
-              messages: [
-                {
-                  content: null,
-                  id: "assistant-tool",
-                  role: "assistant",
-                  toolCalls: [
-                    {
-                      function: {
-                        arguments: JSON.stringify({
-                          file_path: "/project/example.md",
-                          content: "# Example\n",
-                        }),
-                        name: "write_file",
-                      },
-                      id: "tool-123",
-                      type: "function",
-                    },
-                  ],
-                },
-                {
-                  content: "Saved /project/example.md",
-                  id: "result-tool",
-                  role: "tool",
-                  toolCallId: "tool-123",
-                },
-              ],
-            }
-          : { approvals: [], interrupts: [], messages: [] },
-      });
-      return;
-    }
-    if (url.pathname.endsWith("/runs")) {
-      await route.fulfill({ json: [] });
-      return;
-    }
-    if (url.pathname.endsWith("/files")) {
-      if (!approved) {
-        await route.fulfill({
-          json: { detail: "File not found" },
-          status: 404,
-        });
-        return;
-      }
-      await route.fulfill({
-        json: {
-          content: "# Example\n",
-          path: "/project/example.md",
-          version: 1,
-        },
-      });
-      return;
-    }
-    await route.fulfill({ json: {} });
-  });
-
-  await page.goto("/");
-  await page.getByLabel("Message Agent Hub").fill("Create the file");
-  await page.getByRole("button", { name: "Send" }).click();
-  await expect(page.getByText("Approve Project File change")).toBeVisible();
-  await page.getByText("Preview new file").click();
-  await expect(page.getByText("# Example", { exact: true })).toBeVisible();
-  await expect(page.getByText("write_file", { exact: true })).toBeHidden();
-  await page.getByRole("button", { name: "Approve" }).click();
-  await expect(page.getByText("write_file", { exact: true })).toBeHidden();
-
-  await expect
-    .poll(() => resumeRequests)
-    .toEqual([
-      [
-        {
-          interruptId: "interrupt-123",
-          payload: { approved: true },
-          status: "resolved",
-        },
-      ],
-    ]);
-  await page.getByRole("button", { name: "the file" }).click();
-  await expect(
-    page.getByRole("complementary").getByText("# Example"),
-  ).toBeVisible();
-  await page.reload();
-  await expect(
-    page.getByRole("region", { name: "Approve Project File change" }),
-  ).toContainText("Approved");
-  await expect(
-    page.getByRole("button", { name: "Open Project File" }),
-  ).toBeVisible();
-  const restoredCard = page.getByRole("region", {
-    name: "Approve Project File change",
-  });
-  await restoredCard.getByText("Review proposed change").click();
-  await expect(
-    restoredCard.getByText("# Example", { exact: true }),
-  ).toBeVisible();
-  await restoredCard.getByText("Decision provenance").click();
-  await expect(restoredCard).toContainText("initial-run");
-  await expect(restoredCard).toContainText("resume-run");
-  await expect(
-    page.getByRole("button", { name: "Approve", exact: true }),
-  ).toBeHidden();
 });
 
 test("rejected Project File approval remains a resolved card after reload", async ({

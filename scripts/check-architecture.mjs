@@ -1,10 +1,20 @@
 import { readFile, readdir } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 
+import { findDependencyCycle } from "./module-import-graph.mjs";
+
 const root = new URL("../", import.meta.url).pathname;
 const webRoot = join(root, "apps/web/src");
 const apiRoot = join(root, "apps/api/src/agent_hub_api");
 const violations = [];
+const apiDependencies = new Map();
+const webDependencies = new Map();
+
+function addDependency(graph, from, to) {
+  if (from === to) return;
+  if (!graph.has(from)) graph.set(from, new Set());
+  graph.get(from).add(to);
+}
 
 async function files(directory, extensions) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -72,6 +82,16 @@ function checkPythonModulePath(path, moduleName, importedPath) {
   const parts = importedPath.split(".");
   const importedModule = parts[2];
   const subpath = parts.slice(3);
+  if (!path.endsWith("_test.py")) {
+    addDependency(apiDependencies, moduleName, importedModule);
+  }
+  if (
+    moduleName === "input_selection" &&
+    importedModule !== moduleName &&
+    !path.endsWith("_test.py")
+  ) {
+    report(path, "Input Selection must not import source or execution Modules");
+  }
   if (importedModule === moduleName || !subpath.length) return;
 
   const kind = subpath[0].startsWith("_")
@@ -141,11 +161,22 @@ for (const path of await files(webRoot, new Set([".ts", ".tsx"]))) {
     /from\s+["']@\/modules\/([^/"']+)\/([^"']+)["']/g,
   )) {
     const [, importedModule, entryPoint] = match;
+    if (moduleName && !/\.(?:test|spec)\.[jt]sx?$/.test(path)) {
+      addDependency(webDependencies, moduleName, importedModule);
+    }
     if (importedModule !== moduleName && entryPoint !== "server") {
       report(
         path,
         `bypasses the package-root Interface of Module '${importedModule}'`,
       );
+    }
+  }
+
+  for (const match of source.matchAll(
+    /from\s+["']@\/modules\/([^/"']+)["']/g,
+  )) {
+    if (moduleName && !/\.(?:test|spec)\.[jt]sx?$/.test(path)) {
+      addDependency(webDependencies, moduleName, match[1]);
     }
   }
 }
@@ -168,6 +199,15 @@ for (const path of await files(apiRoot, new Set([".py"]))) {
   }
 
   if (moduleName) checkPythonModuleImports(path, source, moduleName);
+}
+
+for (const [label, dependencies] of [
+  ["API", apiDependencies],
+  ["web", webDependencies],
+]) {
+  const cycle = findDependencyCycle(dependencies);
+  if (cycle)
+    violations.push(`${label} Module import cycle: ${cycle.join(" -> ")}`);
 }
 
 if (violations.length) {

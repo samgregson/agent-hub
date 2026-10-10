@@ -42,6 +42,14 @@ def create_fixture_server() -> FastMCP:
             "source": "agent-hub-foundation-fixture",
         }
 
+    @mcp.tool(
+        name="render_template_value",
+        annotations={"readOnlyHint": True, "idempotentHint": True},
+    )
+    async def render_template_value(template: str, value: float) -> dict[str, str]:
+        """Replace a value marker in text; the Plugin owns this example operation."""
+        return {"rendered": template.replace("{{value}}", str(value))}
+
     @mcp.tool(name="create_status_artifact")
     async def create_status_artifact(title: str) -> dict[str, Any]:
         """Create a portable status Artifact draft; the client owns persistence."""
@@ -72,14 +80,6 @@ def create_fixture_server() -> FastMCP:
         replacement["payload"]["status"] = status
         replacement["artifact"]["summary"] = f"Fixture status is {status}."
         return replacement
-
-    @mcp.tool(
-        name="render_template_value",
-        annotations={"readOnlyHint": True, "idempotentHint": True},
-    )
-    async def render_template_value(template: str, value: float) -> dict[str, str]:
-        """Replace a value marker in text; the Plugin owns this example operation."""
-        return {"rendered": template.replace("{{value}}", str(value))}
 
     @mcp.resource(
         uri=FIXTURE_APP_RESOURCE_URI,

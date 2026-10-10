@@ -17,10 +17,10 @@ async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
         tools = await client.list_tools()
         assert {tool.name for tool in tools} == {
             FIXTURE_TOOL_NAME,
+            "render_template_value",
             "create_status_artifact",
             "validate_status_artifact",
             "set_status_artifact_status",
-            "render_template_value",
         }
         fixture_tool = next(tool for tool in tools if tool.name == FIXTURE_TOOL_NAME)
         assert fixture_tool.annotations is not None

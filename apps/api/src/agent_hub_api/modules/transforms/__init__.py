@@ -1,6 +1,10 @@
 from agent_hub_api.modules.transforms._application import (
+    DatasetSelection,
+    DatasetSelectionPlan,
     MemoryTransformRunStore,
     MemoryTransformStore,
+    OutputSelection,
+    OutputSelectionPlan,
     TransformDefinition,
     TransformExecutionError,
     TransformInitiation,
@@ -17,6 +21,10 @@ from agent_hub_api.modules.transforms._application import (
 from agent_hub_api.modules.transforms._http import create_transform_router
 
 __all__ = [
+    "DatasetSelection",
+    "DatasetSelectionPlan",
+    "OutputSelection",
+    "OutputSelectionPlan",
     "MemoryTransformStore",
     "MemoryTransformRunStore",
     "TransformDefinition",
