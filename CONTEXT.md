@@ -58,6 +58,10 @@ _Avoid_: Dataset, untraceable copied JSON, execution mode
 One bounded host-orchestrated invocation of a Transform Definition against an immutable selected input snapshot. The selected input may be one value or a collection. The Run records its runtime, inputs, outputs, provenance, and outcome. Repeated invocation over members of a selection is Batch execution.
 _Avoid_: Browser preview, Project File, Artifact
 
+**Transform execution mode**:
+The choice to invoke one Transform Definition once for all captured Dataset Records or independently for each Record. It changes invocation cardinality and the shape of retained results, not the identity of the Transform Definition.
+_Avoid_: Separate kind of Transform, preview setting
+
 **Project File**:
 A durable file in the Project Virtual Filesystem. Ordinary files are working material; registered typed files such as Datasets have their own identity and write rules. Files can be linked and previewed without becoming Artifacts; Artifact elevation remains explicit and reviewable.
 _Avoid_: Artifact, source, local file
