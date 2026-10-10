@@ -2,6 +2,7 @@
 
 import {
   FormEvent,
+  useCallback,
   useEffect,
   useReducer,
   useRef,
@@ -72,6 +73,16 @@ export function ProjectWorkspace() {
     workspaceReducer,
     undefined,
     createWorkspaceState,
+  );
+  const selectTransformDefinition = useCallback(
+    (definitionId: string | null) =>
+      dispatch({ definitionId, type: "selectTransformDefinition" }),
+    [],
+  );
+  const selectTransformRunScope = useCallback(
+    (runScope: string) =>
+      dispatch({ runScope, type: "selectTransformRunScope" }),
+    [],
   );
   const [threadsByProject, setThreadsByProject] = useState<
     Record<string, Thread[]>
@@ -430,13 +441,19 @@ export function ProjectWorkspace() {
           onSelectOperationKind={(operationKind) =>
             dispatch({ operationKind, type: "selectOperationKind" })
           }
+          onSelectTransformDefinition={selectTransformDefinition}
+          onSelectTransformRunScope={selectTransformRunScope}
           onSelectThread={(threadId) =>
             dispatch({ threadId, type: "selectThread" })
           }
           project={selectedProject}
           selectedActivity={selectedActivity}
           selectedThreadId={selectedThread?.id}
+          selectedTransformDefinitionId={
+            selectedWorkspace?.selectedTransformDefinitionId ?? null
+          }
           threads={selectedThreads}
+          transformRunScope={selectedWorkspace?.transformRunScope ?? null}
         />
       </aside>
 
@@ -499,6 +516,8 @@ export function ProjectWorkspace() {
                 onSelectOperationKind={(operationKind) =>
                   dispatch({ operationKind, type: "selectOperationKind" })
                 }
+                onSelectTransformDefinition={selectTransformDefinition}
+                onSelectTransformRunScope={selectTransformRunScope}
                 onSelectThread={(threadId) => {
                   dispatch({ threadId, type: "selectThread" });
                   setIsMobileNavigationOpen(false);
@@ -506,7 +525,11 @@ export function ProjectWorkspace() {
                 project={selectedProject}
                 selectedActivity={selectedActivity}
                 selectedThreadId={selectedThread?.id}
+                selectedTransformDefinitionId={
+                  selectedWorkspace?.selectedTransformDefinitionId ?? null
+                }
                 threads={selectedThreads}
+                transformRunScope={selectedWorkspace?.transformRunScope ?? null}
               />
             </div>
           </aside>
@@ -623,12 +646,16 @@ interface ProjectNavigatorProps {
   onOpenArtifact: (artifactId: string) => void;
   onOpenProjectFile: (path: string) => void;
   onSelectOperationKind: (operationKind: OperationKind) => void;
+  onSelectTransformDefinition: (definitionId: string | null) => void;
+  onSelectTransformRunScope: (runScope: string) => void;
   onRenameThread: (thread: Thread) => void;
   onSelectThread: (threadId: string) => void;
   project: Project | undefined;
   selectedActivity: ActivityView;
   selectedThreadId: string | undefined;
+  selectedTransformDefinitionId: string | null;
   threads: Thread[];
+  transformRunScope: string | null;
 }
 
 function ProjectNavigator({
@@ -639,12 +666,16 @@ function ProjectNavigator({
   onOpenArtifact,
   onOpenProjectFile,
   onSelectOperationKind,
+  onSelectTransformDefinition,
+  onSelectTransformRunScope,
   onRenameThread,
   onSelectThread,
   project,
   selectedActivity,
   selectedThreadId,
+  selectedTransformDefinitionId,
   threads,
+  transformRunScope,
 }: ProjectNavigatorProps) {
   return (
     <>
@@ -696,8 +727,12 @@ function ProjectNavigator({
       ) : selectedActivity === "operations" && project ? (
         <OperationsCatalog
           onSelectKind={onSelectOperationKind}
+          onSelectTransformDefinition={onSelectTransformDefinition}
+          onSelectTransformRunScope={onSelectTransformRunScope}
           operationKind={operationKind}
           projectId={project.id}
+          selectedTransformDefinitionId={selectedTransformDefinitionId}
+          transformRunScope={transformRunScope}
         />
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />
@@ -714,12 +749,20 @@ function ProjectNavigator({
 
 function OperationsCatalog({
   onSelectKind,
+  onSelectTransformDefinition,
+  onSelectTransformRunScope,
   operationKind,
   projectId,
+  selectedTransformDefinitionId,
+  transformRunScope,
 }: {
   onSelectKind: (operationKind: OperationKind) => void;
+  onSelectTransformDefinition: (definitionId: string | null) => void;
+  onSelectTransformRunScope: (runScope: string) => void;
   operationKind: OperationKind;
   projectId: string;
+  selectedTransformDefinitionId: string | null;
+  transformRunScope: string | null;
 }) {
   return (
     <>
@@ -746,7 +789,14 @@ function OperationsCatalog({
           projectId={projectId}
         />
       ) : (
-        <TransformCatalog key={projectId} projectId={projectId} />
+        <TransformCatalog
+          key={projectId}
+          onSelectDefinition={onSelectTransformDefinition}
+          onSelectRunScope={onSelectTransformRunScope}
+          projectId={projectId}
+          runScope={transformRunScope}
+          selectedDefinitionId={selectedTransformDefinitionId}
+        />
       )}
     </>
   );

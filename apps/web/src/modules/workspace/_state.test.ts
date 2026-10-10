@@ -162,3 +162,45 @@ test("Operations choice is restored per Project", () => {
   assert.equal(state.projects["project-a"].activity, "operations");
   assert.equal(state.projects["project-a"].operationKind, "transforms");
 });
+
+test("Transform navigation selection survives a Project drawer remount", () => {
+  let state = workspaceReducer(createWorkspaceState(), {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  state = workspaceReducer(state, {
+    definitionId: "transform-b",
+    type: "selectTransformDefinition",
+  });
+  state = workspaceReducer(state, {
+    runScope: "transform-c",
+    type: "selectTransformRunScope",
+  });
+  assert.equal(
+    state.projects["project-a"].selectedTransformDefinitionId,
+    "transform-c",
+  );
+  state = workspaceReducer(state, {
+    runScope: "all",
+    type: "selectTransformRunScope",
+  });
+  assert.equal(
+    state.projects["project-a"].selectedTransformDefinitionId,
+    "transform-c",
+  );
+  assert.equal(state.projects["project-a"].transformRunScope, "all");
+  state = workspaceReducer(state, {
+    projectId: "project-b",
+    type: "selectProject",
+  });
+  assert.equal(state.projects["project-b"].selectedTransformDefinitionId, null);
+  state = workspaceReducer(state, {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  assert.equal(
+    state.projects["project-a"].selectedTransformDefinitionId,
+    "transform-c",
+  );
+  assert.equal(state.projects["project-a"].transformRunScope, "all");
+});

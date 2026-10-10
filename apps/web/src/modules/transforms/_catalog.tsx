@@ -85,14 +85,24 @@ function shortId(value: string): string {
   return value.slice(0, 8);
 }
 
-export function TransformCatalog({ projectId }: { projectId: string }) {
+export function TransformCatalog({
+  onSelectDefinition,
+  onSelectRunScope,
+  projectId,
+  runScope,
+  selectedDefinitionId,
+}: {
+  onSelectDefinition: (definitionId: string | null) => void;
+  onSelectRunScope: (runScope: string) => void;
+  projectId: string;
+  runScope: string | null;
+  selectedDefinitionId: string | null;
+}) {
   const root = `/api/projects/${encodeURIComponent(projectId)}/transforms`;
   const [definitions, setDefinitions] = useState<Definition[] | null>(null);
-  const [runs, setRuns] = useState<Run[] | null>(null);
-  const [nextOffset, setNextOffset] = useState<number | null>(null);
-  const [selectedDefinitionId, setSelectedDefinitionId] = useState<
-    string | null
-  >(null);
+  const [runPage, setRunPage] = useState<(RunPage & { scope: string }) | null>(
+    null,
+  );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [recordJson, setRecordJson] = useState('{"load": 3}');
@@ -106,28 +116,21 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
   const selectedDefinition = definitions?.find(
     (item) => item.id === selectedDefinitionId,
   );
+  const visibleRunPage = runPage?.scope === runScope ? runPage : null;
+  const runs = visibleRunPage?.items ?? null;
+  const nextOffset = visibleRunPage?.nextOffset ?? null;
   const selectedRun = runs?.find((item) => item.id === selectedRunId);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([
-      fetch(root, { cache: "no-store" }),
-      fetch(`${root}/runs?limit=20`, { cache: "no-store" }),
-    ])
-      .then(async ([definitionResponse, runResponse]) => {
-        if (!definitionResponse.ok || !runResponse.ok) {
+    void fetch(root, { cache: "no-store" })
+      .then(async (definitionResponse) => {
+        if (!definitionResponse.ok) {
           throw new Error("Transforms could not be loaded.");
         }
-        const [available, page] = await Promise.all([
-          definitionResponse.json() as Promise<Definition[]>,
-          runResponse.json() as Promise<RunPage>,
-        ]);
+        const available = (await definitionResponse.json()) as Definition[];
         if (!active) return;
         setDefinitions(available);
-        setRuns(page.items);
-        setNextOffset(page.nextOffset);
-        setSelectedDefinitionId(available[0]?.id ?? null);
-        setSelectedRunId(page.items[0]?.id ?? null);
       })
       .catch((cause: unknown) => {
         if (active)
@@ -141,6 +144,49 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
       active = false;
     };
   }, [root]);
+
+  useEffect(() => {
+    if (definitions === null) return;
+    if (runScope === null) {
+      onSelectDefinition(definitions[0]?.id ?? null);
+    } else if (
+      selectedDefinitionId !== null &&
+      !definitions.some((item) => item.id === selectedDefinitionId)
+    ) {
+      onSelectDefinition(null);
+    }
+  }, [definitions, onSelectDefinition, runScope, selectedDefinitionId]);
+
+  useEffect(() => {
+    if (runScope === null) return;
+    let active = true;
+    const query = new URLSearchParams({ limit: "20" });
+    if (runScope !== "all") query.set("definitionId", runScope);
+    void fetch(`${root}/runs?${query}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Runs could not be loaded.");
+        return (await response.json()) as RunPage;
+      })
+      .then((page) => {
+        if (!active) return;
+        setRunPage({ ...page, scope: runScope });
+        setSelectedRunId(page.items[0]?.id ?? null);
+        setError(null);
+      })
+      .catch((cause: unknown) => {
+        if (active) {
+          setRunPage({ items: [], nextOffset: null, scope: runScope });
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Runs could not be loaded.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [root, runScope]);
 
   async function saveDefinition(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -183,7 +229,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
         ...(current ?? []).filter((item) => item.id !== saved.id),
         saved,
       ]);
-      setSelectedDefinitionId(saved.id);
+      onSelectDefinition(saved.id);
       setIsEditing(false);
       setPreview(null);
       setNotice(`${saved.name} saved as revision ${saved.revision}.`);
@@ -221,7 +267,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
         (current) =>
           current?.filter((item) => item.id !== selectedDefinition.id) ?? [],
       );
-      setSelectedDefinitionId(null);
+      onSelectDefinition(null);
       setPreview(null);
       setNotice("Definition deleted. Its Runs remain available below.");
     } catch (cause) {
@@ -261,10 +307,20 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
         setPreview((await response.json()) as Preview);
       } else {
         const run = (await response.json()) as Run;
-        setRuns((current) => [
-          run,
-          ...(current ?? []).filter((item) => item.id !== run.id),
-        ]);
+        onSelectRunScope(selectedDefinition.id);
+        setRunPage((current) => ({
+          items: [
+            run,
+            ...(current?.scope === selectedDefinition.id
+              ? current.items.filter((item) => item.id !== run.id)
+              : []),
+          ],
+          nextOffset:
+            current?.scope === selectedDefinition.id
+              ? current.nextOffset
+              : null,
+          scope: selectedDefinition.id,
+        }));
         setSelectedRunId(run.id);
         setPreview(null);
         setNotice(`Run ${shortId(run.id)} ${run.status}.`);
@@ -281,21 +337,32 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
   }
 
   async function loadMoreRuns() {
-    if (nextOffset === null) return;
+    if (nextOffset === null || runScope === null) return;
     setBusy("more");
     setError(null);
     try {
-      const response = await fetch(
-        `${root}/runs?limit=20&offset=${nextOffset}`,
-        { cache: "no-store" },
-      );
+      const query = new URLSearchParams({
+        limit: "20",
+        offset: String(nextOffset),
+      });
+      if (runScope !== "all") query.set("definitionId", runScope);
+      const response = await fetch(`${root}/runs?${query}`, {
+        cache: "no-store",
+      });
       if (!response.ok)
         throw new Error(
           await responseError(response, "Runs could not be loaded."),
         );
       const page = (await response.json()) as RunPage;
-      setRuns((current) => [...(current ?? []), ...page.items]);
-      setNextOffset(page.nextOffset);
+      setRunPage((current) =>
+        current?.scope === runScope
+          ? {
+              items: [...current.items, ...page.items],
+              nextOffset: page.nextOffset,
+              scope: runScope,
+            }
+          : current,
+      );
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Runs could not be loaded.",
@@ -380,7 +447,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
         </div>
         <Button
           onClick={() => {
-            setSelectedDefinitionId(null);
+            onSelectDefinition(null);
             setIsEditing(true);
             setPreview(null);
           }}
@@ -416,7 +483,7 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
                   aria-pressed={selectedDefinitionId === item.id}
                   className={styles.definitionButton}
                   onClick={() => {
-                    setSelectedDefinitionId(item.id);
+                    onSelectDefinition(item.id);
                     setIsEditing(false);
                     setPreview(null);
                   }}
@@ -586,13 +653,32 @@ export function TransformCatalog({ projectId }: { projectId: string }) {
       <section aria-label="Retained Runs" className={styles.runs}>
         <div className={styles.sectionHeading}>
           <div>
-            <h2>Retained Runs</h2>
+            <h2>
+              {runScope === null || runScope === "all"
+                ? "Retained Runs"
+                : `Runs for ${definitions?.find((item) => item.id === runScope)?.name ?? "Transform"}`}
+            </h2>
             <p>
               Runs and their results remain available after a Definition changes
               or is deleted.
             </p>
           </div>
+          <Field label="Run history">
+            <select
+              aria-label="Transform Run scope"
+              onChange={(event) => onSelectRunScope(event.target.value)}
+              value={runScope ?? "all"}
+            >
+              <option value="all">All retained Runs</option>
+              {definitions?.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </Field>
         </div>
+        {runs === null ? <p role="status">Loading Runs…</p> : null}
         {runs?.length === 0 ? (
           <p>No Runs yet. Start one from a Definition above.</p>
         ) : null}

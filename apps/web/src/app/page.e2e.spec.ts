@@ -583,6 +583,142 @@ test("Batch Runs retain their Definition context and can be opened from it", asy
   );
 });
 
+test("Transform Definition selection scopes retained Runs while historical Runs remain reachable", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-10T00:00:00.000Z",
+    id: "project-transform-context",
+    name: "Transform review",
+    updatedAt: "2026-10-10T00:00:00.000Z",
+  };
+  const definitions = ["First transform", "Second transform"].map(
+    (name, index) => ({
+      id: `definition-${index}`,
+      name,
+      source: "def transform(inputs, parameters): return inputs",
+      inputSelectors: {},
+      outputSchema: { type: "object" },
+      runtime: "pyodide",
+      packageHash: null,
+      revision: 1,
+    }),
+  );
+  const runs = [
+    ...definitions.map((definition, index) => ({
+      id: `run-${index}`,
+      definitionId: definition.id,
+      definitionSnapshot: {
+        name: definition.name,
+        source: definition.source,
+        revision: 1,
+      },
+    })),
+    {
+      id: "run-deleted",
+      definitionId: "deleted-definition",
+      definitionSnapshot: {
+        name: "Deleted transform",
+        source: "",
+        revision: 1,
+      },
+    },
+  ].map((run) => ({
+    ...run,
+    status: "succeeded",
+    inputs: { load: 3 },
+    parameters: {},
+    inputHash: "12345678",
+    sourceHash: "12345678",
+    packageHash: null,
+    runtime: "pyodide",
+    output: { value: 3 },
+    outputManifest: {},
+    error: null,
+    initiation: { kind: "directUser", approval: "notRequired" },
+    limits: {},
+    createdAt: "2026-10-10T00:00:00.000Z",
+  }));
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: definitions }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    (route) => {
+      const definitionId = new URL(route.request().url()).searchParams.get(
+        "definitionId",
+      );
+      return route.fulfill({
+        json: {
+          items: runs.filter(
+            (run) => !definitionId || run.definitionId === definitionId,
+          ),
+          nextOffset: null,
+        },
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Operation types" })
+    .getByRole("button", { name: "Transforms" })
+    .click();
+  const retained = page.getByRole("region", { name: "Retained Runs" });
+  const runList = retained.locator("ul").first();
+  await expect(runList).toContainText("First transform");
+  await expect(runList).not.toContainText("Deleted transform");
+  await page
+    .getByRole("button", { name: /Second transform Revision 1/ })
+    .click();
+  await expect(page.getByLabel("Transform Run scope")).toHaveValue(
+    "definition-1",
+  );
+  await expect(runList).toContainText("Second transform");
+  await expect(runList).not.toContainText("First transform");
+  await expect(runList).not.toContainText("Deleted transform");
+  await expect(page.getByLabel("Run dataflow")).toContainText(
+    "Second transform",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel("Transform Run scope")).toHaveValue(
+    "definition-1",
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  const phoneDrawer = page.getByRole("dialog", { name: "Project navigation" });
+  await phoneDrawer
+    .getByRole("button", { name: /Second transform Revision 1/ })
+    .click();
+  const phoneScope = phoneDrawer.getByLabel("Transform Run scope");
+  await expect(phoneScope).toHaveValue("definition-1");
+  await phoneDrawer
+    .getByRole("button", { name: "Close Project navigation" })
+    .click();
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  await expect(phoneDrawer.getByLabel("Transform Run scope")).toHaveValue(
+    "definition-1",
+  );
+  await phoneScope.selectOption("all");
+  await expect(
+    phoneDrawer.getByRole("region", { name: "Retained Runs" }),
+  ).toContainText("Deleted transform");
+});
+
 test("Library opens a registered Dataset in its table viewer and saves through Dataset commands", async ({
   page,
 }) => {
