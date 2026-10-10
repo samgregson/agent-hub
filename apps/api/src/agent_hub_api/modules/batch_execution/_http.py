@@ -45,6 +45,7 @@ class BatchRunResponse(_Model):
     created_at: str
     id: str
     definition_id: str
+    definition_name: str | None
     initiator_subject: str | None
     initiation: dict[str, object]
     status: str
@@ -77,11 +78,13 @@ class ResultSummaryResponse(_Model):
 
 
 def _response(run: BatchRun) -> BatchRunResponse:
+    definition_name = run.definition_snapshot.get("definitionName")
     return BatchRunResponse(
         archived_at=run.archived_at.isoformat() if run.archived_at else None,
         created_at=run.created_at.isoformat(),
         id=run.id,
         definition_id=run.definition_id,
+        definition_name=definition_name if isinstance(definition_name, str) else None,
         initiator_subject=run.initiator_subject,
         initiation=dict(run.initiation),
         status=run.status.value,

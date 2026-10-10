@@ -475,6 +475,114 @@ test("Operations keeps Batch and Transform actions under one Project destination
   ).toHaveAttribute("aria-pressed", "true");
 });
 
+test("Batch Runs retain their Definition context and can be opened from it", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-10T00:00:00.000Z",
+    id: "project-batch-context",
+    name: "Design review",
+    updatedAt: "2026-10-10T00:00:00.000Z",
+  };
+  const definitions = [
+    {
+      id: "definition-a",
+      name: "Load check",
+      datasetId: "dataset-a",
+      datasetAvailable: true,
+      pluginId: "calculator",
+      toolName: "calculate",
+      transformDefinitionId: null,
+    },
+    {
+      id: "definition-b",
+      name: "Stress check",
+      datasetId: "dataset-a",
+      datasetAvailable: true,
+      pluginId: "calculator",
+      toolName: "calculate",
+      transformDefinitionId: null,
+    },
+  ];
+  const runs = definitions.map((definition, index) => ({
+    archivedAt: null,
+    createdAt: "2026-10-10T00:00:00.000Z",
+    definitionId: definition.id,
+    definitionName: definition.name,
+    id: `run-${index}`,
+    initiatorSubject: "sam",
+    initiation: { kind: "directUser", approval: "notRequired" },
+    status: "succeeded",
+    recordCount: 1,
+    succeededCount: 1,
+    failedCount: 0,
+    updatedAt: "2026-10-10T00:00:00.000Z",
+  }));
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/batch-definitions`, (route) =>
+    route.fulfill({ json: definitions }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/batch-runs?**`, (route) => {
+    const definitionId = new URL(route.request().url()).searchParams.get(
+      "definition_id",
+    );
+    return route.fulfill({
+      json: {
+        items: runs.filter(
+          (run) => !definitionId || run.definitionId === definitionId,
+        ),
+        nextOffset: null,
+      },
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/batch-runs/*/results?**`,
+    (route) =>
+      route.fulfill({
+        json: {
+          items: [],
+          nextOffset: null,
+          summary: { totalCount: 1, succeededCount: 1, failedCount: 0 },
+        },
+      }),
+  );
+
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations" })
+    .click();
+  const runsSection = page.getByRole("region", { name: "Recent Batch Runs" });
+  await expect(runsSection).toContainText("Load check");
+  await expect(runsSection).toContainText("Stress check");
+  await page
+    .getByRole("button", { name: "View runs for Stress check" })
+    .click();
+  await expect(page.getByLabel("Batch Run definition")).toHaveValue(
+    "definition-b",
+  );
+  await expect(
+    runsSection.getByRole("button", { name: "View Batch Run run-1" }),
+  ).toBeVisible();
+  await expect(
+    runsSection.getByRole("button", { name: "View Batch Run run-0" }),
+  ).toHaveCount(0);
+  await expect(page.getByLabel("Batch Run results")).toContainText(
+    "Stress check",
+  );
+});
+
 test("Library opens a registered Dataset in its table viewer and saves through Dataset commands", async ({
   page,
 }) => {

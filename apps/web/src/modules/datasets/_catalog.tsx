@@ -37,6 +37,7 @@ interface BatchRun {
   archivedAt: string | null;
   createdAt: string;
   definitionId: string;
+  definitionName?: string | null;
   id: string;
   initiatorSubject: string | null;
   initiation: { kind: string; approval: string };
@@ -105,6 +106,11 @@ export function DatasetCatalog({
   const selectedRunStatus = selectedRun?.status;
   const visibleResults =
     resultPage?.runId === selectedRunId ? resultPage : null;
+  const nameForRun = (run: BatchRun) =>
+    run.definitionName ??
+    definitions?.find((definition) => definition.id === run.definitionId)
+      ?.name ??
+    `Definition ${run.definitionId.slice(0, 8)}`;
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
 
   useEffect(() => {
@@ -665,6 +671,14 @@ export function DatasetCatalog({
                 }${definition.datasetAvailable ? "" : " · Dataset unavailable"}`}
                 id={`batch-definition-${definition.id}`}
                 key={definition.id}
+                onOpen={() => {
+                  setRunDefinition(definition.id);
+                  document.getElementById("batch-runs")?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  });
+                }}
+                openLabel={`View runs for ${definition.name}`}
                 title={definition.name}
               />
             ))}
@@ -674,8 +688,13 @@ export function DatasetCatalog({
             <section
               aria-label="Recent Batch Runs"
               className={styles.runSection}
+              id="batch-runs"
             >
-              <h2>Recent Batch Runs</h2>
+              <h2>
+                {runDefinition === "all"
+                  ? "Recent Batch Runs"
+                  : `Runs for ${definitions?.find((definition) => definition.id === runDefinition)?.name ?? "Batch Definition"}`}
+              </h2>
               <div className={styles.runFilters}>
                 <Field label="Batch Definition">
                   <select
@@ -722,7 +741,7 @@ export function DatasetCatalog({
                         Archive run
                       </Button>
                     }
-                    details={runSummary(run)}
+                    details={`${nameForRun(run)} · ${runSummary(run)}`}
                     key={run.id}
                     onOpen={() => setSelectedRun(run)}
                     openLabel={`View Batch Run ${run.id}`}
@@ -743,6 +762,7 @@ export function DatasetCatalog({
           {selectedRun ? (
             <section aria-label="Batch Run results" className={styles.detail}>
               <h2>Batch Run results</h2>
+              <p>From Batch Definition: {nameForRun(selectedRun)}</p>
               <p>{runSummary(selectedRun)}</p>
               <p>
                 {selectedRun.initiation.kind === "agentRun"

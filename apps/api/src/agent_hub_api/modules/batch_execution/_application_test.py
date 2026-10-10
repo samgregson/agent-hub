@@ -153,6 +153,7 @@ async def test_transform_batch_uses_captured_definition_and_first_record_guard()
         {"result": 6},
     ]
     assert run.definition_snapshot["transformDefinitionId"] == transform.id
+    assert run.definition_snapshot["definitionName"] == "Double loads"
     assert run.definition_snapshot["sourceHash"] == transform.source_hash
     assert run.definition_snapshot["packageHash"] == transform.package_hash
 
@@ -419,6 +420,7 @@ async def test_result_set_http_query_returns_a_filtered_page_and_summary() -> No
     assert run_response.status_code == 200
     assert "records" not in run_response.json()
     assert run_response.json()["recordCount"] == 5
+    assert run_response.json()["definitionName"] == "Double loads"
     assert run_response.json()["succeededCount"] == 5
     assert run_response.json()["initiatorSubject"] == "sam"
     assert run_response.json()["initiation"] == {

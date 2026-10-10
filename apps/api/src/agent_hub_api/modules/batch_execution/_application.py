@@ -543,6 +543,7 @@ class BatchExecutionModule:
                 raise BatchRunNotFound from error
             return {
                 "datasetId": definition.dataset_id,
+                "definitionName": definition.name,
                 **transform_snapshot,
             }
         if definition.plugin_id is None or definition.tool_name is None:
@@ -951,6 +952,7 @@ def _snapshot(
 ) -> Mapping[str, object]:
     return {
         "datasetId": definition.dataset_id,
+        "definitionName": definition.name,
         "pluginId": definition.plugin_id,
         "toolName": definition.tool_name,
         "argumentMappings": definition.argument_mappings,
