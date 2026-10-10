@@ -1332,7 +1332,7 @@ test("selection planning and runs reach the Project API through the browser", as
   }
 });
 
-test("a reviewed Dataset selection starts one captured Transform Run", async ({
+test("a reviewed Dataset Transform run offers one invocation or per-Record execution", async ({
   page,
 }) => {
   const project = {
@@ -1352,13 +1352,17 @@ test("a reviewed Dataset selection starts one captured Transform Run", async ({
     revision: 3,
   };
   const selection = {
+    sourceKind: "dataset",
     datasetId: "dataset-1",
     datasetVersion: 2,
     datasetPath: "/.datasets/dataset-1.json",
-    recordIds: ["record-2"],
-    records: [{ id: "record-2", value: { score: 3 } }],
-    rule: { sortPath: "/score", descending: true, limit: 1 },
-    selectedCount: 1,
+    recordIds: ["record-1", "record-2"],
+    records: [
+      { id: "record-1", value: { score: 1 } },
+      { id: "record-2", value: { score: 3 } },
+    ],
+    rule: {},
+    selectedCount: 2,
     invocationCount: 1,
   };
   const writes: Array<Record<string, unknown>> = [];
@@ -1381,25 +1385,57 @@ test("a reviewed Dataset selection starts one captured Transform Run", async ({
     (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
   );
   await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/selection-plan`,
+    `**/api/projects/${project.id}/transforms/${definition.id}/dataset-runs/plan`,
     (route) => {
       writes.push(route.request().postDataJSON() as Record<string, unknown>);
       return route.fulfill({
         json: {
-          selection,
-          selectedCount: 1,
-          invocationCount: 1,
-          outputLocation: "Transform Run output",
+          datasetId: "dataset-1",
+          datasetVersion: 2,
+          transformDefinitionId: definition.id,
+          transformRevision: 3,
+          recordIds: selection.recordIds,
+          mode: (route.request().postDataJSON() as { mode: string }).mode,
+          invocationCount:
+            (route.request().postDataJSON() as { mode: string }).mode ===
+            "dataset"
+              ? 1
+              : 2,
+          outputKind:
+            (route.request().postDataJSON() as { mode: string }).mode ===
+            "dataset"
+              ? "transformRun"
+              : "batchResultSet",
         },
       });
     },
   );
   await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/selection-runs`,
+    `**/api/projects/${project.id}/transforms/${definition.id}/dataset-runs`,
     (route) => {
       writes.push(route.request().postDataJSON() as Record<string, unknown>);
       return route.fulfill({
         status: 201,
+        json:
+          (route.request().postDataJSON() as { mode: string }).mode ===
+          "dataset"
+            ? {
+                id: "run-selection",
+                status: "succeeded",
+                outputKind: "transformRun",
+              }
+            : {
+                id: "batch-selection",
+                status: "queued",
+                outputKind: "batchResultSet",
+              },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs/run-selection`,
+    (route) =>
+      route.fulfill({
         json: {
           id: "run-selection",
           definitionId: definition.id,
@@ -1411,13 +1447,13 @@ test("a reviewed Dataset selection starts one captured Transform Run", async ({
             revision: 3,
             selection,
           },
-          inputs: { items: [{ score: 3 }] },
+          inputs: { items: [{ score: 1 }, { score: 3 }] },
           parameters: {},
           inputHash: "inputhash",
           sourceHash: "sourcehash",
           packageHash: "abc",
           runtime: "pyodide",
-          output: { total: 3 },
+          output: { total: 4 },
           outputManifest: {},
           error: null,
           initiation: {
@@ -1429,8 +1465,7 @@ test("a reviewed Dataset selection starts one captured Transform Run", async ({
           limits: {},
           createdAt: "2026-10-08T00:00:00Z",
         },
-      });
-    },
+      }),
   );
   await page.goto("/");
   await page
@@ -1445,27 +1480,47 @@ test("a reviewed Dataset selection starts one captured Transform Run", async ({
   await page
     .getByRole("combobox", { name: "Dataset", exact: true })
     .selectOption("dataset-1");
-  await page.getByLabel("Sort path (JSON Pointer, optional)").fill("/score");
-  await page.getByLabel("Descending order").check();
-  await page.getByLabel("Maximum records (optional)").fill("1");
-  await page.getByRole("button", { name: "Review selection" }).click();
+  await page.getByRole("button", { name: "Review Run" }).click();
   await expect(
-    page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText("1 records · 1 Transform invocation");
-  await page.getByRole("button", { name: "Start selected Run" }).click();
+    page.getByRole("region", { name: "Dataset Run plan" }),
+  ).toContainText("2 Records · 1 invocation");
+  await page.getByRole("button", { name: "Start Run" }).click();
   await expect(
     page.getByRole("article", { name: "Run dataflow" }),
-  ).toContainText("Dataset dataset- · v2 · 1 Records");
+  ).toContainText("Dataset dataset- · v2 · 2 Records");
   expect(writes).toHaveLength(2);
   expect(writes[0]).toMatchObject({
     datasetId: "dataset-1",
-    expectedVersion: 2,
-    expectedDefinitionRevision: 3,
-    sortPath: "/score",
-    descending: true,
-    limit: 1,
+    mode: "dataset",
+    parameters: {},
   });
-  expect(writes[1]).toEqual(writes[0]);
+  expect(writes[1]).toMatchObject({
+    datasetId: "dataset-1",
+    mode: "dataset",
+    expectedDatasetVersion: 2,
+    expectedTransformRevision: 3,
+  });
+  await page
+    .getByRole("combobox", { name: "Execution mode" })
+    .selectOption("perRecord");
+  await page.getByRole("button", { name: "Review Run" }).click();
+  await expect(
+    page.getByRole("region", { name: "Dataset Run plan" }),
+  ).toContainText("2 Records · 2 invocations");
+  await page.getByRole("button", { name: "Start Run" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Batch Run batch-se queued",
+  );
+  expect(writes[2]).toMatchObject({
+    datasetId: "dataset-1",
+    mode: "perRecord",
+  });
+  expect(writes[3]).toMatchObject({
+    datasetId: "dataset-1",
+    mode: "perRecord",
+    expectedDatasetVersion: 2,
+    expectedTransformRevision: 3,
+  });
 });
 
 test("a retained Transform output selection shows its source and selected values", async ({

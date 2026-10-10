@@ -28,7 +28,6 @@ from agent_hub_api.modules.datasets import (
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transform_inputs import ArtifactSelection, ResultSetSelection
 from agent_hub_api.modules.transforms import (
-    DatasetSelection,
     MemoryTransformStore,
     OutputSelection,
     TransformInitiation,
@@ -202,22 +201,22 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "start_project_batch_run" in names
     assert {"list_project_batch_runs", "inspect_project_batch_results"} <= names
     assert "inspect_project_batch_results" not in captured["interrupt_on"]
-    assert "create_project_transform_batch_definition" in captured["interrupt_on"]
-    assert "create_project_transform_batch_definition" in names
     assert {"discover_project_transforms", "load_project_transform"} <= names
     assert "create_project_transform" in captured["interrupt_on"]
     assert "update_project_transform" in captured["interrupt_on"]
     assert "delete_project_transform" in captured["interrupt_on"]
     assert "start_project_transform_run" in captured["interrupt_on"]
-    assert "start_project_transform_selection_run" in captured["interrupt_on"]
+    assert "start_project_dataset_transform_run" in captured["interrupt_on"]
     assert "start_project_transform_output_selection_run" in captured["interrupt_on"]
     assert "start_project_transform_result_set_selection_run" in captured["interrupt_on"]
     assert "start_project_transform_artifact_selection_run" in captured["interrupt_on"]
-    assert "plan_project_transform_selection" in names
+    assert "plan_project_dataset_transform_run" in names
+    assert "plan_project_transform_selection" not in names
+    assert "create_project_transform_batch_definition" not in names
     assert "plan_project_transform_output_selection" in names
     assert "plan_project_transform_result_set_selection" in names
     assert "plan_project_transform_artifact_selection" in names
-    assert "plan_project_transform_selection" not in captured["interrupt_on"]
+    assert "plan_project_dataset_transform_run" not in captured["interrupt_on"]
     assert "plan_project_transform_output_selection" not in captured["interrupt_on"]
     assert "plan_project_transform_result_set_selection" not in captured["interrupt_on"]
     assert "plan_project_transform_artifact_selection" not in captured["interrupt_on"]
@@ -580,42 +579,6 @@ async def test_agent_discovers_batch_runs_and_inspects_a_bounded_result_page() -
 
 
 @pytest.mark.asyncio
-async def test_agent_can_propose_transform_batch_definition_after_approval() -> None:
-    class Batches:
-        async def define_transform_batch(
-            self,
-            _access: object,
-            project_id: str,
-            dataset_id: str,
-            name: str,
-            transform_definition_id: str,
-        ) -> object:
-            assert (project_id, dataset_id, name, transform_definition_id) == (
-                "project-1",
-                "dataset-1",
-                "Double loads",
-                "transform-1",
-            )
-            return SimpleNamespace(id="definition-1", name=name)
-
-    tools = {
-        item.name: item
-        for item in PostgresDeepAgentRunner._batch_tools(
-            cast(Any, Batches()), "project-1", "sam", "thread-1", "agent-run-1"
-        )
-    }
-    result = await tools["create_project_transform_batch_definition"].ainvoke(
-        {
-            "dataset_id": "dataset-1",
-            "name": "Double loads",
-            "transform_definition_id": "transform-1",
-        }
-    )
-
-    assert result == "Created Batch Definition Double loads (definition-1)."
-
-
-@pytest.mark.asyncio
 async def test_agent_transform_tools_call_the_project_module() -> None:
     class Transforms:
         def __init__(self) -> None:
@@ -729,62 +692,44 @@ async def test_invalid_approved_transform_proposal_returns_actionable_tool_error
 
 
 @pytest.mark.asyncio
-async def test_agent_reviews_and_starts_a_versioned_dataset_selection() -> None:
-    class Transforms:
-        def __init__(self) -> None:
-            self.started: tuple[DatasetSelection, TransformInitiation] | None = None
+async def test_agent_has_one_approved_dataset_transform_action_for_both_modes() -> None:
+    class Inputs:
+        started: list[object] = []
 
-        async def plan_dataset_selection(
-            self,
-            _access: object,
-            _project_id: str,
-            _definition_id: str,
-            selection: DatasetSelection,
-            _parameters: dict[str, object],
-        ) -> object:
-            assert selection.expected_version == 2
-            return SimpleNamespace(snapshot=lambda: {"recordIds": ["record-2"]})
+        async def plan_dataset_run(self, *_: object) -> object:
+            return SimpleNamespace(snapshot=lambda: {"mode": "dataset", "invocationCount": 1})
 
-        async def start_selected_run(
-            self,
-            _access: object,
-            _project_id: str,
-            _definition_id: str,
-            selection: DatasetSelection,
-            _parameters: dict[str, object],
-            initiation: TransformInitiation,
-        ) -> object:
-            self.started = (selection, initiation)
-            return SimpleNamespace(id="run-2", status="succeeded")
+        async def start_dataset_run(self, *args: object, **kwargs: object) -> object:
+            self.started.append((args, kwargs))
+            return SimpleNamespace(id="run-1", status="succeeded", records=None)
 
-    transforms = Transforms()
+    inputs = Inputs()
     tools = {
         item.name: item
-        for item in PostgresDeepAgentRunner._transform_tools(
-            cast(Any, transforms), "project-1", "sam", "thread-1", "agent-run-1"
+        for item in PostgresDeepAgentRunner._transform_input_tools(
+            cast(Any, inputs), "project-1", "sam", "thread-1", "agent-run-1"
         )
     }
-    choice = json.dumps(
+    plan = await tools["plan_project_dataset_transform_run"].ainvoke(
+        {"definition_id": "transform-1", "dataset_id": "dataset-1", "mode": "dataset"}
+    )
+    result = await tools["start_project_dataset_transform_run"].ainvoke(
         {
-            "dataset_id": "dataset-1",
-            "expected_version": 2,
-            "expected_definition_revision": 3,
-            "sort_path": "/score",
-            "limit": 1,
+            "name": "start_project_dataset_transform_run",
+            "type": "tool_call",
+            "args": {
+                "definition_id": "transform-1",
+                "dataset_id": "dataset-1",
+                "mode": "dataset",
+                "expected_dataset_version": 2,
+                "expected_transform_revision": 3,
+            },
+            "id": "call-1",
         }
     )
-    plan = await tools["plan_project_transform_selection"].ainvoke(
-        {"definition_id": "transform-1", "selection_json": choice}
-    )
-    started = await tools["start_project_transform_selection_run"].ainvoke(
-        {"definition_id": "transform-1", "selection_json": choice}
-    )
-    assert json.loads(plan) == {"recordIds": ["record-2"]}
-    assert started == "Transform Run run-2 succeeded."
-    assert transforms.started == (
-        DatasetSelection("dataset-1", 2, 3, sort_path="/score", limit=1),
-        TransformInitiation("agentRun", "approved", "thread-1", "agent-run-1"),
-    )
+    assert json.loads(plan) == {"mode": "dataset", "invocationCount": 1}
+    assert result.content == "Transform Run run-1 succeeded."
+    assert len(inputs.started) == 1
 
 
 @pytest.mark.asyncio

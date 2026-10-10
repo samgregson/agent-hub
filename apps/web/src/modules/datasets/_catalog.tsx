@@ -63,6 +63,8 @@ interface BatchRun {
   failedCount: number;
   updatedAt: string;
   definitionSnapshot?: {
+    mode?: string;
+    transformDefinitionId?: string;
     fileBinding?: {
       argument: string;
       sourcePath: string;
@@ -952,7 +954,12 @@ export function DatasetCatalog({
           {selectedRun ? (
             <section aria-label="Batch Run results" className={styles.detail}>
               <h2>Batch Run results</h2>
-              <p>From Batch Definition: {nameForRun(selectedRun)}</p>
+              <p>
+                {selectedRun.definitionSnapshot?.mode === "perRecord"
+                  ? "From Transform Definition: "
+                  : "From Batch Definition: "}
+                {nameForRun(selectedRun)}
+              </p>
               <p>{runSummary(selectedRun)}</p>
               <p>
                 {selectedRun.initiation.kind === "agentRun"

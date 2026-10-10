@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from agent_hub_api.modules.datasets import DatasetNotFound, DatasetValidationError
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
@@ -16,6 +17,7 @@ from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transform_inputs._application import (
     ArtifactSelection,
     ResultSetSelection,
+    TransformDatasetMode,
     TransformInputModule,
     TransformInputValidationError,
 )
@@ -61,6 +63,21 @@ class SelectionPlanResponse(_Model):
 class RunReferenceResponse(_Model):
     id: str
     status: str
+
+
+class DatasetRunPlanRequest(_Model):
+    dataset_id: str
+    mode: TransformDatasetMode
+    parameters: dict[str, object] = Field(default_factory=dict)
+
+
+class DatasetRunStartRequest(DatasetRunPlanRequest):
+    expected_dataset_version: int = Field(ge=1)
+    expected_transform_revision: int = Field(ge=1)
+
+
+class DatasetRunResponse(RunReferenceResponse):
+    output_kind: str
 
 
 def _selection(body: ResultSetSelectionRequest) -> ResultSetSelection:
@@ -111,7 +128,7 @@ def create_transform_input_router(
     Context = Annotated[RequestContext, Depends(context)]
 
     def failure(error: Exception) -> HTTPException:
-        if isinstance(error, TransformNotFound):
+        if isinstance(error, (TransformNotFound, DatasetNotFound)):
             return HTTPException(status_code=404, detail="Transform not found")
         if isinstance(error, TransformExecutionError):
             code = {
@@ -123,6 +140,72 @@ def create_transform_input_router(
             }.get(error.code, status.HTTP_502_BAD_GATEWAY)
             return HTTPException(status_code=code, detail=error.code)
         return HTTPException(status_code=422, detail=str(error))
+
+    @router.post("/{definition_id}/dataset-runs/plan")
+    async def plan_dataset_run(
+        project_id: str,
+        definition_id: str,
+        body: DatasetRunPlanRequest,
+        request_context: Context,
+    ) -> dict[str, object]:
+        try:
+            plan = await inputs.plan_dataset_run(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                definition_id,
+                body.dataset_id,
+                body.mode,
+                body.parameters,
+            )
+        except (
+            DatasetNotFound,
+            DatasetValidationError,
+            TransformInputValidationError,
+            TransformNotFound,
+            TransformValidationError,
+            TransformExecutionError,
+        ) as error:
+            raise failure(error) from error
+        return dict(plan.snapshot())
+
+    @router.post(
+        "/{definition_id}/dataset-runs",
+        response_model=DatasetRunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def start_dataset_run(
+        project_id: str,
+        definition_id: str,
+        body: DatasetRunStartRequest,
+        request_context: Context,
+    ) -> DatasetRunResponse:
+        try:
+            run = await inputs.start_dataset_run(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                definition_id,
+                body.dataset_id,
+                body.mode,
+                body.expected_dataset_version,
+                body.expected_transform_revision,
+                body.parameters,
+            )
+        except (
+            DatasetNotFound,
+            DatasetValidationError,
+            TransformInputValidationError,
+            TransformNotFound,
+            TransformValidationError,
+            TransformExecutionError,
+        ) as error:
+            raise failure(error) from error
+        return DatasetRunResponse(
+            id=run.id,
+            status=run.status,
+            output_kind=(
+                "transformRun" if body.mode == TransformDatasetMode.dataset else "batchResultSet"
+            ),
+        )
 
     @router.post("/{definition_id}/result-set-selection-plan", response_model=SelectionPlanResponse)
     async def plan(

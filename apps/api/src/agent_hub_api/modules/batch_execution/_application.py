@@ -178,6 +178,85 @@ class BatchExecutionModule:
             access, project_id, dataset_id, name, transform_definition_id
         )
 
+    async def submit_transform_dataset(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        transform_definition_id: str,
+        dataset_id: str,
+        expected_dataset_version: int,
+        expected_transform_revision: int,
+        idempotency_key: str | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
+        parameters: Mapping[str, object] | None = None,
+    ) -> BatchRun:
+        """Capture one independent invocation per Dataset Record for a Transform."""
+        await self._authorize(access, project_id)
+        existing = await self._idempotent_existing(
+            project_id, transform_definition_id, idempotency_key
+        )
+        if existing is not None:
+            if (
+                existing.definition_snapshot.get("datasetId") != dataset_id
+                or existing.definition_snapshot.get("datasetVersion") != expected_dataset_version
+                or existing.definition_snapshot.get("revision") != expected_transform_revision
+                or existing.definition_snapshot.get("parameters", {}) != dict(parameters or {})
+            ):
+                raise BatchRunIdempotencyConflict(
+                    "This idempotency key identifies another Transform Run."
+                )
+            return existing
+        if self._transforms is None:
+            raise DatasetValidationError("Transform execution is unavailable.")
+        snapshot = await self._transforms.batch_snapshot(
+            access, project_id, transform_definition_id
+        )
+        if snapshot["revision"] != expected_transform_revision:
+            raise DatasetValidationError("Transform Definition changed; review it again.")
+        dataset = await self._datasets.load_dataset(access, project_id, dataset_id)
+        if dataset.version != expected_dataset_version:
+            raise DatasetValidationError("Dataset changed; review it again.")
+        if not dataset.records:
+            raise DatasetValidationError("Dataset has no Records to run.")
+        now = datetime.now(UTC)
+        run = BatchRun(
+            id=str(uuid4()),
+            project_id=project_id,
+            definition_id=transform_definition_id,
+            status=BatchRunStatus.queued,
+            definition_snapshot={
+                **snapshot,
+                **_dataset_snapshot(dataset.id, dataset.version, dataset.records),
+                "datasetId": dataset.id,
+                "definitionName": snapshot["name"],
+                "mode": "perRecord",
+                "parameters": dict(parameters or {}),
+                "maxConcurrency": self._max_concurrency,
+                "recordIds": [record.id for record in dataset.records],
+            },
+            records=tuple(
+                ResultRecord(record.id, dict(record.value)) for record in dataset.records
+            ),
+            created_at=now,
+            updated_at=now,
+            idempotency_key=idempotency_key,
+            initiator_subject=access.subject,
+            initiation=_initiation_snapshot(initiation),
+        )
+        stored, _ = await self._store.create_or_load(run)
+        if (
+            stored.definition_id != transform_definition_id
+            or stored.definition_snapshot.get("datasetId") != dataset_id
+            or stored.definition_snapshot.get("datasetVersion") != expected_dataset_version
+            or stored.definition_snapshot.get("revision") != expected_transform_revision
+            or stored.definition_snapshot.get("parameters", {}) != dict(parameters or {})
+        ):
+            raise BatchRunIdempotencyConflict(
+                "This idempotency key identifies another Transform Run."
+            )
+        return stored
+
     async def start_one(
         self,
         access: ProjectAccess,
@@ -342,7 +421,7 @@ class BatchExecutionModule:
             updated_at=datetime.now(UTC),
         )
         await self._store.replace(progress)
-        if first.error:
+        if first.error and running.definition_snapshot.get("mode") != "perRecord":
             failed = replace(progress, status=BatchRunStatus.failed, updated_at=datetime.now(UTC))
             return await self._store.replace(failed) or failed
         semaphore = asyncio.Semaphore(self._max_concurrency)
@@ -365,8 +444,10 @@ class BatchExecutionModule:
         completed = replace(
             progress,
             status=(
-                BatchRunStatus.partial
-                if any(record.error for record in remaining)
+                BatchRunStatus.failed
+                if all(record.error for record in (first, *remaining))
+                else BatchRunStatus.partial
+                if any(record.error for record in (first, *remaining))
                 else BatchRunStatus.succeeded
             ),
             records=(first, *remaining),
@@ -396,7 +477,11 @@ class BatchExecutionModule:
                 if self._transforms is None:
                     raise ValueError("The Transform runner is unavailable.")
                 output = await self._transforms.execute_batch_record(
-                    access, project_id, run.definition_snapshot, record.input
+                    access,
+                    project_id,
+                    run.definition_snapshot,
+                    record.input,
+                    cast(Mapping[str, object], run.definition_snapshot.get("parameters", {})),
                 )
                 return ResultRecord(record.dataset_record_id, record.input, output)
             plugin_id = run.definition_snapshot.get("pluginId")

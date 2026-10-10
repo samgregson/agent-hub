@@ -97,7 +97,7 @@ Additionally:
 
 These directions should be enforced by TypeScript restricted-import rules, Python import checks, and contract tests as the corresponding Modules appear.
 
-`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Input Selection is a lower Module containing only source-neutral selection rules and value identities. Dataset, Transform, Batch Execution, and Artifact keep authority over their own records, authorization, and durable Runs. Transform Inputs coordinates retained Batch Result Set and MCP Tool Result Snapshot values into Transform Runs through the Batch Execution, Artifact, and Transform Interfaces; it owns cross-source selection provenance without moving those decisions into `main.py`.
+`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Input Selection is a lower Module containing only source-neutral selection rules and value identities. Dataset, Transform, Batch Execution, and Artifact keep authority over their own records, authorization, and durable Runs. Transform Inputs coordinates the two Dataset execution modes and retained Batch Result Set and MCP Tool Result Snapshot values through the Dataset, Batch Execution, Artifact, and Transform Interfaces; it owns cross-source review and provenance without moving those decisions into `main.py`.
 
 ## Frontend ownership
 

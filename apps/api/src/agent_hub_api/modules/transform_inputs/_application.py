@@ -3,13 +3,17 @@
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 
 from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactNotFound
 from agent_hub_api.modules.batch_execution import (
     BatchExecutionModule,
+    BatchInitiation,
+    BatchRun,
     BatchRunNotFound,
     BatchRunStatus,
 )
+from agent_hub_api.modules.datasets import DatasetModule
 from agent_hub_api.modules.input_selection import (
     SelectionRule,
     SelectionValidationError,
@@ -19,12 +23,44 @@ from agent_hub_api.modules.input_selection import (
 )
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms import (
+    DatasetSelection,
     TransformInitiation,
     TransformModule,
     TransformRun,
 )
 
 MAX_SOURCE_ROWS = 10_000
+
+
+class TransformDatasetMode(StrEnum):
+    dataset = "dataset"
+    per_record = "perRecord"
+
+
+@dataclass(frozen=True, slots=True)
+class TransformDatasetRunPlan:
+    dataset_id: str
+    dataset_version: int
+    transform_definition_id: str
+    transform_revision: int
+    record_ids: tuple[str, ...]
+    mode: TransformDatasetMode
+
+    def snapshot(self) -> Mapping[str, object]:
+        return {
+            "datasetId": self.dataset_id,
+            "datasetVersion": self.dataset_version,
+            "transformDefinitionId": self.transform_definition_id,
+            "transformRevision": self.transform_revision,
+            "recordIds": list(self.record_ids),
+            "mode": self.mode.value,
+            "invocationCount": (
+                1 if self.mode == TransformDatasetMode.dataset else len(self.record_ids)
+            ),
+            "outputKind": (
+                "transformRun" if self.mode == TransformDatasetMode.dataset else "batchResultSet"
+            ),
+        }
 
 
 class TransformInputValidationError(ValueError):
@@ -165,11 +201,112 @@ class TransformInputModule:
     """Plan and execute one Transform from captured cross-Module values."""
 
     def __init__(
-        self, batches: BatchExecutionModule, transforms: TransformModule, artifacts: ArtifactModule
+        self,
+        batches: BatchExecutionModule,
+        transforms: TransformModule,
+        artifacts: ArtifactModule,
+        datasets: DatasetModule | None = None,
     ) -> None:
         self._batches = batches
         self._transforms = transforms
         self._artifacts = artifacts
+        self._datasets = datasets
+
+    async def plan_dataset_run(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        dataset_id: str,
+        mode: TransformDatasetMode,
+        parameters: Mapping[str, object] | None = None,
+    ) -> TransformDatasetRunPlan:
+        if self._datasets is None:
+            raise TransformInputValidationError("Dataset execution is unavailable.")
+        dataset = await self._datasets.load_dataset(access, project_id, dataset_id)
+        definition = await self._transforms.load(access, project_id, definition_id)
+        if not dataset.records:
+            raise TransformInputValidationError("Dataset has no Records to run.")
+        if mode == TransformDatasetMode.dataset:
+            await self._transforms.plan_dataset_selection(
+                access,
+                project_id,
+                definition_id,
+                DatasetSelection(dataset.id, dataset.version, definition.revision),
+                parameters or {},
+            )
+        else:
+            await self._transforms.batch_snapshot(access, project_id, definition_id)
+            await self._transforms.validate_batch_records(
+                access,
+                project_id,
+                definition_id,
+                tuple(record.value for record in dataset.records),
+                parameters or {},
+                expected_revision=definition.revision,
+            )
+        return TransformDatasetRunPlan(
+            dataset.id,
+            dataset.version,
+            definition.id,
+            definition.revision,
+            tuple(record.id for record in dataset.records),
+            mode,
+        )
+
+    async def start_dataset_run(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        dataset_id: str,
+        mode: TransformDatasetMode,
+        expected_dataset_version: int,
+        expected_transform_revision: int,
+        parameters: Mapping[str, object] | None = None,
+        initiation: TransformInitiation | None = None,
+        idempotency_key: str | None = None,
+    ) -> TransformRun | BatchRun:
+        plan = await self.plan_dataset_run(
+            access, project_id, definition_id, dataset_id, mode, parameters
+        )
+        if (
+            plan.dataset_version != expected_dataset_version
+            or plan.transform_revision != expected_transform_revision
+        ):
+            raise TransformInputValidationError("Dataset or Transform changed; review it again.")
+        if mode == TransformDatasetMode.dataset:
+            return await self._transforms.start_selected_run(
+                access,
+                project_id,
+                definition_id,
+                DatasetSelection(dataset_id, expected_dataset_version, expected_transform_revision),
+                parameters or {},
+                initiation,
+            )
+        batch_initiation = (
+            BatchInitiation(
+                initiation.kind,
+                initiation.approval,
+                initiation.thread_id,
+                initiation.agent_run_id,
+            )
+            if initiation is not None
+            else None
+        )
+        run = await self._batches.submit_transform_dataset(
+            access,
+            project_id,
+            definition_id,
+            dataset_id,
+            expected_dataset_version,
+            expected_transform_revision,
+            idempotency_key,
+            initiation=batch_initiation,
+            parameters=parameters or {},
+        )
+        await self._batches.enqueue(access, project_id, run.id)
+        return run
 
     async def plan_artifact_selection(
         self,

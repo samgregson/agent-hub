@@ -9,6 +9,7 @@ const approvalOnlyTools = new Set([
   "update_project_batch_definition",
   "delete_project_batch_definition",
   "start_project_batch_run",
+  "start_project_dataset_transform_run",
 ]);
 
 export interface ProposedFileReview {
@@ -28,6 +29,8 @@ export function approvalLabel(toolName: string): string {
       : "Approve Project Artifact change";
   }
   if (toolName === "delete_project_dataset") return "Approve Dataset deletion";
+  if (toolName === "start_project_dataset_transform_run")
+    return "Approve Transform Run";
   if (toolName.includes("dataset")) return "Approve Dataset change";
   if (toolName.includes("batch_definition"))
     return "Approve Batch Definition change";
@@ -55,6 +58,18 @@ export function approvalTarget(
     typeof fields.file_path === "string" ? fields.file_path : undefined;
   if (path?.startsWith("/project/") && !path.split("/").includes("..")) {
     return { path, summary: path };
+  }
+  if (
+    toolName === "start_project_dataset_transform_run" &&
+    typeof fields.definition_id === "string" &&
+    typeof fields.dataset_id === "string"
+  ) {
+    const mode = fields.mode === "perRecord" ? "per-Record" : "Dataset-wide";
+    return {
+      summary:
+        `Transform ${fields.definition_id} · Dataset ${fields.dataset_id} ` +
+        `v${fields.expected_dataset_version} · ${mode} · revision ${fields.expected_transform_revision}`,
+    };
   }
   const artifactId =
     typeof fields.artifact_id === "string" ? fields.artifact_id : undefined;

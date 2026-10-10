@@ -84,3 +84,27 @@ test("resolved approvals retain the proposed action for audit", () => {
     /Replace all matches\n--- Original text\nbefore\n\+\+\+ Proposed text\nafter/,
   );
 });
+
+test("Dataset Transform approval identifies a run rather than a Dataset edit", () => {
+  assert.equal(
+    approvalLabel("start_project_dataset_transform_run"),
+    "Approve Transform Run",
+  );
+  assert.equal(isApprovalOnlyTool("start_project_dataset_transform_run"), true);
+  assert.deepEqual(
+    approvalTarget(
+      {
+        dataset_id: "dataset-1",
+        definition_id: "transform-1",
+        mode: "perRecord",
+        expected_dataset_version: 2,
+        expected_transform_revision: 3,
+      },
+      "start_project_dataset_transform_run",
+    ),
+    {
+      summary:
+        "Transform transform-1 · Dataset dataset-1 v2 · per-Record · revision 3",
+    },
+  );
+});

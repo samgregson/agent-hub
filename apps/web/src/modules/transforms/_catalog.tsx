@@ -81,6 +81,17 @@ interface DatasetOption {
   version: number;
 }
 
+interface DatasetRunPlan {
+  datasetId: string;
+  datasetVersion: number;
+  transformDefinitionId: string;
+  transformRevision: number;
+  recordIds: string[];
+  mode: "dataset" | "perRecord";
+  invocationCount: number;
+  outputKind: "transformRun" | "batchResultSet";
+}
+
 interface BatchRunOption {
   id: string;
   definitionId: string;
@@ -99,11 +110,6 @@ interface SelectionRuleRequest {
   parameters: Record<string, unknown>;
 }
 
-interface DatasetSelectionRequest extends SelectionRuleRequest {
-  datasetId: string;
-  expectedVersion: number;
-}
-
 interface OutputSelectionRequest extends SelectionRuleRequest {
   sourceRunId: string;
   outputPath: string;
@@ -115,8 +121,7 @@ interface ArtifactSelectionRequest extends SelectionRuleRequest {
   outputPath: string;
 }
 
-type SelectionRequest =
-  DatasetSelectionRequest | OutputSelectionRequest | ArtifactSelectionRequest;
+type SelectionRequest = OutputSelectionRequest | ArtifactSelectionRequest;
 
 interface SelectionPlan {
   selection: {
@@ -202,6 +207,12 @@ export function TransformCatalog({
     Array<{ id: string; title: string; documentVersion: number }>
   >([]);
   const [selectionDatasetId, setSelectionDatasetId] = useState("");
+  const [datasetRunMode, setDatasetRunMode] = useState<"dataset" | "perRecord">(
+    "dataset",
+  );
+  const [datasetRunPlan, setDatasetRunPlan] = useState<DatasetRunPlan | null>(
+    null,
+  );
   const [selectionRunId, setSelectionRunId] = useState("");
   const [selectionBatchRunId, setSelectionBatchRunId] = useState("");
   const [selectionArtifactId, setSelectionArtifactId] = useState("");
@@ -505,6 +516,113 @@ export function TransformCatalog({
     }
   }
 
+  async function reviewDatasetRun() {
+    if (!selectedDefinition || !selectionDatasetId) return;
+    setBusy("dataset-plan");
+    setError(null);
+    setDatasetRunPlan(null);
+    try {
+      const response = await fetch(
+        `${root}/${encodeURIComponent(selectedDefinition.id)}/dataset-runs/plan`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            datasetId: selectionDatasetId,
+            mode: datasetRunMode,
+            parameters: jsonObject(parametersJson, "Parameters"),
+          }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          await responseError(response, "Run could not be reviewed."),
+        );
+      setDatasetRunPlan((await response.json()) as DatasetRunPlan);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Run could not be reviewed.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function startDatasetRun() {
+    if (
+      !selectedDefinition ||
+      !datasetRunPlan ||
+      datasetRunPlan.transformDefinitionId !== selectedDefinition.id
+    )
+      return;
+    setBusy("dataset-run");
+    setError(null);
+    try {
+      const response = await fetch(
+        `${root}/${encodeURIComponent(selectedDefinition.id)}/dataset-runs`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            datasetId: datasetRunPlan.datasetId,
+            mode: datasetRunPlan.mode,
+            expectedDatasetVersion: datasetRunPlan.datasetVersion,
+            expectedTransformRevision: datasetRunPlan.transformRevision,
+            parameters: jsonObject(parametersJson, "Parameters"),
+          }),
+        },
+      );
+      if (!response.ok)
+        throw new Error(
+          await responseError(response, "Run could not be started."),
+        );
+      const started = (await response.json()) as {
+        id: string;
+        status: string;
+        outputKind: string;
+      };
+      setDatasetRunPlan(null);
+      if (started.outputKind === "batchResultSet") {
+        setNotice(
+          `Batch Run ${shortId(started.id)} ${started.status}. Inspect its Result Set under Operations → Batch Definitions.`,
+        );
+      } else {
+        onSelectRunScope(selectedDefinition.id);
+        const detail = await fetch(
+          `${root}/runs/${encodeURIComponent(started.id)}`,
+          {
+            cache: "no-store",
+          },
+        );
+        if (!detail.ok)
+          throw new Error("Run started, but its details could not be loaded.");
+        const run = (await detail.json()) as Run;
+        setRunPage((current) => ({
+          items: [
+            run,
+            ...(current?.scope === selectedDefinition.id
+              ? current.items.filter((item) => item.id !== run.id)
+              : []),
+          ],
+          nextOffset:
+            current?.scope === selectedDefinition.id
+              ? current.nextOffset
+              : null,
+          scope: selectedDefinition.id,
+        }));
+        setSelectedRunId(run.id);
+        setNotice(`Transform Run ${shortId(run.id)} ${run.status}.`);
+      }
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Run could not be started.",
+      );
+      setDatasetRunPlan(null);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   function selectionRequest(): SelectionRequest {
     if (!selectedDefinition) throw new Error("Select a Transform Definition.");
     let equals: SelectionRequest["equals"] = null;
@@ -557,15 +675,7 @@ export function TransformCatalog({
         outputPath: outputPath.trim(),
       };
     }
-    const dataset = datasetOptions.find(
-      (item) => item.id === selectionDatasetId,
-    );
-    if (!dataset) throw new Error("Select a Dataset.");
-    return {
-      ...rule,
-      datasetId: dataset.id,
-      expectedVersion: dataset.version,
-    };
+    throw new Error("Select a retained output source.");
   }
 
   async function reviewSelection() {
@@ -783,6 +893,7 @@ export function TransformCatalog({
             setIsEditing(true);
             setPreview(null);
             setSelectionPlan(null);
+            setDatasetRunPlan(null);
           }}
           variant="primary"
         >
@@ -820,6 +931,7 @@ export function TransformCatalog({
                     setIsEditing(false);
                     setPreview(null);
                     setSelectionPlan(null);
+                    setDatasetRunPlan(null);
                   }}
                   type="button"
                 >
@@ -950,6 +1062,7 @@ export function TransformCatalog({
                         | "artifact",
                     );
                     setSelectionPlan(null);
+                    setDatasetRunPlan(null);
                     if (event.target.value === "resultSet") {
                       void refreshBatchRuns().catch(() =>
                         setError("Batch Runs could not be loaded."),
@@ -964,7 +1077,7 @@ export function TransformCatalog({
                   value={inputMode}
                 >
                   <option value="record">Single input record</option>
-                  <option value="dataset">Selected Dataset Records</option>
+                  <option value="dataset">Dataset Records</option>
                   <option value="output">Selected Transform Run output</option>
                   <option value="resultSet">
                     Selected Batch Result Set values
@@ -1010,6 +1123,115 @@ export function TransformCatalog({
                     </Button>
                   </div>
                 </>
+              ) : inputMode === "dataset" ? (
+                <section
+                  aria-label="Dataset Transform Run"
+                  className={styles.form}
+                >
+                  <p>
+                    Run once with all ordered Records so Python can filter,
+                    sort, or aggregate them, or run independently for each
+                    Record and retain a Result Set.
+                  </p>
+                  <div className={styles.formGrid}>
+                    <Field label="Dataset">
+                      <select
+                        onChange={(event) => {
+                          setSelectionDatasetId(event.target.value);
+                          setDatasetRunPlan(null);
+                        }}
+                        value={selectionDatasetId}
+                      >
+                        <option value="">Select Dataset</option>
+                        {datasetOptions.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name} · v{item.version}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Execution mode">
+                      <select
+                        onChange={(event) => {
+                          setDatasetRunMode(
+                            event.target.value as "dataset" | "perRecord",
+                          );
+                          setDatasetRunPlan(null);
+                        }}
+                        value={datasetRunMode}
+                      >
+                        <option value="dataset">
+                          Dataset-wide · one invocation
+                        </option>
+                        <option value="perRecord">
+                          Per-Record · Result Set
+                        </option>
+                      </select>
+                    </Field>
+                  </div>
+                  <Field label="Parameters (JSON object)">
+                    <textarea
+                      onChange={(event) => {
+                        setParametersJson(event.target.value);
+                        setDatasetRunPlan(null);
+                      }}
+                      rows={3}
+                      spellCheck={false}
+                      value={parametersJson}
+                    />
+                  </Field>
+                  <div className={styles.actions}>
+                    <Button
+                      disabled={busy !== null || !selectionDatasetId}
+                      onClick={() => void reviewDatasetRun()}
+                    >
+                      {busy === "dataset-plan" ? "Reviewing…" : "Review Run"}
+                    </Button>
+                    <Button
+                      onClick={() =>
+                        void refreshDatasets()
+                          .then(() => setDatasetRunPlan(null))
+                          .catch(() =>
+                            setError("Datasets could not be loaded."),
+                          )
+                      }
+                    >
+                      Refresh Datasets
+                    </Button>
+                  </div>
+                  {datasetRunPlan ? (
+                    <section
+                      aria-label="Dataset Run plan"
+                      className={styles.preview}
+                    >
+                      <strong>
+                        {datasetRunPlan.recordIds.length} Records ·{" "}
+                        {datasetRunPlan.invocationCount} invocation
+                        {datasetRunPlan.invocationCount === 1 ? "" : "s"}
+                      </strong>
+                      <p>
+                        Dataset v{datasetRunPlan.datasetVersion} · Transform
+                        revision {datasetRunPlan.transformRevision} →{" "}
+                        {datasetRunPlan.outputKind === "batchResultSet"
+                          ? "Batch Result Set"
+                          : "Transform Run output"}
+                      </p>
+                      <details>
+                        <summary>Captured Record IDs</summary>
+                        <pre>
+                          {JSON.stringify(datasetRunPlan.recordIds, null, 2)}
+                        </pre>
+                      </details>
+                      <Button
+                        disabled={busy !== null}
+                        onClick={() => void startDatasetRun()}
+                        variant="primary"
+                      >
+                        {busy === "dataset-run" ? "Running…" : "Start Run"}
+                      </Button>
+                    </section>
+                  ) : null}
+                </section>
               ) : (
                 <section aria-label="Value selection" className={styles.form}>
                   <p>
@@ -1019,37 +1241,7 @@ export function TransformCatalog({
                       ? " The output path must select a list of JSON objects."
                       : null}
                   </p>
-                  {inputMode === "dataset" ? (
-                    <div className={styles.actions}>
-                      <Field label="Dataset">
-                        <select
-                          onChange={(event) => {
-                            setSelectionDatasetId(event.target.value);
-                            setSelectionPlan(null);
-                          }}
-                          value={selectionDatasetId}
-                        >
-                          <option value="">Select Dataset</option>
-                          {datasetOptions.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name} · v{item.version}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Button
-                        onClick={() =>
-                          void refreshDatasets()
-                            .then(() => setSelectionPlan(null))
-                            .catch(() =>
-                              setError("Datasets could not be loaded."),
-                            )
-                        }
-                      >
-                        Refresh Datasets
-                      </Button>
-                    </div>
-                  ) : inputMode === "output" ? (
+                  {inputMode === "output" ? (
                     <div className={styles.formGrid}>
                       <Field label="Transform Run">
                         <select
@@ -1234,13 +1426,11 @@ export function TransformCatalog({
                   <Button
                     disabled={
                       busy !== null ||
-                      (inputMode === "dataset"
-                        ? !selectionDatasetId
-                        : inputMode === "output"
-                          ? !selectionRunId
-                          : inputMode === "artifact"
-                            ? !selectionArtifactId
-                            : !selectionBatchRunId)
+                      (inputMode === "output"
+                        ? !selectionRunId
+                        : inputMode === "artifact"
+                          ? !selectionArtifactId
+                          : !selectionBatchRunId)
                     }
                     onClick={() => void reviewSelection()}
                   >
@@ -1254,8 +1444,7 @@ export function TransformCatalog({
                       className={styles.preview}
                     >
                       <strong>
-                        {selectionPlan.plan.selectedCount}{" "}
-                        {inputMode === "dataset" ? "records" : "values"} ·{" "}
+                        {selectionPlan.plan.selectedCount} values ·{" "}
                         {selectionPlan.plan.invocationCount} Transform
                         invocation
                       </strong>

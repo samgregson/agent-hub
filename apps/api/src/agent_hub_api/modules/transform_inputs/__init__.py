@@ -5,6 +5,8 @@ from agent_hub_api.modules.transform_inputs._application import (
     ArtifactSelectionPlan,
     ResultSetSelection,
     ResultSetSelectionPlan,
+    TransformDatasetMode,
+    TransformDatasetRunPlan,
     TransformInputModule,
     TransformInputValidationError,
 )
@@ -15,6 +17,8 @@ __all__ = [
     "ArtifactSelectionPlan",
     "ResultSetSelection",
     "ResultSetSelectionPlan",
+    "TransformDatasetMode",
+    "TransformDatasetRunPlan",
     "TransformInputModule",
     "TransformInputValidationError",
     "create_transform_input_router",

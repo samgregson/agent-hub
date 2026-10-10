@@ -37,6 +37,7 @@ from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, Arti
 from agent_hub_api.modules.batch_execution import (
     BatchExecutionModule,
     BatchInitiation,
+    BatchRun,
     BatchRunStatus,
 )
 from agent_hub_api.modules.bindings import BindingModule
@@ -53,10 +54,10 @@ from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transform_inputs import (
     ArtifactSelection,
     ResultSetSelection,
+    TransformDatasetMode,
     TransformInputModule,
 )
 from agent_hub_api.modules.transforms import (
-    DatasetSelection,
     OutputSelection,
     TransformInitiation,
     TransformModule,
@@ -91,7 +92,15 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "input_selectors_json argument is a JSON object mapping input names to JSON "
         'pointers: {"record":""} selects the whole record and {"value":"/value"} '
         "selects one field. Each input name becomes a key in inputs. "
-        "output_schema_json is a JSON Schema object.",
+        "output_schema_json is a JSON Schema object. To run a Transform on a Dataset, "
+        "review it with plan_project_dataset_transform_run, then use the single "
+        "start_project_dataset_transform_run action with mode dataset (one invocation "
+        "over ordered Records, suitable for filtering, sorting, or aggregation) or "
+        "perRecord (one invocation per Record with a Batch Result Set). Do not claim "
+        "Transforms are limited to one Record at a time. For Dataset-wide "
+        'execution, {"values":"/selection/values"} passes the ordered Record values '
+        'to inputs["values"]. For perRecord, {"record":""} passes each full '
+        'Record value to inputs["record"]. Both modes accept parameters.',
         "Never claim access to the host filesystem. When referring to a virtual file in "
         "a response, link it as Markdown using its absolute /project or /scratch path.",
     )
@@ -286,10 +295,6 @@ class PostgresDeepAgentRunner:
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Start the proposed Batch Run?",
             }
-            interrupt_on["create_project_transform_batch_definition"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Create the proposed Transform Batch Definition?",
-            }
         if bindings is not None and subject is not None:
             interrupt_on["bind_project_file_to_batch_definition"] = {
                 "allowed_decisions": ["approve", "reject"],
@@ -329,15 +334,15 @@ class PostgresDeepAgentRunner:
                     "allowed_decisions": ["approve", "reject"],
                     "description": "Save this Transform Run output as an Artifact?",
                 }
-            interrupt_on["start_project_transform_selection_run"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Run the reviewed Dataset selection through this Transform?",
-            }
             interrupt_on["start_project_transform_output_selection_run"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Run the reviewed Transform output selection?",
             }
         if transform_inputs is not None and subject is not None:
+            interrupt_on["start_project_dataset_transform_run"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Run the reviewed Transform on this Dataset?",
+            }
             interrupt_on["start_project_transform_result_set_selection_run"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Run the reviewed Result Set selection through this Transform?",
@@ -858,21 +863,10 @@ class PostgresDeepAgentRunner:
                 }
             )
 
-        @tool
-        async def create_project_transform_batch_definition(
-            dataset_id: str, name: str, transform_definition_id: str
-        ) -> str:
-            """Create a per-record Transform Batch Definition after user approval."""
-            definition = await batches.define_transform_batch(
-                access, project_id, dataset_id, name, transform_definition_id
-            )
-            return f"Created Batch Definition {definition.name} ({definition.id})."
-
         return [
             start_project_batch_run,
             list_project_batch_runs,
             inspect_project_batch_results,
-            create_project_transform_batch_definition,
         ]
 
     @staticmethod
@@ -902,13 +896,6 @@ class PostgresDeepAgentRunner:
             ):
                 raise ValueError("input_selectors_json must be a JSON object of names to pointers")
             return cast(dict[str, str], value)
-
-        def dataset_selection(raw: str) -> DatasetSelection:
-            value = object_json(raw)
-            try:
-                return DatasetSelection(**value)
-            except TypeError as error:
-                raise ValueError("Dataset selection fields are invalid.") from error
 
         def output_selection(raw: str) -> OutputSelection:
             value = object_json(raw)
@@ -1062,40 +1049,6 @@ class PostgresDeepAgentRunner:
             return f"Transform Run {run.id} {run.status}."
 
         @tool
-        async def plan_project_transform_selection(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Review a bounded Dataset selection before one Transform invocation."""
-            plan = await transforms.plan_dataset_selection(
-                access,
-                project_id,
-                definition_id,
-                dataset_selection(selection_json),
-                object_json(parameters_json),
-            )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_transform_selection_run(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Run an explicitly versioned Dataset selection after user approval."""
-            run = await transforms.start_selected_run(
-                access,
-                project_id,
-                definition_id,
-                dataset_selection(selection_json),
-                object_json(parameters_json),
-                initiation=TransformInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                ),
-            )
-            return f"Transform Run {run.id} {run.status}."
-
-        @tool
         async def plan_project_transform_output_selection(
             definition_id: str, selection_json: str, parameters_json: str = "{}"
         ) -> str:
@@ -1144,8 +1097,6 @@ class PostgresDeepAgentRunner:
             update_project_transform,
             delete_project_transform,
             start_project_transform_run,
-            plan_project_transform_selection,
-            start_project_transform_selection_run,
             plan_project_transform_output_selection,
             start_project_transform_output_selection_run,
             save_project_transform_run_as_dataset,
@@ -1204,6 +1155,62 @@ class PostgresDeepAgentRunner:
             if not isinstance(value, dict):
                 raise ValueError("Expected a JSON object")
             return value
+
+        @tool
+        async def plan_project_dataset_transform_run(
+            definition_id: str,
+            dataset_id: str,
+            mode: str,
+            parameters_json: str = "{}",
+        ) -> str:
+            """Review a Transform on all ordered Dataset Records before a durable Run.
+
+            mode is dataset for one invocation over the collection, or perRecord for
+            independent invocations and a Batch Result Set. Returns versions, Record
+            IDs, invocation count, and output kind for the approval proposal.
+            """
+            plan = await inputs.plan_dataset_run(
+                access,
+                project_id,
+                definition_id,
+                dataset_id,
+                TransformDatasetMode(mode),
+                parse_parameters(parameters_json),
+            )
+            return json.dumps(plan.snapshot())
+
+        @tool
+        async def start_project_dataset_transform_run(
+            definition_id: str,
+            dataset_id: str,
+            mode: str,
+            expected_dataset_version: int,
+            expected_transform_revision: int,
+            tool_call_id: Annotated[str, InjectedToolCallId],
+            parameters_json: str = "{}",
+        ) -> str:
+            """Start the reviewed Dataset Transform in dataset or perRecord mode after approval."""
+            key = hashlib.sha256(
+                f"agent-dataset-transform:{thread_id}:{tool_call_id}".encode()
+            ).hexdigest()
+            run = await inputs.start_dataset_run(
+                access,
+                project_id,
+                definition_id,
+                dataset_id,
+                TransformDatasetMode(mode),
+                expected_dataset_version,
+                expected_transform_revision,
+                parse_parameters(parameters_json),
+                TransformInitiation("agentRun", "approved", thread_id, agent_run_id),
+                key,
+            )
+            if isinstance(run, BatchRun):
+                return (
+                    f"Batch Run {run.id} {run.status}; Result Records are pending "
+                    "until the Run reaches a terminal status."
+                )
+            return f"Transform Run {run.id} {run.status}."
 
         @tool
         async def plan_project_transform_result_set_selection(
@@ -1284,6 +1291,8 @@ class PostgresDeepAgentRunner:
             return f"Transform Run {run.id} {run.status}."
 
         return [
+            plan_project_dataset_transform_run,
+            start_project_dataset_transform_run,
             plan_project_transform_result_set_selection,
             start_project_transform_result_set_selection_run,
             plan_project_transform_artifact_selection,

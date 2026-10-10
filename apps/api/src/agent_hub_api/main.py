@@ -97,7 +97,7 @@ def create_app(
         bindings=resolved_bindings,
     )
     resolved_transform_inputs = TransformInputModule(
-        resolved_batches, resolved_transforms, resolved_artifacts
+        resolved_batches, resolved_transforms, resolved_artifacts, resolved_datasets
     )
     deep_agent_runner = None
     if agent_execution is None:

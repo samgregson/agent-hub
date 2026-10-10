@@ -84,6 +84,108 @@ class Gateway:
 
 
 @pytest.mark.asyncio
+async def test_per_record_transform_run_needs_no_batch_definition() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Transform run")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner,
+        project.id,
+        "Loads",
+        [DatasetRecordInput({"load": 2}), DatasetRecordInput({"load": 3})],
+    )
+
+    class Runner:
+        fail_loads: set[int] = set()
+
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:test;pyodide:test", "a" * 64)
+
+        async def execute(
+            self, _source: str, inputs: dict[str, object], _parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            if inputs["load"] in self.fail_loads:
+                raise ValueError("record rejected")
+            return {"result": cast(int, inputs["load"]) * 2}, "deno:test;pyodide:test"
+
+    runner = Runner()
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
+    transform = await transforms.define(
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"load": "/load"},
+        {"type": "object"},
+    )
+    batches = BatchExecutionModule(
+        projects,
+        datasets,
+        cast(PluginGatewayModule, Gateway()),
+        MemoryBatchRunStore(),
+        transforms=transforms,
+    )
+
+    queued = await batches.submit_transform_dataset(
+        owner,
+        project.id,
+        transform.id,
+        dataset.id,
+        dataset.version,
+        transform.revision,
+        "approved-call-1",
+    )
+    completed = await batches.execute(owner, project.id, queued.id)
+
+    assert completed.definition_id == transform.id
+    assert completed.status == BatchRunStatus.succeeded
+    assert [item.structured_output for item in completed.records] == [{"result": 4}, {"result": 6}]
+    assert completed.definition_snapshot["datasetVersion"] == dataset.version
+    assert len(await datasets.list_definitions(owner, project.id)) == 0
+    assert (
+        await batches.submit_transform_dataset(
+            owner,
+            project.id,
+            transform.id,
+            dataset.id,
+            dataset.version,
+            transform.revision,
+            "approved-call-1",
+        )
+    ).id == queued.id
+
+    runner.fail_loads = {2}
+    partial_run = await batches.submit_transform_dataset(
+        owner,
+        project.id,
+        transform.id,
+        dataset.id,
+        dataset.version,
+        transform.revision,
+        "approved-call-2",
+    )
+    partial = await batches.execute(owner, project.id, partial_run.id)
+    assert partial.status == BatchRunStatus.partial
+    assert partial.records[0].error == "record rejected"
+    assert partial.records[1].structured_output == {"result": 6}
+
+    runner.fail_loads = {2, 3}
+    failed_run = await batches.submit_transform_dataset(
+        owner,
+        project.id,
+        transform.id,
+        dataset.id,
+        dataset.version,
+        transform.revision,
+        "approved-call-3",
+    )
+    failed = await batches.execute(owner, project.id, failed_run.id)
+    assert failed.status == BatchRunStatus.failed
+    assert [record.error for record in failed.records] == ["record rejected"] * 2
+
+
+@pytest.mark.asyncio
 async def test_transform_batch_uses_captured_definition_and_first_record_guard() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="sam")

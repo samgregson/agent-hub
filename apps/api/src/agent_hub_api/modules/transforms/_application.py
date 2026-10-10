@@ -391,6 +391,7 @@ class TransformModule:
         project_id: str,
         snapshot: Mapping[str, object],
         record: Mapping[str, object],
+        parameters: Mapping[str, object] | None = None,
     ) -> Mapping[str, object]:
         """Run one captured record without creating a second Transform Run."""
         await self._authorize(access, project_id)
@@ -404,9 +405,12 @@ class TransformModule:
             raise TransformExecutionError("runtime_mismatch")
         selectors = cast(Mapping[str, str], snapshot["inputSelectors"])
         inputs = {name: _select(record, pointer) for name, pointer in selectors.items()}
-        if len(_canonical(inputs)) > 64_000:
+        parameter_values = dict(parameters or {})
+        if len(_canonical({"inputs": inputs, "parameters": parameter_values})) > 64_000:
             raise TransformValidationError("Transform inputs exceed 64000 bytes.")
-        output, runtime = await self._runner.execute(str(snapshot["source"]), inputs, {})
+        output, runtime = await self._runner.execute(
+            str(snapshot["source"]), inputs, parameter_values
+        )
         if runtime != identity.runtime:
             raise TransformExecutionError("runtime_mismatch")
         schema = cast(Mapping[str, object], snapshot["outputSchema"])
@@ -459,12 +463,18 @@ class TransformModule:
             raise TransformValidationError("Selected Dataset is unavailable.") from error
         if dataset.version != selection.expected_version:
             raise TransformValidationError("Dataset version changed; review the selection again.")
-        records = _selected_values(
-            tuple(
-                SelectionValue(item.id, item.position, item.value, item.source_key)
-                for item in dataset.records
-            ),
-            selection,
+        candidates = tuple(
+            SelectionValue(item.id, item.position, item.value, item.source_key)
+            for item in dataset.records
+        )
+        records = (
+            candidates
+            if selection.filter_path is None
+            and selection.equals is None
+            and selection.sort_path is None
+            and not selection.descending
+            and selection.limit is None
+            else _selected_values(candidates, selection)
         )
         plan = DatasetSelectionPlan(dataset.id, dataset.version, records, selection)
         _inputs(definition, plan.input_record(), parameters or {})
@@ -581,6 +591,25 @@ class TransformModule:
                 "Transform Definition revision changed; review it again."
             )
         _inputs(definition, record, parameters)
+
+    async def validate_batch_records(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        records: Sequence[Mapping[str, object]],
+        parameters: Mapping[str, object],
+        *,
+        expected_revision: int,
+    ) -> None:
+        """Check every per-Record invocation against one captured Definition revision."""
+        definition = await self.load(access, project_id, definition_id)
+        if definition.revision != expected_revision:
+            raise TransformValidationError(
+                "Transform Definition revision changed; review it again."
+            )
+        for record in records:
+            _inputs(definition, record, parameters)
 
     async def start_captured_run(
         self,

@@ -11,7 +11,7 @@ export async function POST(
   const { projectId, definitionId } = await context.params;
   return forwardBackendRequest(
     request,
-    `/api/projects/${encodeURIComponent(projectId)}/transforms/${encodeURIComponent(definitionId)}/selection-plan`,
+    `/api/projects/${encodeURIComponent(projectId)}/transforms/${encodeURIComponent(definitionId)}/dataset-runs`,
     "application/json",
   );
 }

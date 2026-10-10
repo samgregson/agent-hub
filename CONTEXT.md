@@ -25,11 +25,11 @@ A durable, queryable collection of machine-scale outcomes produced by one Batch 
 _Avoid_: Artifact, chat transcript, plugin-owned database
 
 **Batch Run**:
-One bounded host-orchestrated execution of a Batch Definition over captured Dataset Records. It owns progress, initiator provenance, idempotency, and an immutable input and target snapshot independently of a browser or Agent Run. Agent-proposed execution requires approval; a directly authorized user action does not. Its completed Result Set is retained even when the Run is explicitly archived from normal workspace views.
+One bounded host-orchestrated execution over captured Dataset Records. Its target may be a Batch Definition or a Transform Definition invoked independently for each Record. It owns progress, initiator provenance, idempotency, and an immutable input and target snapshot independently of a browser or Agent Run. Agent-proposed execution requires approval; a directly authorized user action does not. Its completed Result Set is retained even when the Run is explicitly archived from normal workspace views.
 _Avoid_: Agent Run, Plugin job, Artifact, disposable job
 
 **Batch Definition**:
-A durable Project-owned setup that targets either one catalogue-approved MCP tool or one Transform Definition for each Dataset Record. It may be reused to start Batch Runs, but each Run captures the definition and target it actually used.
+A durable Project-owned setup that targets either one catalogue-approved MCP tool or one Transform Definition for each Dataset Record. It may be reused to start Batch Runs, but a direct per-Record Transform Run does not require one. Each Run captures the target it actually used.
 _Avoid_: Workflow, pipeline, Plugin protocol, run result
 
 **Binding**:
