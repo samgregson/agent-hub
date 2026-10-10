@@ -27,6 +27,12 @@ interface DatasetSummary {
 
 type PendingDeletion = LibraryItem | null;
 
+const libraryKindLabels = {
+  artifact: "Artifact",
+  dataset: "Dataset",
+  projectFile: "Project File",
+} as const;
+
 interface LibraryCatalogResult {
   error: string | null;
   items: LibraryItem[] | null;
@@ -282,7 +288,7 @@ export function LibraryCatalog({
                 </MenuItem>
               </Menu>
             }
-            details={`${item.kind === "dataset" ? "Dataset · " : ""}Version ${item.version}`}
+            details={`${libraryKindLabels[item.kind]} · Version ${item.version}`}
             key={item.kind === "artifact" ? item.id : item.path}
             openLabel={item.label}
             onOpen={() =>

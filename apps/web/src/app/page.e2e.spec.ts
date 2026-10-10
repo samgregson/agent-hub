@@ -294,7 +294,7 @@ test("navigator catalogs share collection typography at desktop and phone widths
   );
 });
 
-test("Library navigation combines Artifacts and Project files into one list", async ({
+test("Library identifies Artifacts, Datasets, and Project Files without duplicates", async ({
   page,
 }) => {
   const project = {
@@ -333,6 +333,11 @@ test("Library navigation combines Artifacts and Project files into one list", as
               updatedAt: "2026-09-18T00:00:00.000Z",
               version: 1,
             },
+            {
+              path: "/project/.datasets/dataset-123.json",
+              updatedAt: "2026-09-18T00:00:00.000Z",
+              version: 2,
+            },
           ],
         },
       });
@@ -340,7 +345,16 @@ test("Library navigation combines Artifacts and Project files into one list", as
   );
 
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
-    await route.fulfill({ json: [] });
+    await route.fulfill({
+      json: [
+        {
+          id: "dataset-123",
+          name: "Load cases",
+          filePath: "/project/.datasets/dataset-123.json",
+          version: 2,
+        },
+      ],
+    });
   });
 
   await page.goto("/");
@@ -355,6 +369,18 @@ test("Library navigation combines Artifacts and Project files into one list", as
   await expect(page.getByLabel("Library items")).toContainText(
     "/project/foundation-notes.md",
   );
+  await expect(page.getByLabel("Library items")).toContainText(
+    "Artifact · Version 1",
+  );
+  await expect(page.getByLabel("Library items")).toContainText(
+    "Dataset · Version 2",
+  );
+  await expect(page.getByLabel("Library items")).toContainText(
+    "Project File · Version 1",
+  );
+  await expect(
+    page.getByRole("button", { name: "Load cases", exact: true }),
+  ).toHaveCount(1);
   await expect(
     page.getByText(
       "Durable project work products. Project files appear below until elevated.",
