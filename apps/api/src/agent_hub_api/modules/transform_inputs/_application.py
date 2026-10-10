@@ -68,7 +68,26 @@ class ResultSetSelectionPlan:
         return 1
 
     def input_record(self) -> Mapping[str, object]:
-        return {"selection": {"values": [_json_copy(item.value) for item in self.selected]}}
+        rows = self._rows()
+        return {
+            "selection": {
+                "values": [row["value"] for row in rows],
+                "rows": rows,
+            }
+        }
+
+    def _rows(self) -> list[dict[str, object]]:
+        return [
+            {
+                "resultRecordId": f"{self.source_run_id}:{item.id}",
+                "datasetRecordId": item.id,
+                "sourceKey": item.source_key,
+                "position": item.position,
+                "input": _json_copy(inputs),
+                "value": _json_copy(item.value),
+            }
+            for item, inputs in zip(self.selected, self.selected_inputs, strict=True)
+        ]
 
     def snapshot(self) -> Mapping[str, object]:
         return {
@@ -79,15 +98,7 @@ class ResultSetSelectionPlan:
             "sourceRecordCount": self.source_record_count,
             "failedCount": self.failed_count,
             "outputPath": self.output_path,
-            "selectedRecords": [
-                {
-                    "datasetRecordId": item.id,
-                    "position": item.position,
-                    "input": _json_copy(inputs),
-                    "value": _json_copy(item.value),
-                }
-                for item, inputs in zip(self.selected, self.selected_inputs, strict=True)
-            ],
+            "selectedRecords": self._rows(),
             "rule": dict(self.rule.snapshot()),
             "selectedCount": self.selected_count,
         }
@@ -116,6 +127,13 @@ class TransformInputModule:
             raise TransformInputValidationError("Selected Result Set is not complete.")
         if len(source.records) > MAX_SOURCE_ROWS:
             raise TransformInputValidationError("Result Set exceeds the source inspection limit.")
+        source_keys: dict[str, str | None] = {}
+        dataset_records = source.definition_snapshot.get("datasetRecords")
+        if isinstance(dataset_records, list):
+            for record in dataset_records:
+                if isinstance(record, dict) and isinstance(record.get("id"), str):
+                    source_key = record.get("sourceKey")
+                    source_keys[record["id"]] = source_key if isinstance(source_key, str) else None
         candidates: list[SelectionValue] = []
         for position, record in enumerate(source.records):
             if record.structured_output is None:
@@ -124,7 +142,14 @@ class TransformInputModule:
                 value = project_value(record.structured_output, selection.output_path)
             except SelectionValidationError as error:
                 raise TransformInputValidationError(str(error)) from error
-            candidates.append(SelectionValue(record.dataset_record_id, position, value))
+            candidates.append(
+                SelectionValue(
+                    record.dataset_record_id,
+                    position,
+                    value,
+                    source_keys.get(record.dataset_record_id),
+                )
+            )
         try:
             selected = select_values(candidates, selection.rule())
         except SelectionValidationError as error:

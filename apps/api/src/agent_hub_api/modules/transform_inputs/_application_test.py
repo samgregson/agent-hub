@@ -36,7 +36,14 @@ async def test_result_set_values_feed_one_transform_with_captured_row_lineage() 
         project_id=project.id,
         definition_id="batch-definition-1",
         status=BatchRunStatus.partial,
-        definition_snapshot={"name": "Source calculation"},
+        definition_snapshot={
+            "name": "Source calculation",
+            "datasetRecords": [
+                {"id": "row-1", "sourceKey": "beam-A"},
+                {"id": "row-2", "sourceKey": "beam-B"},
+                {"id": "row-3", "sourceKey": "beam-C"},
+            ],
+        },
         records=(
             ResultRecord("row-1", {"beam": "A"}, {"score": 5}),
             ResultRecord("row-2", {"beam": "B"}, error="failed"),
@@ -59,7 +66,19 @@ async def test_result_set_values_feed_one_transform_with_captured_row_lineage() 
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
-            assert inputs == {"items": [5]}
+            assert inputs == {
+                "items": [5],
+                "rows": [
+                    {
+                        "resultRecordId": "batch-run-1:row-1",
+                        "datasetRecordId": "row-1",
+                        "sourceKey": "beam-A",
+                        "position": 0,
+                        "input": {"beam": "A"},
+                        "value": 5,
+                    }
+                ],
+            }
             return {"total": 5}, "deno:test;pyodide:test"
 
     transforms = TransformModule(
@@ -70,7 +89,7 @@ async def test_result_set_values_feed_one_transform_with_captured_row_lineage() 
         project.id,
         "Aggregate",
         "def transform(inputs, parameters):\n    return {}\n",
-        {"items": "/selection/values"},
+        {"items": "/selection/values", "rows": "/selection/rows"},
         {"type": "object"},
     )
     inputs = TransformInputModule(cast(BatchExecutionModule, Batches()), transforms)
@@ -85,13 +104,32 @@ async def test_result_set_values_feed_one_transform_with_captured_row_lineage() 
     assert plan.selected_count == 1
     assert plan.invocation_count == 1
     assert plan.snapshot()["selectedRecords"] == [
-        {"datasetRecordId": "row-1", "position": 0, "input": {"beam": "A"}, "value": 5}
+        {
+            "resultRecordId": "batch-run-1:row-1",
+            "datasetRecordId": "row-1",
+            "sourceKey": "beam-A",
+            "position": 0,
+            "input": {"beam": "A"},
+            "value": 5,
+        }
     ]
     assert plan.snapshot()["failedCount"] == 1
 
     run = await inputs.start_result_set_run(owner, project.id, target.id, choice, {})
     assert run.status == "succeeded"
-    assert run.inputs == {"items": [5]}
+    assert run.inputs == {
+        "items": [5],
+        "rows": [
+            {
+                "resultRecordId": "batch-run-1:row-1",
+                "datasetRecordId": "row-1",
+                "sourceKey": "beam-A",
+                "position": 0,
+                "input": {"beam": "A"},
+                "value": 5,
+            }
+        ],
+    }
     snapshot = run.definition_snapshot["selection"]
     assert isinstance(snapshot, Mapping)
     assert snapshot["sourceKind"] == "resultSet"
@@ -102,7 +140,7 @@ async def test_result_set_values_feed_one_transform_with_captured_row_lineage() 
     source_output["score"] = 999
     reloaded = await transforms.load_run(owner, project.id, run.id)
     assert reloaded.definition_snapshot["selection"] == snapshot
-    assert reloaded.inputs == {"items": [5]}
+    assert reloaded.inputs == run.inputs
 
     source = replace(source, status=BatchRunStatus.running)
     with pytest.raises(TransformInputValidationError, match="not complete"):

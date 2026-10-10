@@ -1611,7 +1611,7 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
     id: "transform-consumer",
     name: "Consume results",
     source: "def transform(inputs, parameters): pass",
-    inputSelectors: { items: "/selection/values" },
+    inputSelectors: { rows: "/selection/rows" },
     outputSchema: { type: "object" },
     runtime: "pyodide",
     packageHash: "abc",
@@ -1623,7 +1623,14 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
     outputPath: "/score",
     selectedCount: 1,
     selectedRecords: [
-      { datasetRecordId: "row-1", position: 0, input: { beam: "A" }, value: 5 },
+      {
+        resultRecordId: "batch-source-run:row-1",
+        datasetRecordId: "row-1",
+        sourceKey: "beam-A",
+        position: 0,
+        input: { beam: "A" },
+        value: 5,
+      },
     ],
     rule: { limit: 1 },
   };
@@ -1632,7 +1639,18 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
     definitionId: definition.id,
     status: "succeeded",
     definitionSnapshot: { ...definition, selection },
-    inputs: { items: [5] },
+    inputs: {
+      rows: [
+        {
+          resultRecordId: "batch-source-run:row-1",
+          datasetRecordId: "row-1",
+          sourceKey: "beam-A",
+          position: 0,
+          input: { beam: "A" },
+          value: 5,
+        },
+      ],
+    },
     parameters: {},
     inputHash: "inputhash",
     sourceHash: "sourcehash",
@@ -1732,6 +1750,13 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
   await expect(
     page.getByRole("region", { name: "Selection plan" }),
   ).toContainText("Batch Result Set batch-so → Transform Run output");
+  await page.getByText("Selected source values").click();
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText('"resultRecordId": "batch-source-run:row-1"');
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText('"sourceKey": "beam-A"');
   await page.getByRole("button", { name: "Start selected Run" }).click();
   await expect(
     page.getByRole("article", { name: "Run dataflow" }),

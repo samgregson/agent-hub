@@ -121,7 +121,10 @@ interface SelectionPlan {
     records?: Array<{ id: string; value: Record<string, unknown> }>;
     values?: Array<Record<string, unknown>>;
     selectedRecords?: Array<{
+      resultRecordId: string;
       datasetRecordId: string;
+      sourceKey: string | null;
+      position: number;
       input: Record<string, unknown>;
       value: unknown;
     }>;
