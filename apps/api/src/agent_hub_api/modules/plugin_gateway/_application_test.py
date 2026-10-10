@@ -14,6 +14,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginNotEnabled,
     PluginTool,
     PluginToolResult,
+    PluginTransportError,
     PluginUiResource,
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
@@ -96,6 +97,47 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
 
     await gateway.disable(access, project.id, "foundation-fixture")
     assert (await gateway.selections(access, project.id))[0].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_unavailable_enabled_plugin_does_not_abort_agent_tool_setup() -> None:
+    class UnavailableClient(FixtureClient):
+        async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+            raise PluginTransportError("The Plugin server is unavailable or did not respond.")
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Offline Plugin")
+    gateway = PluginGatewayModule(
+        projects,
+        [
+            PluginManifest(
+                id="foundation-fixture",
+                name="Foundation fixture",
+                version="0.1.0",
+                endpoint="http://foundation-fixture:8000/mcp",
+                tools=(PluginTool(name="foundation_status", read_only=True),),
+            ),
+            PluginManifest(
+                id="available-plugin",
+                name="Available Plugin",
+                version="0.1.0",
+                endpoint="http://available-plugin:8000/mcp",
+                tools=(PluginTool(name="foundation_status", read_only=True),),
+            ),
+        ],
+        MemoryPluginEnablementStore(),
+        {
+            "foundation-fixture": UnavailableClient(calls=[]),
+            "available-plugin": FixtureClient(calls=[]),
+        },
+    )
+    await gateway.enable(access, project.id, "foundation-fixture")
+    await gateway.enable(access, project.id, "available-plugin")
+
+    assert tuple(tool.name for tool in await gateway.agent_tools(project.id)) == (
+        "available_plugin__foundation_status",
+    )
 
 
 @pytest.mark.asyncio

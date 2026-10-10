@@ -11,14 +11,11 @@ from mcp import Client
 from agent_hub_api.modules.plugin_gateway._application import (
     PluginDiscoveredTool,
     PluginToolResult,
+    PluginTransportError,
     PluginUiResource,
 )
 
 MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
-
-
-class PluginTransportError(Exception):
-    """The reviewed Plugin did not return a usable MCP result."""
 
 
 class PluginEndpointRejected(PluginTransportError):

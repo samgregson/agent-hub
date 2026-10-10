@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -14,6 +15,8 @@ from pydantic import BaseModel, create_model
 from agent_hub_api.modules.observability import trace_plugin_operation
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule
 from agent_hub_api.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +92,10 @@ class PluginToolNotAllowed(Exception):
 
 class PluginCallLimitExceeded(Exception):
     """A Plugin's process-local rate or concurrent call budget is exhausted."""
+
+
+class PluginTransportError(Exception):
+    """The reviewed Plugin did not return a usable MCP result."""
 
 
 class _PluginCallBudget:
@@ -338,7 +345,11 @@ class PluginGatewayModule:
         for manifest in self._catalog.values():
             if manifest.id not in enabled:
                 continue
-            discovered = {tool.name: tool for tool in await self._discover(manifest)}
+            try:
+                discovered = {tool.name: tool for tool in await self._discover(manifest)}
+            except PluginTransportError:
+                logger.warning("Skipping unavailable Plugin %s during agent setup", manifest.id)
+                continue
             tools.extend(
                 _agent_tool(
                     self,
