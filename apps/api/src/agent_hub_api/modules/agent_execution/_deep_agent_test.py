@@ -1,3 +1,4 @@
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,7 +18,7 @@ from agent_hub_api.modules.agent_execution._deep_agent import (
     _project_file_permissions,
 )
 from agent_hub_api.modules.artifacts import ArtifactMutationAccess
-from agent_hub_api.modules.batch_execution import BatchInitiation
+from agent_hub_api.modules.batch_execution import BatchInitiation, BatchRunStatus
 from agent_hub_api.modules.bindings import BindingModule
 from agent_hub_api.modules.datasets import (
     DatasetModule,
@@ -77,6 +78,7 @@ def test_agent_instructions_describe_transform_language_and_selectors() -> None:
     assert "Transform source is Python" in _AGENT_SYSTEM_PROMPT
     assert "transform(inputs, parameters)" in _AGENT_SYSTEM_PROMPT
     assert '{"record":""}' in _AGENT_SYSTEM_PROMPT
+    assert "null output during that state" in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -357,8 +359,19 @@ async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
             self.submissions.append((project_id, definition_id, idempotency_key, initiation))
             return SimpleNamespace(id="run-1")
 
-        async def enqueue(self, _access: object, _project_id: str, run_id: str) -> None:
+        async def enqueue(
+            self, _access: object, _project_id: str, run_id: str
+        ) -> asyncio.Task[object]:
             self.enqueued_run_id = run_id
+
+            async def complete() -> object:
+                return SimpleNamespace(
+                    id=run_id,
+                    status=BatchRunStatus.succeeded,
+                    records=(SimpleNamespace(structured_output={"value": 1}, error=None),),
+                )
+
+            return asyncio.create_task(complete())
 
     batches = Batches()
     tool = PostgresDeepAgentRunner._batch_tools(
@@ -379,7 +392,7 @@ async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
     await resumed_tool.ainvoke(call)
     await resumed_tool.ainvoke({**call, "id": "call-2"})
 
-    assert result.content == "Started Batch Run run-1."
+    assert result.content == "Batch Run run-1 succeeded: 1 of 1 records produced outputs; 0 failed."
     assert len(batches.submissions) == 4
     assert batches.submissions[0][0:2] == ("project-1", "definition-1")
     assert batches.submissions[0][2] == batches.submissions[1][2]
@@ -392,8 +405,98 @@ async def test_agent_batch_tool_submits_and_queues_a_host_batch_run() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_does_not_read_pending_batch_outputs_as_failures() -> None:
+    completion = asyncio.Event()
+
+    class Batches:
+        async def submit_all(self, *_: object, **__: object) -> object:
+            return SimpleNamespace(id="run-1")
+
+        async def enqueue(self, *_: object) -> asyncio.Task[object]:
+            async def finish() -> object:
+                await completion.wait()
+                return SimpleNamespace(
+                    id="run-1",
+                    status=BatchRunStatus.succeeded,
+                    records=(SimpleNamespace(structured_output={"copied": True}, error=None),),
+                )
+
+            return asyncio.create_task(finish())
+
+        async def load(self, *_: object) -> object:
+            return SimpleNamespace(status=BatchRunStatus.running)
+
+        async def inspect_results(self, *_: object, **__: object) -> object:
+            pytest.fail("Pending results must not be presented as completed outputs")
+
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._batch_tools(
+            cast(Any, Batches()), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    call = {
+        "name": "start_project_batch_run",
+        "type": "tool_call",
+        "args": {"definition_id": "definition-1"},
+        "id": "call-1",
+    }
+    started = asyncio.create_task(tools["start_project_batch_run"].ainvoke(call))
+    await asyncio.sleep(0)
+    assert not started.done()
+    pending = json.loads(await tools["inspect_project_batch_results"].ainvoke({"run_id": "run-1"}))
+    assert pending == {"runId": "run-1", "status": "running", "resultsReady": False}
+    completion.set()
+    assert (await started).content == (
+        "Batch Run run-1 succeeded: 1 of 1 records produced outputs; 0 failed."
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_reports_long_batch_as_pending_without_cancelling_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completion = asyncio.Event()
+    background: asyncio.Task[object] | None = None
+    monkeypatch.setattr(deep_agent, "_AGENT_BATCH_WAIT_SECONDS", 0.01)
+
+    class Batches:
+        async def submit_all(self, *_: object, **__: object) -> object:
+            return SimpleNamespace(id="run-1")
+
+        async def enqueue(self, *_: object) -> asyncio.Task[object]:
+            nonlocal background
+
+            async def finish() -> object:
+                await completion.wait()
+                return SimpleNamespace(status=BatchRunStatus.succeeded, records=())
+
+            background = asyncio.create_task(finish())
+            return background
+
+    tool = PostgresDeepAgentRunner._batch_tools(
+        cast(Any, Batches()), "project-1", "sam", "thread-1", "agent-run-1"
+    )[0]
+    response = await tool.ainvoke(
+        {
+            "name": "start_project_batch_run",
+            "type": "tool_call",
+            "args": {"definition_id": "definition-1"},
+            "id": "call-1",
+        }
+    )
+    assert "outputs are pending" in response.content.lower()
+    assert background is not None and not background.cancelled()
+    completion.set()
+    await background
+
+
+@pytest.mark.asyncio
 async def test_agent_discovers_batch_runs_and_inspects_a_bounded_result_page() -> None:
     class Batches:
+        async def load(self, _access: object, _project_id: str, _run_id: str) -> object:
+            return SimpleNamespace(status=BatchRunStatus.succeeded)
+
         async def list(self, _access: object, project_id: str, **query: object) -> object:
             assert project_id == "project-1"
             assert query["limit"] == 10

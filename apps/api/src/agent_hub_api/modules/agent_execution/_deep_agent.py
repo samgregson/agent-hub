@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -33,7 +34,11 @@ from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
 from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
-from agent_hub_api.modules.batch_execution import BatchExecutionModule, BatchInitiation
+from agent_hub_api.modules.batch_execution import (
+    BatchExecutionModule,
+    BatchInitiation,
+    BatchRunStatus,
+)
 from agent_hub_api.modules.bindings import BindingModule
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.plugin_gateway import (
@@ -76,7 +81,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "You may read them through Project files or Project Dataset tools. "
         "Use the Project Dataset tools for Dataset mutations; generic file writes cannot "
         "change registered Dataset files. Batch Definitions remain separate Project records. "
-        "Dataset and Batch Definition mutations use the approval card automatically.",
+        "Dataset and Batch Definition mutations use the approval card automatically. "
+        "A queued or running Batch Run has pending results; null output during that state "
+        "does not mean its Transform failed. Report outputs only after terminal status.",
         "Transform Definitions and Runs are durable Project records. Use the Project "
         "Transform tools to inspect or change them; Definition changes, Run starts, and "
         "output saves use the approval card automatically. Transform source is Python "
@@ -89,6 +96,8 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "a response, link it as Markdown using its absolute /project or /scratch path.",
     )
 )
+
+_AGENT_BATCH_WAIT_SECONDS = 30.0
 
 
 @tool
@@ -709,7 +718,11 @@ class PostgresDeepAgentRunner:
             tool_call_id: Annotated[str, InjectedToolCallId],
             record_id: str | None = None,
         ) -> str:
-            """Start one Record or all Records from a Batch Definition after user approval."""
+            """Start one or all Records after approval; wait briefly for final results.
+
+            If the Run remains active, report that outputs are pending. Inspect results
+            only after the Run reaches succeeded, failed, or partial status.
+            """
             key = hashlib.sha256(f"agent-batch:{thread_id}:{tool_call_id}".encode()).hexdigest()
             initiation = BatchInitiation(
                 kind="agentRun",
@@ -731,8 +744,22 @@ class PostgresDeepAgentRunner:
                     key,
                     initiation=initiation,
                 )
-            await batches.enqueue(access, project_id, run.id)
-            return f"Started Batch Run {run.id}."
+            task = await batches.enqueue(access, project_id, run.id)
+            try:
+                completed = await asyncio.wait_for(
+                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
+                )
+            except TimeoutError:
+                return (
+                    f"Batch Run {run.id} is still running. Outputs are pending; "
+                    "check its status before interpreting Result Records."
+                )
+            succeeded = sum(record.structured_output is not None for record in completed.records)
+            failed = sum(record.error is not None for record in completed.records)
+            return (
+                f"Batch Run {run.id} {completed.status}: {succeeded} of "
+                f"{len(completed.records)} records produced outputs; {failed} failed."
+            )
 
         @tool
         async def list_project_batch_runs(
@@ -783,9 +810,15 @@ class PostgresDeepAgentRunner:
             descending: bool = False,
             aggregate_path: str | None = None,
         ) -> str:
-            """Read a bounded Result Set page with optional scalar query and summary."""
+            """Read a completed Result Set page with optional scalar query and summary.
+
+            Queued or running records have pending outputs, not failed outputs.
+            """
             if not 1 <= limit <= 20:
                 raise ValueError("Choose a Result Set page size from 1 to 20.")
+            run = await batches.load(access, project_id, run_id)
+            if run.status in {BatchRunStatus.queued, BatchRunStatus.running}:
+                return json.dumps({"runId": run_id, "status": run.status, "resultsReady": False})
             page = await batches.inspect_results(
                 access,
                 project_id,
