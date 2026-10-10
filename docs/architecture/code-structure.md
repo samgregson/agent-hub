@@ -37,6 +37,7 @@ apps/api/src/agent_hub_api/
     agent_execution/           # Deep Agent construction and Run lifecycle
     agent_transport/           # Project-authorized AG-UI orchestration and transport
     project_files/             # project-scoped Deep Agents filesystem
+    bindings/                  # host-owned Project File to MCP argument rules
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
     transforms/                # Project Transform Definitions, previews, and durable Runs

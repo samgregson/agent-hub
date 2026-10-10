@@ -16,6 +16,7 @@ from agent_hub_api.modules.batch_execution import (
     MemoryBatchRunStore,
     create_batch_execution_router,
 )
+from agent_hub_api.modules.bindings import BindingModule, BindingUnavailable, MemoryBindingStore
 from agent_hub_api.modules.datasets import (
     DatasetModule,
     DatasetRecordInput,
@@ -23,6 +24,7 @@ from agent_hub_api.modules.datasets import (
 )
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolResult
+from agent_hub_api.modules.project_files import create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
     MemoryTransformStore,
@@ -261,6 +263,70 @@ async def test_first_failed_record_stops_the_batch_before_fanout() -> None:
     assert run.status is BatchRunStatus.failed
     assert gateway.calls == [1]
     assert run.records[0].error == "load 1 failed"
+
+
+@pytest.mark.asyncio
+async def test_file_binding_is_captured_with_resolved_arguments_before_batch_execution() -> None:
+    class TemplateSchemas:
+        async def input_schema(self, *_: object) -> Mapping[str, object]:
+            return {
+                "type": "object",
+                "required": ["template", "load"],
+                "properties": {"template": {"type": "string"}, "load": {"type": "number"}},
+            }
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Bridge")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), TemplateSchemas())
+    data = await datasets.create_dataset(
+        access,
+        project.id,
+        "Loads",
+        [DatasetRecordInput({"load": 1}), DatasetRecordInput({"load": 2})],
+    )
+    definition = await datasets.create_definition(
+        access,
+        project.id,
+        data.id,
+        "Render",
+        "fixture",
+        "render",
+        {"load": "/load"},
+        file_argument="template",
+    )
+    files = create_memory_project_files(projects)
+    file = await files.write(project.id, "/template.txt", "load = {{load}}")
+    bindings = BindingModule(projects, datasets, files, MemoryBindingStore())
+    await bindings.bind_file(access, project.id, definition.id, file.path, file.version)
+    gateway = Gateway()
+    batches = BatchExecutionModule(
+        projects,
+        datasets,
+        cast(PluginGatewayModule, gateway),
+        MemoryBatchRunStore(),
+        bindings=bindings,
+    )
+    run = await batches.start_all(
+        access, project.id, definition.id, idempotency_key="file-bound-run"
+    )
+    assert run.status is BatchRunStatus.succeeded
+    assert [record.input for record in run.records] == [
+        {"load": 1, "template": "load = {{load}}"},
+        {"load": 2, "template": "load = {{load}}"},
+    ]
+    captured_file = run.definition_snapshot["fileBinding"]
+    assert isinstance(captured_file, Mapping)
+    assert captured_file["sourceVersion"] == file.version
+    assert captured_file["content"] == "load = {{load}}"
+    await files.write(project.id, file.path, "changed")
+    replay = await batches.submit_all(
+        access, project.id, definition.id, idempotency_key="file-bound-run"
+    )
+    assert replay.id == run.id
+    with pytest.raises(BindingUnavailable, match="changed"):
+        await batches.submit_all(access, project.id, definition.id)
+    assert (await batches.load(access, project.id, run.id)).records == run.records
 
 
 @pytest.mark.asyncio

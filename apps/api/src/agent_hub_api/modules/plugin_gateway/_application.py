@@ -459,6 +459,7 @@ def create_postgres_plugin_gateway(
             PluginTool(name="create_status_artifact", read_only=False, agent_visible=False),
             PluginTool(name="validate_status_artifact", read_only=True, agent_visible=False),
             PluginTool(name="set_status_artifact_status", read_only=False, agent_visible=False),
+            PluginTool(name="render_template_value", read_only=True, repeat_safe=True),
         ),
         app_resource_uri="ui://agent-hub-foundation/status.html",
         app_tool_names=("set_status_artifact_status",),

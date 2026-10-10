@@ -34,6 +34,7 @@ _Avoid_: Workflow, pipeline, Plugin protocol, run result
 
 **Binding**:
 A durable host-owned Project rule that maps an explicitly selected structured value to a declared argument of a target operation. Its mapping and execution policy are inspectable; it is not Plugin-owned code or an iframe-to-iframe connection.
+The first delivered kind binds one ordinary Project File's bounded UTF-8 content and expected file version to one declared MCP Batch Definition argument, broadcasting that scalar to the selected Dataset Records. The Binding has its own version for reviewed edits; a stale source blocks a new Run until explicitly rebound. Other source types, propagation policies, and Workflow graph scheduling remain future slices.
 _Avoid_: Plugin protocol extension, arbitrary parser, direct app communication
 
 **Workflow Definition**:

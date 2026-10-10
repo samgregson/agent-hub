@@ -20,6 +20,7 @@ async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
             "create_status_artifact",
             "validate_status_artifact",
             "set_status_artifact_status",
+            "render_template_value",
         }
         fixture_tool = next(tool for tool in tools if tool.name == FIXTURE_TOOL_NAME)
         assert fixture_tool.annotations is not None
@@ -30,6 +31,10 @@ async def test_the_fixture_is_usable_by_an_ordinary_mcp_client() -> None:
             "source": "agent-hub-foundation-fixture",
             "status": "available",
         }
+        rendered = await client.call_tool(
+            "render_template_value", {"template": "value={{value}}", "value": 2.5}
+        )
+        assert rendered.data == {"rendered": "value=2.5"}
 
         resources = await client.list_resources()
         assert any(str(resource.uri) == FIXTURE_APP_RESOURCE_URI for resource in resources)

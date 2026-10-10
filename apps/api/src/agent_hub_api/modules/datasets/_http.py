@@ -66,6 +66,7 @@ class BatchDefinitionRequest(_Model):
     tool_name: str | None = None
     transform_definition_id: str | None = None
     argument_mappings: dict[str, str] = Field(default_factory=dict)
+    file_argument: str | None = None
 
 
 class BatchDefinitionResponse(_Model):
@@ -77,6 +78,7 @@ class BatchDefinitionResponse(_Model):
     tool_name: str | None
     transform_definition_id: str | None
     argument_mappings: dict[str, str]
+    file_argument: str | None
 
 
 class TransformBatchCreator(Protocol):
@@ -127,6 +129,7 @@ async def _definition_response(
         tool_name=definition.tool_name,
         transform_definition_id=definition.transform_definition_id,
         argument_mappings=dict(definition.argument_mappings),
+        file_argument=definition.file_argument,
     )
 
 
@@ -253,6 +256,7 @@ def create_dataset_router(
                     body.plugin_id is not None
                     or body.tool_name is not None
                     or body.argument_mappings
+                    or body.file_argument is not None
                 ):
                     raise DatasetValidationError("Choose one Batch Definition target.")
                 if transform_batches is None:
@@ -275,6 +279,7 @@ def create_dataset_router(
                     body.plugin_id,
                     body.tool_name,
                     body.argument_mappings,
+                    file_argument=body.file_argument,
                 )
         except (
             DatasetNotFound,
@@ -308,6 +313,7 @@ def create_dataset_router(
                 body.plugin_id,
                 body.tool_name,
                 body.argument_mappings,
+                file_argument=body.file_argument,
             )
         except (
             DatasetNotFound,

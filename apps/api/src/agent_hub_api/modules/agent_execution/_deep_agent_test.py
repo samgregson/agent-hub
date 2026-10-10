@@ -18,6 +18,7 @@ from agent_hub_api.modules.agent_execution._deep_agent import (
 )
 from agent_hub_api.modules.artifacts import ArtifactMutationAccess
 from agent_hub_api.modules.batch_execution import BatchInitiation
+from agent_hub_api.modules.bindings import BindingModule
 from agent_hub_api.modules.datasets import (
     DatasetModule,
     DatasetRecordInput,
@@ -253,14 +254,69 @@ async def test_agent_loads_a_batch_definition_on_demand(
     tools = {registered.name: registered for registered in captured["tools"]}
     result = await tools["load_project_batch_definition"].ainvoke({"definition_id": definition.id})
 
-    assert result == (
-        '{"id": "'
-        + definition.id
-        + '", "name": "Beam checks", "datasetId": "'
-        + dataset.id
-        + '", "pluginId": "reference-calculation", "toolName": "calculate_beam", '
-        '"transformDefinitionId": null, "argumentMappings": {"length_m": "/length"}}'
+    assert json.loads(result) == {
+        "id": definition.id,
+        "name": "Beam checks",
+        "datasetId": dataset.id,
+        "pluginId": "reference-calculation",
+        "toolName": "calculate_beam",
+        "transformDefinitionId": None,
+        "argumentMappings": {"length_m": "/length"},
+        "fileArgument": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_file_binding_uses_the_module_command_with_approval_interrupt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Bindings:
+        calls: list[tuple[str, str, int]] = []
+
+        async def bind_file(
+            self,
+            _access: ProjectAccess,
+            project_id: str,
+            definition_id: str,
+            source_path: str,
+            expected_file_version: int,
+        ) -> SimpleNamespace:
+            self.calls.append((definition_id, source_path, expected_file_version))
+            return SimpleNamespace(
+                source_path=source_path,
+                expected_file_version=expected_file_version,
+            )
+
+    bindings = Bindings()
+    runner = object.__new__(PostgresDeepAgentRunner)
+    runner._checkpointer = cast(Any, object())
+    runner._model = cast(Any, object())
+    runner._project_files = cast(Any, object())
+    runner._plugin_gateway = None
+    runner._bindings = cast(BindingModule, bindings)
+    runner._settings = cast(
+        Any, SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False)
     )
+    captured: dict[str, Any] = {}
+
+    def create_agent(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(nodes={})
+
+    monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
+    await runner._agent_for("project-1", subject="sam")
+
+    assert "bind_project_file_to_batch_definition" in captured["interrupt_on"]
+    tools = {registered.name: registered for registered in captured["tools"]}
+    result = await tools["bind_project_file_to_batch_definition"].ainvoke(
+        {
+            "definition_id": "definition-1",
+            "source_path": "/project/template.txt",
+            "expected_file_version": 3,
+        }
+    )
+    assert bindings.calls == [("definition-1", "/template.txt", 3)]
+    assert "template.txt v3" in result
 
 
 @pytest.mark.asyncio

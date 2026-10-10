@@ -2,9 +2,11 @@
 
 A deliberately small portable FastMCP 4 server used to verify Agent Hub's Plugin
 Gateway. It exposes a read-only `foundation_status` tool, tools to create,
-validate, and edit a status Artifact Document, and a standards-compatible
-`ui://` MCP App resource. The App renders the current document's status.
-The separate reference-calculation Plugin remains the calculation example.
+validate, and edit a status Artifact Document, and a read-only
+`render_template_value` tool for Project File Binding tests. The
+standards-compatible `ui://` MCP App resource renders the current document's
+status. The separate reference-calculation Plugin remains the calculation
+example.
 
 Its tools accept and return inline JSON, with no Agent Hub-specific inputs or
 persistence. Clients without MCP Apps support still receive ordinary tool

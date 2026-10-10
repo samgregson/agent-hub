@@ -69,6 +69,7 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
 | Dataset                    | Agent Hub Dataset Module                        | Registered typed Project VFS document plus query projection                          |
 | Batch Definition           | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
+| Binding                    | Agent Hub Bindings Module                       | Project-scoped PostgreSQL records                                                     |
 | Batch Run / Result Set     | Agent Hub                                       | PostgreSQL execution and result records                                               |
 | Transform Definition       | Agent Hub                                       | Project-scoped PostgreSQL definition record                                           |
 | Transform Run              | Agent Hub                                       | Project-scoped PostgreSQL snapshot and outcome record                                 |
@@ -146,11 +147,13 @@ apply(context, artifact_id | new, semantic_operation, expected_version?) -> save
 
 ### Dataset and Batch Execution Modules — API
 
-The Dataset Module owns Dataset files and Batch Definition persistence. The Batch Execution Module owns immutable Batch Run snapshots, bounded dispatch, Result Set persistence, progress, and result queries. Their Interfaces stay host-oriented and compact:
+The Dataset Module owns Dataset files and Batch Definition persistence. The Bindings Module owns versioned Project File-to-MCP-argument declarations and validates the source file, its expected version, content size, and target argument schema. The Batch Execution Module owns immutable Batch Run snapshots, bounded dispatch, Result Set persistence, progress, and result queries. Their Interfaces stay host-oriented and compact:
 
 ```text
 save_dataset(context, draft) -> Dataset
 save_definition(context, draft) -> Batch Definition
+bind_file(context, definition, path, expected_file_version) -> Binding
+rebind_file(context, definition, path, expected_file_version, expected_binding_version) -> Binding
 start(context, definition, selection, initiator, idempotency_key) -> Batch Run
 inspect(context, batch_run_id, query?) -> Batch Run summary / Result page
 archive(context, batch_run_id) -> archived Batch Run summary
@@ -215,7 +218,7 @@ The application does not claim a cross-library transaction spanning a Run and ev
 ### Dataset batch execution
 
 1. A user directly starts a saved Batch Definition, or an agent proposes the same action and pauses for approval.
-2. Batch Execution captures Dataset-record IDs and values, the Batch Definition, its MCP tool/schema or Transform source/runtime/package identity, initiator provenance, and an idempotency key in a new Batch Run.
+2. Batch Execution captures Dataset-record IDs and values, the Batch Definition, its MCP tool/schema or Transform source/runtime/package identity, initiator provenance, and an idempotency key in a new Batch Run. A file-bound MCP target also captures its declared Binding, exact file path, version, content and SHA-256, and resolved arguments for each Record. A missing or stale file blocks the Run; ordinary Project File edits never trigger automatic execution. This first Binding kind is limited to 64 KB of file content and 100 selected Records.
 3. The executor invokes the first real MCP tool or isolated Transform and validates its structured output before bounded fan-out. Transform-backed definitions use the same Result Set and retain the captured source even if the Transform Definition changes later.
 4. It persists Result Records and compact progress independently of the initiating browser or Agent Run.
 5. The workspace and later agent tools inspect native summaries or paginated/filterable results; an explicit save may create a curated Artifact.

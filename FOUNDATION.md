@@ -159,6 +159,7 @@ For engineering artifacts, numerical values should never be represented as untyp
 - **Artifact relation:** typed lineage or reference between Artifacts.
 - **Dataset:** a registered, typed Project File containing structured working inputs, with Dataset-owned identity, Record IDs, validation, and edits.
 - **Batch Definition:** a reusable Project record mapping Dataset values to one Plugin tool's ordinary MCP arguments.
+- **Binding:** a Project-owned, versioned declaration that supplies a selected source to one operation argument; the first kind supplies ordinary Project File content to an MCP Batch Definition.
 - **Batch Run / Result Set:** one host-orchestrated execution and its durable, queryable outcomes; neither is automatically an Artifact.
 
 These are application concepts. Their ownership, persistence, and Module Interfaces are defined in `docs/architecture/system-architecture.md`.
