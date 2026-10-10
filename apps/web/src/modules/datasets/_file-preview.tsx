@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { filterDatasetRecords, scalarColumns, scalarText } from "./_table";
 import styles from "./dataset.module.css";
 
 interface DatasetRecord {
@@ -47,6 +48,13 @@ export function DatasetFilePreview({
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [records, setRecords] = useState<DraftRecord[]>([]);
+  const [viewFilter, setViewFilter] = useState("");
+  const columns = scalarColumns(dataset?.records ?? []);
+  const visibleRecords = filterDatasetRecords(
+    dataset?.records ?? [],
+    viewFilter,
+    columns,
+  );
   const url = `/api/projects/${encodeURIComponent(projectId)}/datasets/${encodeURIComponent(datasetId)}`;
 
   useEffect(() => {
@@ -234,29 +242,62 @@ export function DatasetFilePreview({
               </div>
             </form>
           ) : (
-            <div className={styles.datasetTableWrap}>
-              <table className={styles.datasetTable}>
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Record</th>
-                    <th>Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dataset.records.map((record) => (
-                    <tr key={record.id}>
-                      <td>{record.position + 1}</td>
-                      <td>
-                        <strong>{record.sourceKey ?? record.id}</strong>
-                      </td>
-                      <td>
-                        <code>{JSON.stringify(record.value)}</code>
-                      </td>
+            <div className={styles.datasetBrowse}>
+              <label className={styles.datasetFilter}>
+                Filter records in this view
+                <input
+                  onChange={(event) => setViewFilter(event.target.value)}
+                  type="search"
+                  value={viewFilter}
+                />
+              </label>
+              <p role="status">
+                Showing {visibleRecords.length} of {dataset.records.length}{" "}
+                Records · View filter only
+              </p>
+              <div className={styles.datasetTableWrap}>
+                <table className={styles.datasetTable}>
+                  <thead>
+                    <tr>
+                      <th scope="col">Order</th>
+                      <th scope="col">Record</th>
+                      {columns.map((column) => (
+                        <th key={column} scope="col">
+                          {column}
+                        </th>
+                      ))}
+                      <th scope="col">Full record</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {visibleRecords.map((record) => (
+                      <tr key={record.id}>
+                        <td>{record.position + 1}</td>
+                        <td>
+                          <strong>{record.sourceKey ?? record.id}</strong>
+                        </td>
+                        {columns.map((column) => (
+                          <td key={column}>
+                            {scalarText(record.value[column]) ??
+                              (column in record.value
+                                ? "See full record"
+                                : "—")}
+                          </td>
+                        ))}
+                        <td>
+                          <details className={styles.datasetRecordDetails}>
+                            <summary>Inspect JSON</summary>
+                            <pre>{JSON.stringify(record.value, null, 2)}</pre>
+                          </details>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {visibleRecords.length === 0 ? (
+                <p>No records match this view filter.</p>
+              ) : null}
             </div>
           )}
         </>

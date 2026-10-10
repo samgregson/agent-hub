@@ -10,6 +10,8 @@
     "types": ["node"]
   },
   "include": [
+    "src/modules/datasets/_table.ts",
+    "src/modules/datasets/_table.test.ts",
     "src/modules/workspace/_state.ts",
     "src/modules/workspace/_state.test.ts",
     "src/modules/workspace/_thread-title.ts",

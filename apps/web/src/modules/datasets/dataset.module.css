@@ -114,6 +114,31 @@
 
 .datasetTableWrap {
   overflow-x: auto;
+  max-width: 100%;
+}
+
+.datasetBrowse {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+}
+
+.datasetFilter {
+  display: grid;
+  max-width: 24rem;
+  gap: var(--space-2);
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.datasetFilter input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-strong);
+  font: inherit;
+  padding: var(--space-3);
 }
 
 .datasetTable {
@@ -131,6 +156,18 @@
 
 .datasetTable code {
   overflow-wrap: anywhere;
+}
+
+.datasetRecordDetails summary {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.datasetRecordDetails pre {
+  max-width: 24rem;
+  overflow: auto;
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-size-meta);
 }
 
 .recordEditor {

@@ -738,12 +738,25 @@ test("Library opens a registered Dataset in its table viewer and saves through D
         id: "record-123",
         position: 0,
         sourceKey: "LC-1",
-        value: { load: 12.5 },
+        value: { load: 12.5, metadata: { unit: "kN" } },
+      },
+      {
+        id: "record-456",
+        position: 1,
+        sourceKey: "LC-2",
+        value: { load: 20, active: true },
       },
     ],
   };
   let savedVersion: number | null = null;
-  let currentDataset = dataset;
+  let currentDataset: Omit<typeof dataset, "records"> & {
+    records: Array<{
+      id: string;
+      position: number;
+      sourceKey: string;
+      value: Record<string, unknown>;
+    }>;
+  } = dataset;
   await page.route("**/api/projects", async (route) =>
     route.fulfill({ json: [project] }),
   );
@@ -768,13 +781,22 @@ test("Library opens a registered Dataset in its table viewer and saves through D
       if (route.request().method() === "PUT") {
         const body = route.request().postDataJSON() as {
           expectedVersion: number;
-          records: Array<{ value: { load: number } }>;
+          records: Array<{
+            value: {
+              load: number;
+              metadata?: { unit: string };
+              active?: boolean;
+            };
+          }>;
         };
         savedVersion = body.expectedVersion;
         currentDataset = {
           ...dataset,
           version: 2,
-          records: [{ ...dataset.records[0], value: body.records[0].value }],
+          records: dataset.records.map((record, index) => ({
+            ...record,
+            value: body.records[index].value,
+          })),
         };
         await route.fulfill({
           json: currentDataset,
@@ -791,6 +813,29 @@ test("Library opens a registered Dataset in its table viewer and saves through D
   const viewer = page.getByRole("region", { name: "Dataset viewer" });
   await expect(viewer).toContainText("LC-1");
   await expect(viewer).toContainText("12.5");
+  await expect(
+    viewer.getByRole("columnheader", { name: "load" }),
+  ).toBeVisible();
+  await expect(
+    viewer.getByRole("columnheader", { name: "active" }),
+  ).toBeVisible();
+  await viewer.getByLabel("Filter records in this view").fill("LC-2");
+  await expect(viewer.getByRole("row", { name: /LC-1/ })).toHaveCount(0);
+  await expect(viewer.getByRole("row", { name: /LC-2/ })).toBeVisible();
+  await expect(viewer.getByRole("status")).toContainText(
+    "Showing 1 of 2 Records · View filter only",
+  );
+  await viewer.getByLabel("Filter records in this view").fill("");
+  await viewer
+    .getByRole("row", { name: /LC-1/ })
+    .getByText("Inspect JSON")
+    .click();
+  await expect(viewer.getByText('"unit": "kN"')).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(viewer).toBeVisible();
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth),
+  ).toBeLessThanOrEqual(390);
   await viewer.getByRole("button", { name: "Edit Dataset" }).click();
   await viewer.getByLabel("LC-1 value (JSON)").fill('{"load":13}');
   await viewer.getByRole("button", { name: "Save Dataset" }).click();
