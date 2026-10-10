@@ -97,6 +97,7 @@ async def test_authorized_project_can_discover_compact_artifacts_and_load_one() 
                 "documentVersion": 1,
                 "title": "Foundation status",
                 "summary": "The fixture is available.",
+                "schemaId": "agent-hub.fixture.status",
                 "pluginId": "foundation-fixture",
                 "pluginVersion": "0.1.0",
             }

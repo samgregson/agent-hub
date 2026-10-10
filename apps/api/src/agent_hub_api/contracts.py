@@ -110,6 +110,7 @@ class ArtifactSummary(BaseModel):
     document_version: Annotated[int, Field(alias="documentVersion", ge=1)]
     title: Annotated[str, Field(max_length=240, min_length=1)]
     summary: Annotated[str | None, Field(max_length=2000)] = None
+    schema_id: Annotated[str, Field(alias="schemaId", min_length=1)]
     plugin_id: Annotated[str, Field(alias="pluginId", min_length=1)]
     plugin_version: Annotated[str, Field(alias="pluginVersion", min_length=1)]
 

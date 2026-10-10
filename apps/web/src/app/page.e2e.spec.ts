@@ -1771,6 +1771,158 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
   expect(writes[1]).toEqual(writes[0]);
 });
 
+test("a retained MCP output selection is reviewable and traceable", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-mcp-selection",
+    name: "MCP selection",
+    createdAt: "2026-10-08T00:00:00Z",
+    updatedAt: "2026-10-08T00:00:00Z",
+  };
+  const definition = {
+    id: "transform-mcp-consumer",
+    name: "Consume MCP output",
+    source: "def transform(inputs, parameters): pass",
+    inputSelectors: { items: "/selection/values" },
+    outputSchema: { type: "object" },
+    runtime: "pyodide",
+    packageHash: "abc",
+    revision: 3,
+  };
+  const selection = {
+    sourceKind: "mcpToolResult",
+    artifactId: "artifact-mcp-output",
+    artifactVersion: 2,
+    pluginId: "fixture",
+    toolName: "measure",
+    outputPath: "/measurements",
+    selectedValues: [{ position: 1, value: { name: "B", score: 4 } }],
+    rule: { limit: 1 },
+    selectedCount: 1,
+  };
+  const retained = {
+    id: "transform-mcp-run",
+    definitionId: definition.id,
+    status: "succeeded",
+    definitionSnapshot: { ...definition, selection },
+    inputs: { items: [{ name: "B", score: 4 }] },
+    parameters: {},
+    inputHash: "inputhash",
+    sourceHash: "sourcehash",
+    packageHash: "abc",
+    runtime: "pyodide",
+    output: { count: 1 },
+    outputManifest: {},
+    error: null,
+    initiation: { kind: "directUser", approval: "notRequired" },
+    limits: {},
+    createdAt: "2026-10-08T00:00:00Z",
+  };
+  const writes: Array<Record<string, unknown>> = [];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [definition] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs?**`,
+    (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
+  );
+  await page.route(`**/api/projects/${project.id}/artifacts`, (route) =>
+    route.fulfill({
+      json: {
+        artifacts: [
+          {
+            id: selection.artifactId,
+            title: "fixture: measure",
+            type: "fixture.measure",
+            schemaId: "agent-hub.tool-result-snapshot",
+            documentVersion: 2,
+          },
+          {
+            id: "unrelated-artifact",
+            title: "Project note",
+            type: "note",
+            schemaId: "agent-hub.note",
+            documentVersion: 1,
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/artifact-selection-plan`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          selection,
+          selectedCount: 1,
+          invocationCount: 1,
+          outputLocation: "Transform Run output",
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/${definition.id}/artifact-selection-runs`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        status: 201,
+        json: { id: retained.id, status: "succeeded" },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms/runs/${retained.id}`,
+    (route) => route.fulfill({ json: retained }),
+  );
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Operation types" })
+    .getByRole("button", { name: "Transforms" })
+    .click();
+  await page.getByLabel("Input source").selectOption("artifact");
+  await expect(
+    page.getByRole("combobox", { name: "MCP Tool Result Artifact" }),
+  ).not.toContainText("Project note");
+  await page
+    .getByRole("combobox", { name: "MCP Tool Result Artifact" })
+    .selectOption(selection.artifactId);
+  await page.getByLabel(/Values path in MCP output/).fill("/measurements");
+  await page.getByLabel("Maximum records (optional)").fill("1");
+  await page.getByRole("button", { name: "Review selection" }).click();
+  await expect(
+    page.getByRole("region", { name: "Selection plan" }),
+  ).toContainText("MCP Tool Result artifact · v2 → Transform Run output");
+  await page.getByRole("button", { name: "Start selected Run" }).click();
+  await expect(
+    page.getByRole("article", { name: "Run dataflow" }),
+  ).toContainText("MCP Tool Result artifact · v2 · 1 values");
+  expect(writes).toHaveLength(2);
+  expect(writes[0]).toMatchObject({
+    artifactId: selection.artifactId,
+    expectedArtifactVersion: 2,
+    outputPath: "/measurements",
+    expectedDefinitionRevision: 3,
+    limit: 1,
+  });
+  expect(writes[1]).toEqual(writes[0]);
+});
+
 test.describe("at phone width", () => {
   test.use({ viewport: { height: 844, width: 390 } });
 

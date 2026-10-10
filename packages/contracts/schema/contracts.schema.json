@@ -122,13 +122,14 @@
     "ArtifactSummary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "type", "documentVersion", "title", "pluginId", "pluginVersion"],
+      "required": ["id", "type", "documentVersion", "title", "schemaId", "pluginId", "pluginVersion"],
       "properties": {
         "id": { "$ref": "#/$defs/EntityId" },
         "type": { "type": "string", "minLength": 1 },
         "documentVersion": { "type": "integer", "minimum": 1 },
         "title": { "type": "string", "minLength": 1, "maxLength": 240 },
         "summary": { "type": "string", "maxLength": 2000 },
+        "schemaId": { "type": "string", "minLength": 1 },
         "pluginId": { "type": "string", "minLength": 1 },
         "pluginVersion": { "type": "string", "minLength": 1 }
       }

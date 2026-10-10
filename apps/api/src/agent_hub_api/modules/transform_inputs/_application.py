@@ -1,9 +1,10 @@
-"""Coordinate retained Result Set values with Transform execution."""
+"""Coordinate retained operation values with Transform execution."""
 
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactNotFound
 from agent_hub_api.modules.batch_execution import (
     BatchExecutionModule,
     BatchRunNotFound,
@@ -104,12 +105,152 @@ class ResultSetSelectionPlan:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ArtifactSelection:
+    artifact_id: str
+    expected_artifact_version: int
+    output_path: str
+    expected_definition_revision: int
+    filter_path: str | None = None
+    equals: str | int | float | bool | None = None
+    sort_path: str | None = None
+    descending: bool = False
+    limit: int | None = None
+
+    def rule(self) -> SelectionRule:
+        return SelectionRule(
+            self.filter_path, self.equals, self.sort_path, self.descending, self.limit
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactSelectionPlan:
+    artifact_id: str
+    artifact_version: int
+    plugin_id: str
+    tool_name: str
+    output_path: str
+    selected: tuple[SelectionValue, ...]
+    rule: SelectionRule
+
+    @property
+    def selected_count(self) -> int:
+        return len(self.selected)
+
+    @property
+    def invocation_count(self) -> int:
+        return 1
+
+    def input_record(self) -> Mapping[str, object]:
+        return {"selection": {"values": [_json_copy(item.value) for item in self.selected]}}
+
+    def snapshot(self) -> Mapping[str, object]:
+        return {
+            "sourceKind": "mcpToolResult",
+            "artifactId": self.artifact_id,
+            "artifactVersion": self.artifact_version,
+            "pluginId": self.plugin_id,
+            "toolName": self.tool_name,
+            "outputPath": self.output_path,
+            "selectedValues": [
+                {"position": item.position, "value": _json_copy(item.value)}
+                for item in self.selected
+            ],
+            "rule": dict(self.rule.snapshot()),
+            "selectedCount": self.selected_count,
+        }
+
+
 class TransformInputModule:
     """Plan and execute one Transform from captured cross-Module values."""
 
-    def __init__(self, batches: BatchExecutionModule, transforms: TransformModule) -> None:
+    def __init__(
+        self, batches: BatchExecutionModule, transforms: TransformModule, artifacts: ArtifactModule
+    ) -> None:
         self._batches = batches
         self._transforms = transforms
+        self._artifacts = artifacts
+
+    async def plan_artifact_selection(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        selection: ArtifactSelection,
+        parameters: Mapping[str, object] | None = None,
+    ) -> ArtifactSelectionPlan:
+        try:
+            source = await self._artifacts.load(
+                ArtifactAccess(access.subject), project_id, selection.artifact_id
+            )
+        except ArtifactNotFound as error:
+            raise TransformInputValidationError("Selected MCP output is unavailable.") from error
+        if source.artifact.schema_.id != "agent-hub.tool-result-snapshot":
+            raise TransformInputValidationError("Artifact is not a retained MCP tool result.")
+        if source.artifact.document_version != selection.expected_artifact_version:
+            raise TransformInputValidationError("MCP output changed; review the selection again.")
+        output = source.payload.get("output")
+        if not isinstance(output, dict):
+            raise TransformInputValidationError("MCP output has no structured values.")
+        try:
+            projected = project_value(output, selection.output_path)
+        except SelectionValidationError as error:
+            raise TransformInputValidationError(str(error)) from error
+        values = projected if isinstance(projected, list) else [projected]
+        if len(values) > MAX_SOURCE_ROWS:
+            raise TransformInputValidationError("MCP output exceeds the source inspection limit.")
+        try:
+            selected = select_values(
+                tuple(
+                    SelectionValue(str(index), index, value) for index, value in enumerate(values)
+                ),
+                selection.rule(),
+            )
+        except SelectionValidationError as error:
+            raise TransformInputValidationError(str(error)) from error
+        plan = ArtifactSelectionPlan(
+            selection.artifact_id,
+            source.artifact.document_version,
+            source.artifact.plugin.id,
+            source.artifact.type.removeprefix(f"{source.artifact.plugin.id}."),
+            selection.output_path,
+            selected,
+            selection.rule(),
+        )
+        await self._transforms.validate_captured_input(
+            access,
+            project_id,
+            definition_id,
+            plan.input_record(),
+            parameters or {},
+            expected_revision=selection.expected_definition_revision,
+        )
+        return plan
+
+    async def start_artifact_run(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        selection: ArtifactSelection,
+        parameters: Mapping[str, object],
+        initiation: TransformInitiation | None = None,
+    ) -> TransformRun:
+        plan = await self.plan_artifact_selection(
+            access, project_id, definition_id, selection, parameters
+        )
+        if not plan.selected:
+            raise TransformInputValidationError("Selection has no values to run.")
+        return await self._transforms.start_captured_run(
+            access,
+            project_id,
+            definition_id,
+            plan.input_record(),
+            parameters,
+            plan.snapshot(),
+            selection.expected_definition_revision,
+            initiation,
+        )
 
     async def plan_result_set_selection(
         self,

@@ -69,6 +69,7 @@ def create_artifact_router(identity: IdentityModule, artifacts: ArtifactModule) 
                         "documentVersion": document.artifact.document_version,
                         "title": document.artifact.title,
                         "summary": document.artifact.summary,
+                        "schemaId": document.artifact.schema_.id,
                         "pluginId": document.artifact.plugin.id,
                         "pluginVersion": document.artifact.plugin.version,
                     }

@@ -46,6 +46,7 @@ export interface ArtifactSummary {
   documentVersion: number;
   title: string;
   summary?: string;
+  schemaId: string;
   pluginId: string;
   pluginVersion: string;
 }

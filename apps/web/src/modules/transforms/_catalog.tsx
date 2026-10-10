@@ -34,6 +34,8 @@ interface Run {
       recordIds?: string[];
       sourceRunId?: string;
       batchRunId?: string;
+      artifactId?: string;
+      artifactVersion?: number;
       outputPath?: string;
       rule: Record<string, unknown>;
       selectedCount: number;
@@ -107,7 +109,14 @@ interface OutputSelectionRequest extends SelectionRuleRequest {
   outputPath: string;
 }
 
-type SelectionRequest = DatasetSelectionRequest | OutputSelectionRequest;
+interface ArtifactSelectionRequest extends SelectionRuleRequest {
+  artifactId: string;
+  expectedArtifactVersion: number;
+  outputPath: string;
+}
+
+type SelectionRequest =
+  DatasetSelectionRequest | OutputSelectionRequest | ArtifactSelectionRequest;
 
 interface SelectionPlan {
   selection: {
@@ -116,6 +125,8 @@ interface SelectionPlan {
     datasetVersion?: number;
     sourceRunId?: string;
     batchRunId?: string;
+    artifactId?: string;
+    artifactVersion?: number;
     outputPath?: string;
     recordIds?: string[];
     records?: Array<{ id: string; value: Record<string, unknown> }>;
@@ -128,6 +139,7 @@ interface SelectionPlan {
       input: Record<string, unknown>;
       value: unknown;
     }>;
+    selectedValues?: Array<{ position: number; value: unknown }>;
     rule: Record<string, unknown>;
   };
   selectedCount: number;
@@ -182,13 +194,17 @@ export function TransformCatalog({
   const [recordJson, setRecordJson] = useState('{"load": 3}');
   const [parametersJson, setParametersJson] = useState("{}");
   const [inputMode, setInputMode] = useState<
-    "record" | "dataset" | "output" | "resultSet"
+    "record" | "dataset" | "output" | "resultSet" | "artifact"
   >("record");
   const [datasetOptions, setDatasetOptions] = useState<DatasetOption[]>([]);
   const [batchRunOptions, setBatchRunOptions] = useState<BatchRunOption[]>([]);
+  const [artifactOptions, setArtifactOptions] = useState<
+    Array<{ id: string; title: string; documentVersion: number }>
+  >([]);
   const [selectionDatasetId, setSelectionDatasetId] = useState("");
   const [selectionRunId, setSelectionRunId] = useState("");
   const [selectionBatchRunId, setSelectionBatchRunId] = useState("");
+  const [selectionArtifactId, setSelectionArtifactId] = useState("");
   const [outputPath, setOutputPath] = useState("");
   const [filterPath, setFilterPath] = useState("");
   const [filterEquals, setFilterEquals] = useState("");
@@ -231,6 +247,27 @@ export function TransformCatalog({
     if (!response.ok) throw new Error("Batch Runs could not be loaded.");
     const page = (await response.json()) as { items: BatchRunOption[] };
     setBatchRunOptions(page.items);
+  }
+
+  async function refreshArtifacts() {
+    const response = await fetch(
+      `/api/projects/${encodeURIComponent(projectId)}/artifacts`,
+      { cache: "no-store" },
+    );
+    if (!response.ok) throw new Error("Artifacts could not be loaded.");
+    const catalog = (await response.json()) as {
+      artifacts: Array<{
+        id: string;
+        title: string;
+        documentVersion: number;
+        schemaId: string;
+      }>;
+    };
+    setArtifactOptions(
+      catalog.artifacts.filter(
+        (artifact) => artifact.schemaId === "agent-hub.tool-result-snapshot",
+      ),
+    );
   }
 
   useEffect(() => {
@@ -508,6 +545,18 @@ export function TransformCatalog({
         outputPath: outputPath.trim(),
       };
     }
+    if (inputMode === "artifact") {
+      const artifact = artifactOptions.find(
+        (item) => item.id === selectionArtifactId,
+      );
+      if (!artifact) throw new Error("Select a retained MCP output Artifact.");
+      return {
+        ...rule,
+        artifactId: artifact.id,
+        expectedArtifactVersion: artifact.documentVersion,
+        outputPath: outputPath.trim(),
+      };
+    }
     const dataset = datasetOptions.find(
       (item) => item.id === selectionDatasetId,
     );
@@ -531,7 +580,9 @@ export function TransformCatalog({
           ? "output-selection"
           : inputMode === "resultSet"
             ? "result-set-selection"
-            : "selection";
+            : inputMode === "artifact"
+              ? "artifact-selection"
+              : "selection";
       const response = await fetch(
         `${root}/${encodeURIComponent(selectedDefinition.id)}/${endpoint}-plan`,
         {
@@ -578,7 +629,10 @@ export function TransformCatalog({
           await responseError(response, "Selected Run could not be started."),
         );
       let run = (await response.json()) as Run;
-      if (selectionPlan.endpoint === "result-set-selection") {
+      if (
+        selectionPlan.endpoint === "result-set-selection" ||
+        selectionPlan.endpoint === "artifact-selection"
+      ) {
         const detail = await fetch(
           `${root}/runs/${encodeURIComponent(run.id)}`,
           { cache: "no-store" },
@@ -889,12 +943,21 @@ export function TransformCatalog({
                   onChange={(event) => {
                     setInputMode(
                       event.target.value as
-                        "record" | "dataset" | "output" | "resultSet",
+                        | "record"
+                        | "dataset"
+                        | "output"
+                        | "resultSet"
+                        | "artifact",
                     );
                     setSelectionPlan(null);
                     if (event.target.value === "resultSet") {
                       void refreshBatchRuns().catch(() =>
                         setError("Batch Runs could not be loaded."),
+                      );
+                    }
+                    if (event.target.value === "artifact") {
+                      void refreshArtifacts().catch(() =>
+                        setError("Artifacts could not be loaded."),
                       );
                     }
                   }}
@@ -906,6 +969,7 @@ export function TransformCatalog({
                   <option value="resultSet">
                     Selected Batch Result Set values
                   </option>
+                  <option value="artifact">Selected MCP tool output</option>
                 </select>
               </Field>
               {inputMode === "record" ? (
@@ -1016,6 +1080,44 @@ export function TransformCatalog({
                           value={outputPath}
                         />
                       </Field>
+                    </div>
+                  ) : inputMode === "artifact" ? (
+                    <div className={styles.formGrid}>
+                      <Field label="MCP Tool Result Artifact">
+                        <select
+                          onChange={(event) => {
+                            setSelectionArtifactId(event.target.value);
+                            setSelectionPlan(null);
+                          }}
+                          value={selectionArtifactId}
+                        >
+                          <option value="">Select retained output</option>
+                          {artifactOptions.map((artifact) => (
+                            <option key={artifact.id} value={artifact.id}>
+                              {artifact.title} · v{artifact.documentVersion}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                      <Field label="Values path in MCP output (JSON Pointer; empty uses whole output)">
+                        <input
+                          onChange={(event) => {
+                            setOutputPath(event.target.value);
+                            setSelectionPlan(null);
+                          }}
+                          placeholder="/items"
+                          value={outputPath}
+                        />
+                      </Field>
+                      <Button
+                        onClick={() =>
+                          void refreshArtifacts().catch(() =>
+                            setError("Artifacts could not be loaded."),
+                          )
+                        }
+                      >
+                        Refresh Artifacts
+                      </Button>
                     </div>
                   ) : (
                     <div className={styles.formGrid}>
@@ -1136,7 +1238,9 @@ export function TransformCatalog({
                         ? !selectionDatasetId
                         : inputMode === "output"
                           ? !selectionRunId
-                          : !selectionBatchRunId)
+                          : inputMode === "artifact"
+                            ? !selectionArtifactId
+                            : !selectionBatchRunId)
                     }
                     onClick={() => void reviewSelection()}
                   >
@@ -1158,9 +1262,11 @@ export function TransformCatalog({
                       <p>
                         {selectionPlan.plan.selection.batchRunId
                           ? `Batch Result Set ${shortId(selectionPlan.plan.selection.batchRunId)}`
-                          : selectionPlan.plan.selection.sourceRunId
-                            ? `Transform Run ${shortId(selectionPlan.plan.selection.sourceRunId)}`
-                            : `Dataset v${selectionPlan.plan.selection.datasetVersion}`}{" "}
+                          : selectionPlan.plan.selection.artifactId
+                            ? `MCP Tool Result ${shortId(selectionPlan.plan.selection.artifactId)} · v${selectionPlan.plan.selection.artifactVersion}`
+                            : selectionPlan.plan.selection.sourceRunId
+                              ? `Transform Run ${shortId(selectionPlan.plan.selection.sourceRunId)}`
+                              : `Dataset v${selectionPlan.plan.selection.datasetVersion}`}{" "}
                         → {selectionPlan.plan.outputLocation}
                       </p>
                       <details>
@@ -1169,7 +1275,8 @@ export function TransformCatalog({
                           {JSON.stringify(
                             selectionPlan.plan.selection.records ??
                               selectionPlan.plan.selection.values ??
-                              selectionPlan.plan.selection.selectedRecords,
+                              selectionPlan.plan.selection.selectedRecords ??
+                              selectionPlan.plan.selection.selectedValues,
                             null,
                             2,
                           )}
@@ -1284,9 +1391,11 @@ export function TransformCatalog({
                     <p>
                       {selectedRun.definitionSnapshot.selection.batchRunId
                         ? `Batch Result Set ${shortId(selectedRun.definitionSnapshot.selection.batchRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
-                        : selectedRun.definitionSnapshot.selection.sourceRunId
-                          ? `Transform Run ${shortId(selectedRun.definitionSnapshot.selection.sourceRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
-                          : `Dataset ${shortId(selectedRun.definitionSnapshot.selection.datasetId ?? "")} · v${selectedRun.definitionSnapshot.selection.datasetVersion} · ${selectedRun.definitionSnapshot.selection.selectedCount} Records`}{" "}
+                        : selectedRun.definitionSnapshot.selection.artifactId
+                          ? `MCP Tool Result ${shortId(selectedRun.definitionSnapshot.selection.artifactId)} · v${selectedRun.definitionSnapshot.selection.artifactVersion} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
+                          : selectedRun.definitionSnapshot.selection.sourceRunId
+                            ? `Transform Run ${shortId(selectedRun.definitionSnapshot.selection.sourceRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
+                            : `Dataset ${shortId(selectedRun.definitionSnapshot.selection.datasetId ?? "")} · v${selectedRun.definitionSnapshot.selection.datasetVersion} · ${selectedRun.definitionSnapshot.selection.selectedCount} Records`}{" "}
                       · 1 invocation
                     </p>
                   ) : null}

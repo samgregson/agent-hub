@@ -25,7 +25,7 @@ from agent_hub_api.modules.datasets import (
     MemoryDatasetStore,
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
-from agent_hub_api.modules.transform_inputs import ResultSetSelection
+from agent_hub_api.modules.transform_inputs import ArtifactSelection, ResultSetSelection
 from agent_hub_api.modules.transforms import DatasetSelection, OutputSelection, TransformInitiation
 
 
@@ -198,12 +198,15 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "start_project_transform_selection_run" in captured["interrupt_on"]
     assert "start_project_transform_output_selection_run" in captured["interrupt_on"]
     assert "start_project_transform_result_set_selection_run" in captured["interrupt_on"]
+    assert "start_project_transform_artifact_selection_run" in captured["interrupt_on"]
     assert "plan_project_transform_selection" in names
     assert "plan_project_transform_output_selection" in names
     assert "plan_project_transform_result_set_selection" in names
+    assert "plan_project_transform_artifact_selection" in names
     assert "plan_project_transform_selection" not in captured["interrupt_on"]
     assert "plan_project_transform_output_selection" not in captured["interrupt_on"]
     assert "plan_project_transform_result_set_selection" not in captured["interrupt_on"]
+    assert "plan_project_transform_artifact_selection" not in captured["interrupt_on"]
     assert "save_project_transform_run_as_dataset" in captured["interrupt_on"]
 
 
@@ -725,6 +728,65 @@ async def test_agent_reviews_and_starts_a_result_set_selection() -> None:
     assert started == "Transform Run run-4 succeeded."
     assert inputs.started == (
         ResultSetSelection("batch-run-1", "/score", 3, limit=2),
+        TransformInitiation("agentRun", "approved", "thread-1", "agent-run-1"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_reviews_and_starts_retained_mcp_output_selection() -> None:
+    class Inputs:
+        def __init__(self) -> None:
+            self.started: tuple[object, TransformInitiation] | None = None
+
+        async def plan_artifact_selection(
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: object,
+            _parameters: dict[str, object],
+        ) -> object:
+            assert selection == ArtifactSelection("artifact-1", 2, "/items", 3, limit=2)
+            return SimpleNamespace(snapshot=lambda: {"selectedCount": 2})
+
+        async def start_artifact_run(
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            selection: object,
+            _parameters: dict[str, object],
+            initiation: TransformInitiation,
+        ) -> object:
+            self.started = (selection, initiation)
+            return SimpleNamespace(id="run-5", status="succeeded")
+
+    inputs = Inputs()
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._transform_input_tools(
+            cast(Any, inputs), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    choice = json.dumps(
+        {
+            "artifact_id": "artifact-1",
+            "expected_artifact_version": 2,
+            "output_path": "/items",
+            "expected_definition_revision": 3,
+            "limit": 2,
+        }
+    )
+    plan = await tools["plan_project_transform_artifact_selection"].ainvoke(
+        {"definition_id": "transform-1", "selection_json": choice}
+    )
+    started = await tools["start_project_transform_artifact_selection_run"].ainvoke(
+        {"definition_id": "transform-1", "selection_json": choice}
+    )
+    assert json.loads(plan) == {"selectedCount": 2}
+    assert started == "Transform Run run-5 succeeded."
+    assert inputs.started == (
+        ArtifactSelection("artifact-1", 2, "/items", 3, limit=2),
         TransformInitiation("agentRun", "approved", "thread-1", "agent-run-1"),
     )
 

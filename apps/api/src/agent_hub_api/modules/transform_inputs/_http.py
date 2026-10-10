@@ -14,6 +14,7 @@ from agent_hub_api.modules.identity import (
 )
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transform_inputs._application import (
+    ArtifactSelection,
     ResultSetSelection,
     TransformInputModule,
     TransformInputValidationError,
@@ -29,9 +30,7 @@ class _Model(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
-class ResultSetSelectionRequest(_Model):
-    source_run_id: str
-    output_path: str = ""
+class _SelectionRuleRequest(_Model):
     expected_definition_revision: int = Field(ge=1)
     filter_path: str | None = None
     equals: str | int | float | bool | None = None
@@ -39,6 +38,17 @@ class ResultSetSelectionRequest(_Model):
     descending: bool = False
     limit: int | None = Field(default=None, ge=1, le=100)
     parameters: dict[str, object] = Field(default_factory=dict)
+
+
+class ResultSetSelectionRequest(_SelectionRuleRequest):
+    source_run_id: str
+    output_path: str = ""
+
+
+class ArtifactSelectionRequest(_SelectionRuleRequest):
+    artifact_id: str
+    expected_artifact_version: int = Field(ge=1)
+    output_path: str = ""
 
 
 class SelectionPlanResponse(_Model):
@@ -56,6 +66,20 @@ class RunReferenceResponse(_Model):
 def _selection(body: ResultSetSelectionRequest) -> ResultSetSelection:
     return ResultSetSelection(
         source_run_id=body.source_run_id,
+        output_path=body.output_path,
+        expected_definition_revision=body.expected_definition_revision,
+        filter_path=body.filter_path,
+        equals=body.equals,
+        sort_path=body.sort_path,
+        descending=body.descending,
+        limit=body.limit,
+    )
+
+
+def _artifact_selection(body: ArtifactSelectionRequest) -> ArtifactSelection:
+    return ArtifactSelection(
+        artifact_id=body.artifact_id,
+        expected_artifact_version=body.expected_artifact_version,
         output_path=body.output_path,
         expected_definition_revision=body.expected_definition_revision,
         filter_path=body.filter_path,
@@ -128,6 +152,63 @@ def create_transform_input_router(
             invocation_count=result.invocation_count,
             output_location="Transform Run output",
         )
+
+    @router.post("/{definition_id}/artifact-selection-plan", response_model=SelectionPlanResponse)
+    async def plan_artifact(
+        project_id: str,
+        definition_id: str,
+        body: ArtifactSelectionRequest,
+        request_context: Context,
+    ) -> SelectionPlanResponse:
+        try:
+            result = await inputs.plan_artifact_selection(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                definition_id,
+                _artifact_selection(body),
+                body.parameters,
+            )
+        except (
+            TransformInputValidationError,
+            TransformNotFound,
+            TransformValidationError,
+            TransformExecutionError,
+        ) as error:
+            raise failure(error) from error
+        return SelectionPlanResponse(
+            selection=dict(result.snapshot()),
+            selected_count=result.selected_count,
+            invocation_count=result.invocation_count,
+            output_location="Transform Run output",
+        )
+
+    @router.post(
+        "/{definition_id}/artifact-selection-runs",
+        response_model=RunReferenceResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def start_artifact(
+        project_id: str,
+        definition_id: str,
+        body: ArtifactSelectionRequest,
+        request_context: Context,
+    ) -> RunReferenceResponse:
+        try:
+            run = await inputs.start_artifact_run(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                definition_id,
+                _artifact_selection(body),
+                body.parameters,
+            )
+        except (
+            TransformInputValidationError,
+            TransformNotFound,
+            TransformValidationError,
+            TransformExecutionError,
+        ) as error:
+            raise failure(error) from error
+        return RunReferenceResponse(id=run.id, status=run.status)
 
     @router.post(
         "/{definition_id}/result-set-selection-runs",

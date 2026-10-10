@@ -45,7 +45,11 @@ from agent_hub_api.modules.plugin_gateway import (
 )
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transform_inputs import ResultSetSelection, TransformInputModule
+from agent_hub_api.modules.transform_inputs import (
+    ArtifactSelection,
+    ResultSetSelection,
+    TransformInputModule,
+)
 from agent_hub_api.modules.transforms import (
     DatasetSelection,
     OutputSelection,
@@ -322,6 +326,10 @@ class PostgresDeepAgentRunner:
             interrupt_on["start_project_transform_result_set_selection_run"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Run the reviewed Result Set selection through this Transform?",
+            }
+            interrupt_on["start_project_transform_artifact_selection_run"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Run the reviewed MCP output selection through this Transform?",
             }
         graph = create_deep_agent(
             model=self._model,
@@ -1110,6 +1118,15 @@ class PostgresDeepAgentRunner:
             except TypeError as error:
                 raise ValueError("Result Set selection fields are invalid.") from error
 
+        def parse_artifact_selection(raw: str) -> ArtifactSelection:
+            value = json.loads(raw)
+            if not isinstance(value, dict):
+                raise ValueError("Expected a JSON object")
+            try:
+                return ArtifactSelection(**value)
+            except TypeError as error:
+                raise ValueError("MCP output selection fields are invalid.") from error
+
         def parse_parameters(raw: str) -> dict[str, Any]:
             value = json.loads(raw)
             if not isinstance(value, dict):
@@ -1155,9 +1172,50 @@ class PostgresDeepAgentRunner:
             )
             return f"Transform Run {run.id} {run.status}."
 
+        @tool
+        async def plan_project_transform_artifact_selection(
+            definition_id: str, selection_json: str, parameters_json: str = "{}"
+        ) -> str:
+            """Review retained MCP Tool Result Snapshot values for one Transform.
+
+            selection_json uses artifact_id, expected_artifact_version, output_path
+            (JSON Pointer into structured output), expected_definition_revision,
+            and optional filter_path, equals, sort_path, descending, and limit.
+            """
+            plan = await inputs.plan_artifact_selection(
+                access,
+                project_id,
+                definition_id,
+                parse_artifact_selection(selection_json),
+                parse_parameters(parameters_json),
+            )
+            return json.dumps(plan.snapshot())
+
+        @tool
+        async def start_project_transform_artifact_selection_run(
+            definition_id: str, selection_json: str, parameters_json: str = "{}"
+        ) -> str:
+            """Start a reviewed MCP output selection Transform Run after approval."""
+            run = await inputs.start_artifact_run(
+                access,
+                project_id,
+                definition_id,
+                parse_artifact_selection(selection_json),
+                parse_parameters(parameters_json),
+                initiation=TransformInitiation(
+                    kind="agentRun",
+                    approval="approved",
+                    thread_id=thread_id,
+                    agent_run_id=agent_run_id,
+                ),
+            )
+            return f"Transform Run {run.id} {run.status}."
+
         return [
             plan_project_transform_result_set_selection,
             start_project_transform_result_set_selection_run,
+            plan_project_transform_artifact_selection,
+            start_project_transform_artifact_selection_run,
         ]
 
     async def close(self) -> None:

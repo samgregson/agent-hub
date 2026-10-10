@@ -5,6 +5,10 @@ from typing import cast
 
 import pytest
 
+from agent_hub_api.modules.artifacts import (
+    ArtifactMutationAccess,
+    create_memory_artifact_module,
+)
 from agent_hub_api.modules.batch_execution import (
     BatchExecutionModule,
     BatchRun,
@@ -13,6 +17,7 @@ from agent_hub_api.modules.batch_execution import (
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transform_inputs import (
+    ArtifactSelection,
     ResultSetSelection,
     TransformInputModule,
     TransformInputValidationError,
@@ -92,7 +97,9 @@ async def test_result_set_values_feed_one_transform_with_captured_row_lineage() 
         {"items": "/selection/values", "rows": "/selection/rows"},
         {"type": "object"},
     )
-    inputs = TransformInputModule(cast(BatchExecutionModule, Batches()), transforms)
+    inputs = TransformInputModule(
+        cast(BatchExecutionModule, Batches()), transforms, create_memory_artifact_module(projects)
+    )
     choice = ResultSetSelection(
         source_run_id=source.id,
         output_path="/score",
@@ -145,3 +152,87 @@ async def test_result_set_values_feed_one_transform_with_captured_row_lineage() 
     source = replace(source, status=BatchRunStatus.running)
     with pytest.raises(TransformInputValidationError, match="not complete"):
         await inputs.plan_result_set_selection(owner, project.id, target.id, choice)
+
+
+@pytest.mark.asyncio
+async def test_retained_mcp_output_feeds_one_transform_with_captured_artifact_lineage() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "MCP output input")
+    artifacts = create_memory_artifact_module(projects)
+    snapshot = await artifacts.create_tool_result_snapshot(
+        ArtifactMutationAccess("sam", "thread-1", "agent-run-1"),
+        project.id,
+        plugin_id="fixture",
+        plugin_version="1",
+        tool_name="measure",
+        arguments={"sample": "A"},
+        structured_content={
+            "measurements": [
+                {"name": "A", "score": 9},
+                {"name": "B", "score": 4},
+                {"name": "C", "score": 7},
+            ]
+        },
+    )
+
+    class Runner:
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:test;pyodide:test", "a" * 64)
+
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert inputs == {"items": [{"name": "B", "score": 4}, {"name": "C", "score": 7}]}
+            return {"count": 2}, "deno:test;pyodide:test"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+    )
+    target = await transforms.define(
+        owner,
+        project.id,
+        "Aggregate",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"items": "/selection/values"},
+        {"type": "object"},
+    )
+    inputs = TransformInputModule(cast(BatchExecutionModule, object()), transforms, artifacts)
+    choice = ArtifactSelection(
+        artifact_id=snapshot.artifact.id.root,
+        expected_artifact_version=1,
+        output_path="/measurements",
+        expected_definition_revision=target.revision,
+        sort_path="/score",
+        limit=2,
+    )
+    plan = await inputs.plan_artifact_selection(owner, project.id, target.id, choice)
+    assert plan.selected_count == 2
+    assert plan.snapshot() == {
+        "sourceKind": "mcpToolResult",
+        "artifactId": snapshot.artifact.id.root,
+        "artifactVersion": 1,
+        "pluginId": "fixture",
+        "toolName": "measure",
+        "outputPath": "/measurements",
+        "selectedValues": [
+            {"position": 1, "value": {"name": "B", "score": 4}},
+            {"position": 2, "value": {"name": "C", "score": 7}},
+        ],
+        "rule": {
+            "filterPath": None,
+            "equals": None,
+            "sortPath": "/score",
+            "descending": False,
+            "limit": 2,
+        },
+        "selectedCount": 2,
+    }
+    run = await inputs.start_artifact_run(owner, project.id, target.id, choice, {})
+    assert run.status == "succeeded"
+    assert run.inputs == {"items": [{"name": "B", "score": 4}, {"name": "C", "score": 7}]}
+    assert run.definition_snapshot["selection"] == plan.snapshot()
+    with pytest.raises(TransformInputValidationError, match="changed"):
+        await inputs.plan_artifact_selection(
+            owner, project.id, target.id, replace(choice, expected_artifact_version=2)
+        )

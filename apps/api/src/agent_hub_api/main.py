@@ -96,7 +96,9 @@ def create_app(
         transforms=resolved_transforms,
         bindings=resolved_bindings,
     )
-    resolved_transform_inputs = TransformInputModule(resolved_batches, resolved_transforms)
+    resolved_transform_inputs = TransformInputModule(
+        resolved_batches, resolved_transforms, resolved_artifacts
+    )
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
