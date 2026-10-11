@@ -13,6 +13,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginManifest,
     PluginNotEnabled,
     PluginTool,
+    PluginToolNotAllowed,
     PluginToolResult,
     PluginTransportError,
     PluginUiResource,
@@ -97,6 +98,49 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
 
     await gateway.disable(access, project.id, "foundation-fixture")
     assert (await gateway.selections(access, project.id))[0].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_single_call_can_review_non_repeat_safe_tool_schema() -> None:
+    class SchemaClient(FixtureClient):
+        async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+            return (
+                PluginDiscoveredTool(
+                    name="calculate",
+                    description="Calculate once.",
+                    read_only=False,
+                    input_schema={"type": "object", "required": ["x"]},
+                    output_schema={"type": "object", "required": ["result"]},
+                ),
+            )
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Single call")
+    gateway = PluginGatewayModule(
+        projects,
+        [
+            PluginManifest(
+                id="fixture",
+                name="Fixture",
+                version="2.0",
+                endpoint="http://fixture/mcp",
+                tools=(PluginTool(name="calculate", read_only=False, repeat_safe=False),),
+            )
+        ],
+        MemoryPluginEnablementStore(),
+        {"fixture": SchemaClient(calls=[])},
+    )
+    await gateway.enable(access, project.id, "fixture")
+
+    assert await gateway.tool_version(access, project.id, "fixture", "calculate") == "2.0"
+    assert (
+        await gateway.output_schema(
+            access, project.id, "fixture", "calculate", require_repeat_safe=False
+        )
+    )["required"] == ["result"]
+    with pytest.raises(PluginToolNotAllowed):
+        await gateway.output_schema(access, project.id, "fixture", "calculate")
 
 
 @pytest.mark.asyncio

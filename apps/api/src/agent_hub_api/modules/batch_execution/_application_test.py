@@ -13,6 +13,7 @@ from agent_hub_api.modules.batch_execution import (
     BatchRun,
     BatchRunOrder,
     BatchRunStatus,
+    McpCallValidationError,
     MemoryBatchRunStore,
     create_batch_execution_router,
 )
@@ -89,6 +90,106 @@ class Gateway:
             "required": ["load"],
             "properties": {"load": {"type": "number"}},
         }
+
+
+@pytest.mark.asyncio
+async def test_direct_mcp_call_retains_one_reviewed_input_and_output() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Direct MCP call")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+
+    class DirectGateway(Gateway):
+        async def tool_version(self, *_: object) -> str:
+            return "1.0.0"
+
+        async def output_schema(self, *_: object, **__: object) -> Mapping[str, object]:
+            return await super().output_schema()
+
+        async def call(
+            self,
+            _access: ProjectAccess,
+            _project_id: str,
+            _plugin_id: str,
+            _tool_name: str,
+            arguments: Mapping[str, object],
+        ) -> PluginToolResult:
+            return await self.batch_call(_access, _project_id, _plugin_id, _tool_name, arguments)
+
+    gateway = DirectGateway()
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, gateway), MemoryBatchRunStore()
+    )
+    plan = await batches.plan_mcp_call(owner, project.id, "fixture", "double", {"load": 3})
+    assert plan.snapshot()["invocationCount"] == 1
+    assert plan.snapshot()["inputs"] == {"load": 3}
+    assert plan.snapshot()["pluginVersion"] == "1.0.0"
+
+    queued = await batches.submit_mcp_call(
+        owner, project.id, "fixture", "double", {"load": 3}, "1.0.0", "call-1"
+    )
+    completed = await batches.execute(owner, project.id, queued.id)
+    assert completed.status == BatchRunStatus.succeeded
+    assert completed.definition_snapshot["callKind"] == "mcpCall"
+    assert completed.records[0].input == {"load": 3}
+    assert completed.records[0].structured_output == {"result": 6}
+    assert gateway.calls == [3]
+    assert (
+        await batches.submit_mcp_call(
+            owner, project.id, "fixture", "double", {"load": 3}, "1.0.0", "call-1"
+        )
+    ).id == queued.id
+
+    with pytest.raises(McpCallValidationError, match="version changed"):
+        await batches.submit_mcp_call(owner, project.id, "fixture", "double", {"load": 3}, "0.9.0")
+    with pytest.raises(McpCallValidationError, match="input schema"):
+        await batches.plan_mcp_call(owner, project.id, "fixture", "double", {"bad": 3})
+
+
+@pytest.mark.asyncio
+async def test_direct_mcp_call_http_reviews_and_starts_one_invocation() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Direct MCP call")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+
+    class DirectGateway(Gateway):
+        async def tool_version(self, *_: object) -> str:
+            return "1.0.0"
+
+        async def output_schema(self, *_: object, **__: object) -> Mapping[str, object]:
+            return await super().output_schema()
+
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, DirectGateway()), MemoryBatchRunStore()
+    )
+    app = FastAPI()
+    app.include_router(
+        create_batch_execution_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            batches,
+        ),
+        prefix="/api",
+    )
+    base = f"/api/projects/{project.id}/batch-runs/mcp-call"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        plan = await client.post(
+            f"{base}/plan",
+            json={"pluginId": "fixture", "toolName": "double", "arguments": {"load": 3}},
+        )
+        started = await client.post(
+            base,
+            json={
+                "pluginId": "fixture",
+                "toolName": "double",
+                "arguments": {"load": 3},
+                "expectedPluginVersion": "1.0.0",
+            },
+        )
+    assert plan.status_code == 200
+    assert plan.json()["inputs"] == {"load": 3}
+    assert started.status_code == 201
+    assert started.json()["recordCount"] == 1
 
 
 @pytest.mark.asyncio

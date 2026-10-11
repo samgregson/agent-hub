@@ -240,12 +240,32 @@ class PluginGatewayModule:
             raise PluginToolNotAllowed
         return tool.input_schema
 
+    async def tool_version(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+    ) -> str:
+        """Return the enabled catalogued version of one MCP tool's Plugin."""
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
+            raise PluginNotEnabled
+        if tool_name not in {tool.name for tool in manifest.tools}:
+            raise PluginToolNotAllowed
+        return manifest.version
+
     async def output_schema(
         self,
         access: ProjectAccess,
         project_id: str,
         plugin_id: str,
         tool_name: str,
+        *,
+        require_repeat_safe: bool = True,
     ) -> Mapping[str, object]:
         """Return an enabled batch tool's declared ordinary MCP output schema."""
         await self._projects.load(access, project_id)
@@ -255,7 +275,7 @@ class PluginGatewayModule:
         if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
             raise PluginNotEnabled
         tool = next((item for item in manifest.tools if item.name == tool_name), None)
-        if tool is None or not tool.repeat_safe:
+        if tool is None or (require_repeat_safe and not tool.repeat_safe):
             raise PluginToolNotAllowed
         discovered = {item.name: item for item in await self._discover(manifest)}
         output_schema = discovered.get(tool_name)

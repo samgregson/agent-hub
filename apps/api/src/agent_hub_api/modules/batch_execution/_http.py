@@ -13,6 +13,7 @@ from agent_hub_api.modules.batch_execution._application import (
     BatchRunNotFound,
     BatchRunOrder,
     BatchRunStatus,
+    McpCallValidationError,
 )
 from agent_hub_api.modules.bindings import BindingUnavailable
 from agent_hub_api.modules.datasets import DatasetNotFound, DatasetValidationError
@@ -49,6 +50,17 @@ class McpMapPlanRequest(_Model):
 
 class StartMcpMapRequest(McpMapPlanRequest):
     expected_dataset_version: int = Field(ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class McpCallPlanRequest(_Model):
+    plugin_id: str
+    tool_name: str
+    arguments: dict[str, object]
+
+
+class StartMcpCallRequest(McpCallPlanRequest):
+    expected_plugin_version: str
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
@@ -209,6 +221,58 @@ def create_batch_execution_router(
             raise HTTPException(status_code=404, detail="MCP Map source not found") from error
         except (
             DatasetValidationError,
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+        ) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @router.post("/mcp-call/plan")
+    async def plan_mcp_call(
+        project_id: str, body: McpCallPlanRequest, request_context: Context
+    ) -> dict[str, object]:
+        try:
+            plan = await batches.plan_mcp_call(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                body.plugin_id,
+                body.tool_name,
+                body.arguments,
+            )
+            return dict(plan.snapshot())
+        except BatchRunNotFound as error:
+            raise HTTPException(status_code=404, detail="Project not found") from error
+        except (
+            McpCallValidationError,
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+        ) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @router.post("/mcp-call", response_model=BatchRunResponse, status_code=status.HTTP_201_CREATED)
+    async def start_mcp_call(
+        project_id: str, body: StartMcpCallRequest, request_context: Context
+    ) -> BatchRunResponse:
+        try:
+            access = ProjectAccess(subject=request_context.subject)
+            run = await batches.submit_mcp_call(
+                access,
+                project_id,
+                body.plugin_id,
+                body.tool_name,
+                body.arguments,
+                body.expected_plugin_version,
+                body.idempotency_key,
+            )
+            await batches.enqueue(access, project_id, run.id)
+            return _response(run)
+        except BatchRunNotFound as error:
+            raise HTTPException(status_code=404, detail="Project not found") from error
+        except BatchRunIdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (
+            McpCallValidationError,
             PluginNotAvailable,
             PluginNotEnabled,
             PluginToolNotAllowed,

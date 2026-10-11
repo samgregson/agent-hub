@@ -90,6 +90,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "This explicitly maps the tool over the Records without creating a Batch "
         "Definition. Python Transform code cannot call MCP tools; put MCP calls in "
         "their own operation step.",
+        "For one MCP invocation, review plan_project_mcp_call with the exact JSON "
+        "arguments, then use start_project_mcp_call. The approval card appears "
+        "automatically. Inspect the retained Run result before reporting its output.",
         "Transform Definitions and Runs are durable Project records. Use the Project "
         "Transform tools to inspect or change them; Definition changes, Run starts, and "
         "output saves use the approval card automatically. Transform source is Python "
@@ -303,6 +306,10 @@ class PostgresDeepAgentRunner:
             interrupt_on["start_project_mcp_map"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Map this MCP tool over the reviewed Dataset Records?",
+            }
+            interrupt_on["start_project_mcp_call"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Run this MCP tool with the reviewed arguments?",
             }
         if bindings is not None and subject is not None:
             interrupt_on["bind_project_file_to_batch_definition"] = {
@@ -731,6 +738,62 @@ class PostgresDeepAgentRunner:
         access = ProjectAccess(subject=subject)
 
         @tool
+        async def plan_project_mcp_call(plugin_id: str, tool_name: str, arguments_json: str) -> str:
+            """Review one permitted MCP call and its exact JSON arguments."""
+            arguments = json.loads(arguments_json)
+            if not isinstance(arguments, dict):
+                raise ValueError("arguments_json must be a JSON object")
+            plan = await batches.plan_mcp_call(access, project_id, plugin_id, tool_name, arguments)
+            return json.dumps(plan.snapshot())
+
+        @tool
+        async def start_project_mcp_call(
+            plugin_id: str,
+            tool_name: str,
+            arguments_json: str,
+            expected_plugin_version: str,
+            tool_call_id: Annotated[str, InjectedToolCallId],
+        ) -> str:
+            """Start the reviewed durable MCP call after user approval."""
+            arguments = json.loads(arguments_json)
+            if not isinstance(arguments, dict):
+                raise ValueError("arguments_json must be a JSON object")
+            key = hashlib.sha256(f"agent-mcp-call:{thread_id}:{tool_call_id}".encode()).hexdigest()
+            run = await batches.submit_mcp_call(
+                access,
+                project_id,
+                plugin_id,
+                tool_name,
+                arguments,
+                expected_plugin_version,
+                key,
+                initiation=BatchInitiation(
+                    kind="agentRun",
+                    approval="approved",
+                    thread_id=thread_id,
+                    agent_run_id=agent_run_id,
+                    tool_call_id=tool_call_id,
+                ),
+            )
+            task = await batches.enqueue(access, project_id, run.id)
+            try:
+                completed = await asyncio.wait_for(
+                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
+                )
+            except TimeoutError:
+                return f"MCP Call {run.id} is still running; inspect its result later."
+            result = completed.records[0]
+            outcome = (
+                json.dumps(result.structured_output)
+                if result.structured_output is not None
+                else result.error
+            )
+            return (
+                f"MCP Call {run.id} {completed.status}: "
+                f"{outcome}"
+            )
+
+        @tool
         async def plan_project_mcp_map(dataset_id: str, plugin_id: str, tool_name: str) -> str:
             """Review a direct MCP Map over tool-ready Dataset Records.
 
@@ -935,6 +998,8 @@ class PostgresDeepAgentRunner:
             start_project_batch_run,
             list_project_batch_runs,
             inspect_project_batch_results,
+            plan_project_mcp_call,
+            start_project_mcp_call,
             plan_project_mcp_map,
             start_project_mcp_map,
         ]

@@ -203,6 +203,9 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "plan_project_mcp_map" not in captured["interrupt_on"]
     assert "start_project_mcp_map" in names
     assert "start_project_mcp_map" in captured["interrupt_on"]
+    assert "plan_project_mcp_call" in names
+    assert "plan_project_mcp_call" not in captured["interrupt_on"]
+    assert "start_project_mcp_call" in captured["interrupt_on"]
     assert {"list_project_batch_runs", "inspect_project_batch_results"} <= names
     assert "inspect_project_batch_results" not in captured["interrupt_on"]
     assert {"discover_project_transforms", "load_project_transform"} <= names
@@ -580,6 +583,59 @@ async def test_agent_discovers_batch_runs_and_inspects_a_bounded_result_page() -
         }
     ]
     assert inspected["summary"]["numericSum"] == 6
+
+
+@pytest.mark.asyncio
+async def test_agent_reviews_and_starts_single_mcp_call_with_provenance() -> None:
+    class Batches:
+        initiation: BatchInitiation | None = None
+
+        async def plan_mcp_call(self, *_: object) -> object:
+            return SimpleNamespace(snapshot=lambda: {"pluginVersion": "1.0", "inputs": {"load": 3}})
+
+        async def submit_mcp_call(self, *args: object, **kwargs: object) -> object:
+            self.initiation = cast(BatchInitiation, kwargs["initiation"])
+            assert args[4] == {"load": 3}
+            assert args[5] == "1.0"
+            return SimpleNamespace(id="run-1")
+
+        async def enqueue(self, *_: object) -> asyncio.Task[object]:
+            async def complete() -> object:
+                return SimpleNamespace(
+                    status=BatchRunStatus.succeeded,
+                    records=(SimpleNamespace(structured_output={"result": 6}, error=None),),
+                )
+
+            return asyncio.create_task(complete())
+
+    batches = Batches()
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._batch_tools(
+            cast(Any, batches), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    plan = await tools["plan_project_mcp_call"].ainvoke(
+        {"plugin_id": "fixture", "tool_name": "double", "arguments_json": '{"load":3}'}
+    )
+    started = await tools["start_project_mcp_call"].ainvoke(
+        {
+            "name": "start_project_mcp_call",
+            "type": "tool_call",
+            "id": "call-1",
+            "args": {
+                "plugin_id": "fixture",
+                "tool_name": "double",
+                "arguments_json": '{"load":3}',
+                "expected_plugin_version": "1.0",
+            },
+        }
+    )
+    assert json.loads(plan)["inputs"] == {"load": 3}
+    assert "MCP Call run-1 succeeded" in started.content
+    assert batches.initiation == BatchInitiation(
+        "agentRun", "approved", "thread-1", "agent-run-1", "call-1"
+    )
 
 
 @pytest.mark.asyncio

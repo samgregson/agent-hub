@@ -29,6 +29,7 @@ from agent_hub_api.settings import Settings
 
 MAX_FILE_BOUND_INVOCATIONS = 100
 MAX_DIRECT_MAP_INVOCATIONS = 100
+MAX_DIRECT_CALL_INPUT_BYTES = 64_000
 
 
 class BatchRunStatus(StrEnum):
@@ -143,7 +144,34 @@ class McpDatasetMapPlan:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class McpCallPlan:
+    plugin_id: str
+    plugin_version: str
+    tool_name: str
+    arguments: Mapping[str, object]
+    input_schema: Mapping[str, object]
+    output_schema: Mapping[str, object]
+
+    def snapshot(self) -> Mapping[str, object]:
+        return {
+            "callKind": "mcpCall",
+            "pluginId": self.plugin_id,
+            "pluginVersion": self.plugin_version,
+            "toolName": self.tool_name,
+            "inputs": dict(self.arguments),
+            "inputSchema": dict(self.input_schema),
+            "outputSchema": dict(self.output_schema),
+            "invocationCount": 1,
+            "outputKind": "batchResultSet",
+        }
+
+
 class BatchRunNotFound(Exception):
+    pass
+
+
+class McpCallValidationError(Exception):
     pass
 
 
@@ -201,6 +229,94 @@ class BatchExecutionModule:
         self._transforms = transforms
         self._bindings = bindings
         self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
+
+    async def plan_mcp_call(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> McpCallPlan:
+        """Review one permitted MCP invocation with captured arguments."""
+        await self._authorize(access, project_id)
+        plugin_version = await self._gateway.tool_version(access, project_id, plugin_id, tool_name)
+        input_schema = await self._gateway.input_schema(access, project_id, plugin_id, tool_name)
+        output_schema = await self._gateway.output_schema(
+            access, project_id, plugin_id, tool_name, require_repeat_safe=False
+        )
+        try:
+            encoded = json.dumps(arguments, allow_nan=False, sort_keys=True, separators=(",", ":"))
+            if len(encoded.encode()) > MAX_DIRECT_CALL_INPUT_BYTES:
+                raise McpCallValidationError("MCP call arguments exceed 64000 bytes.")
+            captured = json.loads(encoded)
+            Draft202012Validator(input_schema).validate(captured)
+        except (TypeError, ValueError, ValidationError) as error:
+            raise McpCallValidationError(
+                "MCP call arguments do not satisfy the input schema."
+            ) from error
+        if not isinstance(captured, dict):
+            raise McpCallValidationError("MCP call arguments must be a JSON object.")
+        return McpCallPlan(
+            plugin_id,
+            plugin_version,
+            tool_name,
+            captured,
+            dict(input_schema),
+            dict(output_schema),
+        )
+
+    async def submit_mcp_call(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+        expected_plugin_version: str,
+        idempotency_key: str | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
+    ) -> BatchRun:
+        """Retain one direct MCP invocation in the existing Run store."""
+        await self._authorize(access, project_id)
+        target_id = str(uuid5(NAMESPACE_URL, f"mcp-call:{project_id}:{plugin_id}:{tool_name}"))
+        existing = await self._idempotent_existing(project_id, target_id, idempotency_key)
+        if existing is not None:
+            if (
+                existing.definition_snapshot.get("callKind") != "mcpCall"
+                or existing.definition_snapshot.get("pluginVersion") != expected_plugin_version
+                or existing.records[0].input != arguments
+            ):
+                raise BatchRunIdempotencyConflict(
+                    "This idempotency key identifies another MCP call."
+                )
+            return existing
+        plan = await self.plan_mcp_call(access, project_id, plugin_id, tool_name, arguments)
+        if plan.plugin_version != expected_plugin_version:
+            raise McpCallValidationError("MCP tool version changed; review the call again.")
+        now = datetime.now(UTC)
+        run = BatchRun(
+            id=str(uuid4()),
+            project_id=project_id,
+            definition_id=target_id,
+            status=BatchRunStatus.queued,
+            definition_snapshot={
+                **plan.snapshot(),
+                "definitionName": tool_name,
+                "maxConcurrency": 1,
+            },
+            records=(ResultRecord("single", dict(plan.arguments)),),
+            created_at=now,
+            updated_at=now,
+            idempotency_key=idempotency_key,
+            initiator_subject=access.subject,
+            initiation=_initiation_snapshot(initiation),
+        )
+        stored, _ = await self._store.create_or_load(run)
+        if stored.definition_id != target_id:
+            raise BatchRunIdempotencyConflict("This idempotency key identifies another MCP call.")
+        return stored
 
     async def plan_mcp_dataset(
         self,
@@ -624,12 +740,12 @@ class BatchExecutionModule:
             tool_name = run.definition_snapshot.get("toolName")
             if not isinstance(plugin_id, str) or not isinstance(tool_name, str):
                 raise ValueError("The Batch Run has no MCP tool target.")
-            result = await self._gateway.batch_call(
-                access,
-                project_id,
-                plugin_id,
-                tool_name,
-                record.input,
+            result = await (
+                self._gateway.call(access, project_id, plugin_id, tool_name, record.input)
+                if run.definition_snapshot.get("callKind") == "mcpCall"
+                else self._gateway.batch_call(
+                    access, project_id, plugin_id, tool_name, record.input
+                )
             )
             if result.structured_content is None:
                 raise ValueError("The tool returned no structured output.")
