@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Mapping
 from typing import cast
 
@@ -34,6 +35,8 @@ class _Schemas:
 class _Runner:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.active_calls = 0
+        self.maximum_active_calls = 0
 
     async def identity(self) -> TransformRuntimeIdentity:
         return TransformRuntimeIdentity("fixture", "fixture-hash")
@@ -43,6 +46,10 @@ class _Runner:
     ) -> tuple[object, str]:
         del parameters
         self.calls.append((source, inputs))
+        self.active_calls += 1
+        self.maximum_active_calls = max(self.maximum_active_calls, self.active_calls)
+        await asyncio.sleep(0.01)
+        self.active_calls -= 1
         if "# double" in source:
             value = cast(dict[str, int], inputs["record"])
             return {"value": value["value"] * 2}, "fixture"
@@ -133,6 +140,7 @@ async def test_execute_runs_branching_python_map_dag_and_is_idempotent() -> None
     nodes = cast(dict[str, object], completed.execution["nodes"])
     assert cast(dict[str, object], nodes["double"])["items"]
     assert len(runner.calls) == 5
+    assert runner.maximum_active_calls >= 2
     assert await workflows.execute(access, project.id, prepared.id) == completed
     assert len(runner.calls) == 5
 
