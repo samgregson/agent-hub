@@ -414,6 +414,27 @@ class TransformModule:
             "limits": dict(identity.limits),
         }
 
+    async def function_map_snapshot(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        items: Sequence[Mapping[str, object]],
+        parameters: Mapping[str, object],
+    ) -> tuple[Mapping[str, object], str]:
+        """Validate a one-input Function Map once against every captured item."""
+        snapshot = await self.batch_snapshot(access, project_id, definition_id)
+        selectors = cast(Mapping[str, str], snapshot["inputSelectors"])
+        if len(selectors) != 1:
+            raise TransformValidationError("Python Map requires a Function with one named input.")
+        item_input_name = next(iter(selectors))
+        definition = await self.load(access, project_id, definition_id)
+        if definition.revision != snapshot["revision"]:
+            raise TransformValidationError("Function changed; review the Map again.")
+        for item in items:
+            _function_inputs(definition, {item_input_name: item}, parameters)
+        return snapshot, item_input_name
+
     async def execute_batch_record(
         self,
         access: ProjectAccess,
@@ -433,7 +454,14 @@ class TransformModule:
         ):
             raise TransformExecutionError("runtime_mismatch")
         selectors = cast(Mapping[str, str], snapshot["inputSelectors"])
-        inputs = {name: _select(record, pointer) for name, pointer in selectors.items()}
+        inputs: dict[str, object]
+        if snapshot.get("callKind") == "pythonMap":
+            item_input_name = snapshot.get("itemInputName")
+            if not isinstance(item_input_name, str) or set(selectors) != {item_input_name}:
+                raise TransformValidationError("Python Map input contract is invalid.")
+            inputs = {item_input_name: dict(record)}
+        else:
+            inputs = {name: _select(record, pointer) for name, pointer in selectors.items()}
         parameter_values = dict(parameters or {})
         if len(_canonical({"inputs": inputs, "parameters": parameter_values})) > 64_000:
             raise TransformValidationError("Transform inputs exceed 64000 bytes.")

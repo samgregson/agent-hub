@@ -93,6 +93,10 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "For one MCP invocation, review plan_project_mcp_call with the exact JSON "
         "arguments, then use start_project_mcp_call. The approval card appears "
         "automatically. Inspect the retained Run result before reporting its output.",
+        "To apply a one-input Python Function independently to every Dataset Record, "
+        "review plan_project_python_map, then use start_project_python_map after "
+        "the automatic approval card. This Map passes each whole Record value to "
+        "the Function's named input; Definition JSON pointers are not applied.",
         "Transform Definitions and Runs are durable Project records. Use the Project "
         "Transform tools to inspect or change them; Definition changes, Run starts, and "
         "output saves use the approval card automatically. Transform source is Python "
@@ -310,6 +314,10 @@ class PostgresDeepAgentRunner:
             interrupt_on["start_project_mcp_call"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Run this MCP tool with the reviewed arguments?",
+            }
+            interrupt_on["start_project_python_map"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Map this Python Function over the reviewed Dataset Records?",
             }
         if bindings is not None and subject is not None:
             interrupt_on["bind_project_file_to_batch_definition"] = {
@@ -738,6 +746,73 @@ class PostgresDeepAgentRunner:
         access = ProjectAccess(subject=subject)
 
         @tool
+        async def plan_project_python_map(
+            definition_id: str, dataset_id: str, parameters_json: str = "{}"
+        ) -> str:
+            """Review one Python Function call per ordered Dataset Record.
+
+            The Function must declare exactly one named item input. The plan shows
+            every captured Record, target revision, invocation count, and output kind.
+            """
+            parameters = json.loads(parameters_json)
+            if not isinstance(parameters, dict):
+                raise ValueError("parameters_json must be a JSON object")
+            plan = await batches.plan_python_dataset_map(
+                access, project_id, definition_id, dataset_id, parameters
+            )
+            return json.dumps(plan.snapshot())
+
+        @tool
+        async def start_project_python_map(
+            definition_id: str,
+            dataset_id: str,
+            expected_dataset_version: int,
+            expected_definition_revision: int,
+            tool_call_id: Annotated[str, InjectedToolCallId],
+            parameters_json: str = "{}",
+        ) -> str:
+            """Start the reviewed Python Function Map after user approval."""
+            parameters = json.loads(parameters_json)
+            if not isinstance(parameters, dict):
+                raise ValueError("parameters_json must be a JSON object")
+            key = hashlib.sha256(
+                f"agent-python-map:{thread_id}:{tool_call_id}".encode()
+            ).hexdigest()
+            run = await batches.submit_python_dataset_map(
+                access,
+                project_id,
+                definition_id,
+                dataset_id,
+                expected_dataset_version,
+                expected_definition_revision,
+                key,
+                initiation=BatchInitiation(
+                    kind="agentRun",
+                    approval="approved",
+                    thread_id=thread_id,
+                    agent_run_id=agent_run_id,
+                    tool_call_id=tool_call_id,
+                ),
+                parameters=parameters,
+            )
+            task = await batches.enqueue(access, project_id, run.id)
+            try:
+                completed = await asyncio.wait_for(
+                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
+                )
+            except TimeoutError:
+                return (
+                    f"Python Map {run.id} is still running. Outputs are pending; "
+                    "inspect the Result Set later."
+                )
+            succeeded = sum(record.structured_output is not None for record in completed.records)
+            failed = sum(record.error is not None for record in completed.records)
+            return (
+                f"Python Map {run.id} {completed.status}: {succeeded} of "
+                f"{len(completed.records)} Records produced outputs; {failed} failed."
+            )
+
+        @tool
         async def plan_project_mcp_call(plugin_id: str, tool_name: str, arguments_json: str) -> str:
             """Review one permitted MCP call and its exact JSON arguments."""
             arguments = json.loads(arguments_json)
@@ -788,10 +863,7 @@ class PostgresDeepAgentRunner:
                 if result.structured_output is not None
                 else result.error
             )
-            return (
-                f"MCP Call {run.id} {completed.status}: "
-                f"{outcome}"
-            )
+            return f"MCP Call {run.id} {completed.status}: {outcome}"
 
         @tool
         async def plan_project_mcp_map(dataset_id: str, plugin_id: str, tool_name: str) -> str:
@@ -998,6 +1070,8 @@ class PostgresDeepAgentRunner:
             start_project_batch_run,
             list_project_batch_runs,
             inspect_project_batch_results,
+            plan_project_python_map,
+            start_project_python_map,
             plan_project_mcp_call,
             start_project_mcp_call,
             plan_project_mcp_map,

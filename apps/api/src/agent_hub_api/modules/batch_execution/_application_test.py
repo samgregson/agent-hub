@@ -425,6 +425,197 @@ async def test_per_record_transform_run_needs_no_batch_definition() -> None:
 
 
 @pytest.mark.asyncio
+async def test_python_function_map_passes_each_record_to_one_named_input() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Function Map")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner,
+        project.id,
+        "Loads",
+        [DatasetRecordInput({"load": 2}), DatasetRecordInput({"load": 3})],
+    )
+
+    class Runner:
+        calls: list[dict[str, object]] = []
+
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:test;pyodide:test", "a" * 64)
+
+        async def execute(
+            self, _source: str, inputs: dict[str, object], _parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            self.calls.append(inputs)
+            item = cast(dict[str, int], inputs["item"])
+            if item["load"] == 3:
+                raise ValueError("record rejected")
+            return {"result": item["load"] * 2}, "deno:test;pyodide:test"
+
+    runner = Runner()
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
+    definition = await transforms.define(
+        owner,
+        project.id,
+        "Double",
+        "def transform(inputs, parameters):\n    return {'result': inputs['item']['load'] * 2}\n",
+        {"item": "/not-used-by-map"},
+        {"type": "object", "required": ["result"]},
+    )
+    batches = BatchExecutionModule(
+        projects,
+        datasets,
+        cast(PluginGatewayModule, Gateway()),
+        MemoryBatchRunStore(),
+        transforms=transforms,
+    )
+
+    plan = await batches.plan_python_dataset_map(owner, project.id, definition.id, dataset.id)
+    assert plan.snapshot()["itemInputName"] == "item"
+    assert plan.snapshot()["invocationCount"] == 2
+    assert plan.snapshot()["recordIds"] == [record.id for record in dataset.records]
+    assert cast(list[object], plan.snapshot()["boundInputs"])[0] == {
+        "recordId": dataset.records[0].id,
+        "inputs": {"item": {"load": 2}},
+    }
+
+    queued = await batches.submit_python_dataset_map(
+        owner,
+        project.id,
+        definition.id,
+        dataset.id,
+        plan.dataset_version,
+        plan.definition_revision,
+        "approved-map-1",
+    )
+    completed = await batches.execute(owner, project.id, queued.id)
+    assert completed.status == BatchRunStatus.partial
+    assert runner.calls == [
+        {"item": {"load": 2}},
+        {"item": {"load": 3}},
+    ]
+    assert completed.records[0].structured_output == {"result": 4}
+    assert completed.records[1].error == "record rejected"
+    assert completed.definition_snapshot["callKind"] == "pythonMap"
+    assert (
+        await batches.submit_python_dataset_map(
+            owner,
+            project.id,
+            definition.id,
+            dataset.id,
+            plan.dataset_version,
+            plan.definition_revision,
+            "approved-map-1",
+        )
+    ).id == queued.id
+
+    await transforms.revise(
+        owner,
+        project.id,
+        definition.id,
+        definition.name,
+        definition.source,
+        definition.input_selectors,
+        definition.output_schema,
+    )
+    with pytest.raises(DatasetValidationError, match="changed"):
+        await batches.submit_python_dataset_map(
+            owner,
+            project.id,
+            definition.id,
+            dataset.id,
+            plan.dataset_version,
+            plan.definition_revision,
+        )
+    revised_plan = await batches.plan_python_dataset_map(
+        owner, project.id, definition.id, dataset.id
+    )
+
+    await datasets.update_dataset(
+        owner,
+        project.id,
+        dataset.id,
+        dataset.name,
+        [DatasetRecordInput(record.value, id=record.id) for record in dataset.records],
+        expected_version=dataset.version,
+    )
+    with pytest.raises(DatasetValidationError, match="changed"):
+        await batches.submit_python_dataset_map(
+            owner,
+            project.id,
+            definition.id,
+            dataset.id,
+            revised_plan.dataset_version,
+            revised_plan.definition_revision,
+        )
+
+
+@pytest.mark.asyncio
+async def test_python_function_map_http_reviews_then_starts() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Function Map HTTP")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner, project.id, "Loads", [DatasetRecordInput({"load": 2})]
+    )
+
+    class Runner:
+        async def identity(self) -> TransformRuntimeIdentity:
+            return TransformRuntimeIdentity("deno:test;pyodide:test", "a" * 64)
+
+        async def execute(
+            self, _source: str, inputs: dict[str, object], _parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            return {"copied": inputs["item"]}, "deno:test;pyodide:test"
+
+    transforms = TransformModule(projects, MemoryTransformStore(), Runner())
+    definition = await transforms.define(
+        owner,
+        project.id,
+        "Copy",
+        "def transform(inputs, parameters):\n    return {'copied': inputs['item']}\n",
+        {"item": "/ignored"},
+        {"type": "object"},
+    )
+    batches = BatchExecutionModule(
+        projects,
+        datasets,
+        cast(PluginGatewayModule, Gateway()),
+        MemoryBatchRunStore(),
+        transforms=transforms,
+    )
+    app = FastAPI()
+    app.include_router(
+        create_batch_execution_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            batches,
+        ),
+        prefix="/api",
+    )
+    base = f"/api/projects/{project.id}/batch-runs/python-map"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        planned = await client.post(
+            f"{base}/plan",
+            json={"definitionId": definition.id, "datasetId": dataset.id},
+        )
+        started = await client.post(
+            base,
+            json={
+                "definitionId": definition.id,
+                "datasetId": dataset.id,
+                "expectedDatasetVersion": dataset.version,
+                "expectedDefinitionRevision": definition.revision,
+            },
+        )
+    assert planned.status_code == 200
+    assert planned.json()["itemInputName"] == "item"
+    assert planned.json()["invocationCount"] == 1
+    assert started.status_code == 201
+    assert started.json()["recordCount"] == 1
+
+
+@pytest.mark.asyncio
 async def test_transform_batch_uses_captured_definition_and_first_record_guard() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="sam")

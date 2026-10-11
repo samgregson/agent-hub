@@ -167,6 +167,52 @@ class McpCallPlan:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class PythonDatasetMapPlan:
+    dataset_id: str
+    dataset_version: int
+    definition_id: str
+    definition_revision: int
+    definition_name: str
+    item_input_name: str
+    records: tuple[DatasetRecord, ...]
+    definition_snapshot: Mapping[str, object]
+    parameters: Mapping[str, object]
+
+    def snapshot(self) -> Mapping[str, object]:
+        return {
+            "callKind": "pythonMap",
+            "datasetId": self.dataset_id,
+            "datasetVersion": self.dataset_version,
+            "definitionId": self.definition_id,
+            "definitionRevision": self.definition_revision,
+            "name": self.definition_name,
+            "itemInputName": self.item_input_name,
+            "recordIds": [record.id for record in self.records],
+            "inputs": [dict(record.value) for record in self.records],
+            "boundInputs": [
+                {"recordId": record.id, "inputs": {self.item_input_name: dict(record.value)}}
+                for record in self.records
+            ],
+            "datasetRecords": [
+                {
+                    "id": record.id,
+                    "position": record.position,
+                    "sourceKey": record.source_key,
+                    "value": dict(record.value),
+                }
+                for record in self.records
+            ],
+            "parameters": dict(self.parameters),
+            "outputSchema": self.definition_snapshot["outputSchema"],
+            "sourceHash": self.definition_snapshot["sourceHash"],
+            "runtime": self.definition_snapshot["runtime"],
+            "packageHash": self.definition_snapshot["packageHash"],
+            "invocationCount": len(self.records),
+            "outputKind": "batchResultSet",
+        }
+
+
 class BatchRunNotFound(Exception):
     pass
 
@@ -229,6 +275,115 @@ class BatchExecutionModule:
         self._transforms = transforms
         self._bindings = bindings
         self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
+
+    async def plan_python_dataset_map(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        dataset_id: str,
+        parameters: Mapping[str, object] | None = None,
+    ) -> PythonDatasetMapPlan:
+        """Review an explicit Map of a one-input Python Function over Dataset Records."""
+        await self._authorize(access, project_id)
+        if self._transforms is None:
+            raise DatasetValidationError("Python Function execution is unavailable.")
+        dataset = await self._datasets.load_dataset(access, project_id, dataset_id)
+        if not dataset.records:
+            raise DatasetValidationError("Dataset has no Records to map.")
+        if len(dataset.records) > MAX_DIRECT_MAP_INVOCATIONS:
+            raise DatasetValidationError("Python Map is limited to 100 Records.")
+        definition, item_input_name = await self._transforms.function_map_snapshot(
+            access,
+            project_id,
+            definition_id,
+            tuple(record.value for record in dataset.records),
+            parameters or {},
+        )
+        return PythonDatasetMapPlan(
+            dataset.id,
+            dataset.version,
+            definition_id,
+            cast(int, definition["revision"]),
+            cast(str, definition["name"]),
+            item_input_name,
+            dataset.records,
+            definition,
+            dict(parameters or {}),
+        )
+
+    async def submit_python_dataset_map(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        dataset_id: str,
+        expected_dataset_version: int,
+        expected_definition_revision: int,
+        idempotency_key: str | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
+        parameters: Mapping[str, object] | None = None,
+    ) -> BatchRun:
+        """Capture a reviewed Python Function Map in the existing Result Set store."""
+        await self._authorize(access, project_id)
+        existing = await self._idempotent_existing(project_id, definition_id, idempotency_key)
+        if existing is not None:
+            if (
+                existing.definition_snapshot.get("callKind") != "pythonMap"
+                or existing.definition_snapshot.get("datasetId") != dataset_id
+                or existing.definition_snapshot.get("datasetVersion") != expected_dataset_version
+                or existing.definition_snapshot.get("revision") != expected_definition_revision
+                or existing.definition_snapshot.get("parameters", {}) != dict(parameters or {})
+            ):
+                raise BatchRunIdempotencyConflict(
+                    "This idempotency key identifies another Python Map."
+                )
+            return existing
+        plan = await self.plan_python_dataset_map(
+            access, project_id, definition_id, dataset_id, parameters
+        )
+        if (
+            plan.dataset_version != expected_dataset_version
+            or plan.definition_revision != expected_definition_revision
+        ):
+            raise DatasetValidationError("Dataset or Function changed; review the Map again.")
+        now = datetime.now(UTC)
+        run = BatchRun(
+            id=str(uuid4()),
+            project_id=project_id,
+            definition_id=definition_id,
+            status=BatchRunStatus.queued,
+            definition_snapshot={
+                **plan.definition_snapshot,
+                **_dataset_snapshot(plan.dataset_id, plan.dataset_version, plan.records),
+                "callKind": "pythonMap",
+                "datasetId": plan.dataset_id,
+                "definitionName": plan.definition_name,
+                "itemInputName": plan.item_input_name,
+                "mode": "perRecord",
+                "parameters": dict(plan.parameters),
+                "recordIds": [record.id for record in plan.records],
+                "maxConcurrency": self._max_concurrency,
+            },
+            records=tuple(ResultRecord(record.id, dict(record.value)) for record in plan.records),
+            created_at=now,
+            updated_at=now,
+            idempotency_key=idempotency_key,
+            initiator_subject=access.subject,
+            initiation=_initiation_snapshot(initiation),
+        )
+        stored, _ = await self._store.create_or_load(run)
+        if (
+            stored.definition_id != definition_id
+            or stored.definition_snapshot.get("callKind") != "pythonMap"
+            or stored.definition_snapshot.get("datasetId") != dataset_id
+            or stored.definition_snapshot.get("datasetVersion") != expected_dataset_version
+            or stored.definition_snapshot.get("revision") != expected_definition_revision
+            or stored.definition_snapshot.get("parameters", {}) != dict(parameters or {})
+        ):
+            raise BatchRunIdempotencyConflict("This idempotency key identifies another Python Map.")
+        return stored
 
     async def plan_mcp_call(
         self,

@@ -206,6 +206,9 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "plan_project_mcp_call" in names
     assert "plan_project_mcp_call" not in captured["interrupt_on"]
     assert "start_project_mcp_call" in captured["interrupt_on"]
+    assert "plan_project_python_map" in names
+    assert "plan_project_python_map" not in captured["interrupt_on"]
+    assert "start_project_python_map" in captured["interrupt_on"]
     assert {"list_project_batch_runs", "inspect_project_batch_results"} <= names
     assert "inspect_project_batch_results" not in captured["interrupt_on"]
     assert {"discover_project_transforms", "load_project_transform"} <= names
@@ -633,6 +636,61 @@ async def test_agent_reviews_and_starts_single_mcp_call_with_provenance() -> Non
     )
     assert json.loads(plan)["inputs"] == {"load": 3}
     assert "MCP Call run-1 succeeded" in started.content
+    assert batches.initiation == BatchInitiation(
+        "agentRun", "approved", "thread-1", "agent-run-1", "call-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_reviews_and_starts_python_function_map_with_provenance() -> None:
+    class Batches:
+        initiation: BatchInitiation | None = None
+
+        async def plan_python_dataset_map(self, *_: object) -> object:
+            return SimpleNamespace(snapshot=lambda: {"itemInputName": "item", "invocationCount": 2})
+
+        async def submit_python_dataset_map(self, *args: object, **kwargs: object) -> object:
+            assert args[4:6] == (2, 3)
+            self.initiation = cast(BatchInitiation, kwargs["initiation"])
+            return SimpleNamespace(id="run-1")
+
+        async def enqueue(self, *_: object) -> asyncio.Task[object]:
+            async def complete() -> object:
+                return SimpleNamespace(
+                    status=BatchRunStatus.partial,
+                    records=(
+                        SimpleNamespace(structured_output={"result": 4}, error=None),
+                        SimpleNamespace(structured_output=None, error="failed"),
+                    ),
+                )
+
+            return asyncio.create_task(complete())
+
+    batches = Batches()
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._batch_tools(
+            cast(Any, batches), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    plan = await tools["plan_project_python_map"].ainvoke(
+        {"definition_id": "function-1", "dataset_id": "dataset-1"}
+    )
+    started = await tools["start_project_python_map"].ainvoke(
+        {
+            "name": "start_project_python_map",
+            "type": "tool_call",
+            "id": "call-1",
+            "args": {
+                "definition_id": "function-1",
+                "dataset_id": "dataset-1",
+                "expected_dataset_version": 2,
+                "expected_definition_revision": 3,
+            },
+        }
+    )
+    assert json.loads(plan) == {"itemInputName": "item", "invocationCount": 2}
+    assert "1 of 2 Records produced outputs; 1 failed" in started.content
     assert batches.initiation == BatchInitiation(
         "agentRun", "approved", "thread-1", "agent-run-1", "call-1"
     )

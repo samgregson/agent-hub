@@ -29,7 +29,11 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginToolNotAllowed,
 )
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transforms import TransformExecutionError
+from agent_hub_api.modules.transforms import (
+    TransformExecutionError,
+    TransformNotFound,
+    TransformValidationError,
+)
 
 
 class _Model(BaseModel):
@@ -61,6 +65,18 @@ class McpCallPlanRequest(_Model):
 
 class StartMcpCallRequest(McpCallPlanRequest):
     expected_plugin_version: str
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class PythonMapPlanRequest(_Model):
+    definition_id: str
+    dataset_id: str
+    parameters: dict[str, object] = Field(default_factory=dict)
+
+
+class StartPythonMapRequest(PythonMapPlanRequest):
+    expected_dataset_version: int = Field(ge=1)
+    expected_definition_revision: int = Field(ge=1)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
@@ -277,6 +293,51 @@ def create_batch_execution_router(
             PluginNotEnabled,
             PluginToolNotAllowed,
         ) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @router.post("/python-map/plan")
+    async def plan_python_map(
+        project_id: str, body: PythonMapPlanRequest, request_context: Context
+    ) -> dict[str, object]:
+        try:
+            plan = await batches.plan_python_dataset_map(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                body.definition_id,
+                body.dataset_id,
+                body.parameters,
+            )
+            return dict(plan.snapshot())
+        except (BatchRunNotFound, DatasetNotFound, TransformNotFound) as error:
+            raise HTTPException(status_code=404, detail="Python Map source not found") from error
+        except (DatasetValidationError, TransformExecutionError, TransformValidationError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @router.post(
+        "/python-map", response_model=BatchRunResponse, status_code=status.HTTP_201_CREATED
+    )
+    async def start_python_map(
+        project_id: str, body: StartPythonMapRequest, request_context: Context
+    ) -> BatchRunResponse:
+        try:
+            access = ProjectAccess(subject=request_context.subject)
+            run = await batches.submit_python_dataset_map(
+                access,
+                project_id,
+                body.definition_id,
+                body.dataset_id,
+                body.expected_dataset_version,
+                body.expected_definition_revision,
+                body.idempotency_key,
+                parameters=body.parameters,
+            )
+            await batches.enqueue(access, project_id, run.id)
+            return _response(run)
+        except (BatchRunNotFound, DatasetNotFound, TransformNotFound) as error:
+            raise HTTPException(status_code=404, detail="Python Map source not found") from error
+        except BatchRunIdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (DatasetValidationError, TransformExecutionError, TransformValidationError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
     @router.post("/mcp-map", response_model=BatchRunResponse, status_code=status.HTTP_201_CREATED)
