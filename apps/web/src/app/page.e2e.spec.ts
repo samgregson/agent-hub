@@ -1008,10 +1008,10 @@ test("Batch Runs retain their Definition context and can be opened from it", asy
     id: `run-${index}`,
     initiatorSubject: "sam",
     initiation: { kind: "directUser", approval: "notRequired" },
-    status: "succeeded",
-    recordCount: 1,
+    status: index === 1 ? "partial" : "succeeded",
+    recordCount: index === 1 ? 2 : 1,
     succeededCount: 1,
-    failedCount: 0,
+    failedCount: index === 1 ? 1 : 0,
     updatedAt: "2026-10-10T00:00:00.000Z",
   }));
   await page.route("**/api/projects", (route) =>
@@ -1044,14 +1044,52 @@ test("Batch Runs retain their Definition context and can be opened from it", asy
   });
   await page.route(
     `**/api/projects/${project.id}/batch-runs/*/results?**`,
-    (route) =>
-      route.fulfill({
+    (route) => {
+      const query = new URL(route.request().url()).searchParams;
+      const filtered =
+        query.get("filter_path") === "/structuredOutput/score" &&
+        query.get("equals") === "0.8" &&
+        query.get("aggregate_path") === "/structuredOutput/score";
+      const secondPage = query.get("offset") === "20";
+      return route.fulfill({
         json: {
-          items: [],
-          nextOffset: null,
-          summary: { totalCount: 1, succeededCount: 1, failedCount: 0 },
+          items: filtered
+            ? [
+                {
+                  datasetRecordId: secondPage ? "record-2" : "record-1",
+                  error: null,
+                  input: { load: 3 },
+                  structuredOutput: { score: 0.8 },
+                },
+              ]
+            : [
+                {
+                  datasetRecordId: "record-1",
+                  error: null,
+                  input: { load: 3 },
+                  structuredOutput: { score: 0.8 },
+                },
+                {
+                  datasetRecordId: "record-error",
+                  error: "Tool timed out",
+                  input: { load: 4 },
+                  structuredOutput: null,
+                },
+              ],
+          nextOffset: filtered && !secondPage ? 20 : null,
+          summary: {
+            totalCount: 2,
+            succeededCount: filtered ? 2 : 1,
+            failedCount: filtered ? 0 : 1,
+            numericCount: 2,
+            numericSum: 1.6,
+            numericMin: 0.8,
+            numericMax: 0.8,
+            numericAverage: 0.8,
+          },
         },
-      }),
+      });
+    },
   );
 
   await page.goto("/");
@@ -1077,6 +1115,39 @@ test("Batch Runs retain their Definition context and can be opened from it", asy
   await expect(page.getByLabel("Batch Run results")).toContainText(
     "Stress check",
   );
+  const resultView = page.getByLabel("Batch Run results");
+  await expect(resultView).toContainText(
+    "partial · 2 records · 1 succeeded · 1 failed",
+  );
+  await expect(resultView).toContainText("Tool timed out");
+  await resultView
+    .getByLabel("Filter field (JSON Pointer)")
+    .fill("/structuredOutput/score");
+  await resultView.getByLabel("Exact JSON value").fill("0.8");
+  await resultView
+    .getByLabel("Aggregate numeric field (JSON Pointer)")
+    .fill("/structuredOutput/score");
+  await resultView.getByRole("button", { name: "Apply result query" }).click();
+  await expect(resultView).toContainText("2 results · 2 succeeded · 0 failed");
+  await expect(resultView).toContainText("Average: 0.8");
+  await expect(resultView).toContainText("Record record-1");
+  await resultView.getByRole("button", { name: "Load more results" }).click();
+  await expect(resultView).toContainText("Record record-2");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  const mobileNavigation = page.getByRole("dialog", {
+    name: "Project navigation",
+  });
+  await mobileNavigation.getByRole("button", { name: "Operations" }).click();
+  const mobileResultView = mobileNavigation.getByLabel("Batch Run results");
+  await expect(mobileResultView.getByLabel("Result Set query")).toBeVisible();
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollWidth >
+        document.documentElement.clientWidth,
+    ),
+  ).toBe(false);
 });
 
 test("Transform Definition selection scopes retained Runs while historical Runs remain reachable", async ({

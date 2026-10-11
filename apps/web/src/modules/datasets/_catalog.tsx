@@ -85,7 +85,49 @@ interface ResultRecord {
 interface ResultPage {
   items: ResultRecord[];
   nextOffset: number | null;
-  summary: { totalCount: number; succeededCount: number; failedCount: number };
+  summary: {
+    totalCount: number;
+    succeededCount: number;
+    failedCount: number;
+    numericCount: number;
+    numericSum: number | null;
+    numericMin: number | null;
+    numericMax: number | null;
+    numericAverage: number | null;
+  };
+}
+
+interface ResultQuery {
+  filterPath: string;
+  exactJson: string;
+  minimum: string;
+  maximum: string;
+  sortPath: string;
+  descending: boolean;
+  aggregatePath: string;
+}
+
+const emptyResultQuery: ResultQuery = {
+  filterPath: "",
+  exactJson: "",
+  minimum: "",
+  maximum: "",
+  sortPath: "",
+  descending: false,
+  aggregatePath: "",
+};
+
+function resultQueryParams(query: ResultQuery, offset: number) {
+  const params = new URLSearchParams({ limit: "20", offset: String(offset) });
+  if (query.filterPath) params.set("filter_path", query.filterPath);
+  if (query.exactJson)
+    params.set("equals", JSON.stringify(JSON.parse(query.exactJson)));
+  if (query.minimum) params.set("minimum", query.minimum);
+  if (query.maximum) params.set("maximum", query.maximum);
+  if (query.sortPath) params.set("sort_path", query.sortPath);
+  if (query.descending) params.set("descending", "true");
+  if (query.aggregatePath) params.set("aggregate_path", query.aggregatePath);
+  return params;
 }
 
 interface BatchRunPage {
@@ -134,15 +176,22 @@ export function DatasetCatalog({
   );
   const [fileOptions, setFileOptions] = useState<ProjectFileOption[]>([]);
   const [resultPage, setResultPage] = useState<
-    (ResultPage & { runId: string }) | null
+    (ResultPage & { runId: string; queryKey: string }) | null
   >(null);
+  const [draftResultQuery, setDraftResultQuery] =
+    useState<ResultQuery>(emptyResultQuery);
+  const [resultQuery, setResultQuery] = useState<ResultQuery>(emptyResultQuery);
+  const resultQueryKey = JSON.stringify(resultQuery);
   const selectedRunId = selectedRun?.id;
   const selectedRunStatus = selectedRun?.status;
   const selectedDefinition = definitions?.find(
     (item) => item.id === selectedDefinitionId,
   );
   const visibleResults =
-    resultPage?.runId === selectedRunId ? resultPage : null;
+    resultPage?.runId === selectedRunId &&
+    resultPage?.queryKey === resultQueryKey
+      ? resultPage
+      : null;
   const nameForRun = (run: BatchRun) =>
     run.definitionName ??
     definitions?.find((definition) => definition.id === run.definitionId)
@@ -323,8 +372,9 @@ export function DatasetCatalog({
   useEffect(() => {
     if (!selectedRunId) return;
     let active = true;
+    const params = resultQueryParams(resultQuery, 0);
     void fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRunId)}/results?limit=20`,
+      `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRunId)}/results?${params}`,
       { cache: "no-store" },
     )
       .then(async (response) => {
@@ -332,7 +382,12 @@ export function DatasetCatalog({
         return response.json() as Promise<ResultPage>;
       })
       .then((page) => {
-        if (active) setResultPage({ ...page, runId: selectedRunId });
+        if (active)
+          setResultPage({
+            ...page,
+            runId: selectedRunId,
+            queryKey: resultQueryKey,
+          });
       })
       .catch(() => {
         if (active) setError("Result Set could not be loaded.");
@@ -340,12 +395,19 @@ export function DatasetCatalog({
     return () => {
       active = false;
     };
-  }, [projectId, selectedRunId, selectedRunStatus]);
+  }, [
+    projectId,
+    selectedRunId,
+    selectedRunStatus,
+    resultQuery,
+    resultQueryKey,
+  ]);
 
   async function loadMoreResults() {
     if (!selectedRun || visibleResults?.nextOffset == null) return;
+    const params = resultQueryParams(resultQuery, visibleResults.nextOffset);
     const response = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRun.id)}/results?limit=20&offset=${visibleResults.nextOffset}`,
+      `/api/projects/${encodeURIComponent(projectId)}/batch-runs/${encodeURIComponent(selectedRun.id)}/results?${params}`,
       { cache: "no-store" },
     );
     if (!response.ok) {
@@ -354,14 +416,46 @@ export function DatasetCatalog({
     }
     const page = (await response.json()) as ResultPage;
     setResultPage((current) =>
-      current?.runId === selectedRun.id
+      current?.runId === selectedRun.id && current.queryKey === resultQueryKey
         ? {
             ...page,
             items: [...current.items, ...page.items],
             runId: selectedRun.id,
+            queryKey: resultQueryKey,
           }
-        : { ...page, runId: selectedRun.id },
+        : { ...page, runId: selectedRun.id, queryKey: resultQueryKey },
     );
+  }
+
+  function applyResultQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      const exact = draftResultQuery.exactJson.trim();
+      if (exact) {
+        const parsed: unknown = JSON.parse(exact);
+        if (
+          parsed === null ||
+          typeof parsed === "object" ||
+          !["string", "number", "boolean"].includes(typeof parsed)
+        )
+          throw new Error(
+            "Exact JSON value must be a string, number, or boolean.",
+          );
+      }
+      for (const value of [
+        draftResultQuery.minimum,
+        draftResultQuery.maximum,
+      ]) {
+        if (value && !Number.isFinite(Number(value)))
+          throw new Error("Minimum and maximum must be finite numbers.");
+      }
+      setError(null);
+      setResultQuery({ ...draftResultQuery, exactJson: exact });
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "Result query is invalid.",
+      );
+    }
   }
 
   async function createDataset(event: FormEvent<HTMLFormElement>) {
@@ -962,6 +1056,10 @@ export function DatasetCatalog({
               </p>
               <p>{runSummary(selectedRun)}</p>
               <p>
+                Result filters, ordering, and summaries only change this view;
+                the completed Run and Result Set stay unchanged.
+              </p>
+              <p>
                 {selectedRun.initiation.kind === "agentRun"
                   ? "Started by an approved agent action"
                   : selectedRun.initiation.kind === "directUser"
@@ -983,13 +1081,138 @@ export function DatasetCatalog({
                   </pre>
                 </details>
               ) : null}
+              <form
+                aria-label="Result Set query"
+                className={styles.resultQuery}
+                onSubmit={applyResultQuery}
+              >
+                <Field label="Filter field (JSON Pointer)">
+                  <input
+                    onChange={(event) =>
+                      setDraftResultQuery((query) => ({
+                        ...query,
+                        filterPath: event.target.value,
+                      }))
+                    }
+                    placeholder="/structuredOutput/score"
+                    value={draftResultQuery.filterPath}
+                  />
+                </Field>
+                <Field label="Exact JSON value">
+                  <input
+                    onChange={(event) =>
+                      setDraftResultQuery((query) => ({
+                        ...query,
+                        exactJson: event.target.value,
+                      }))
+                    }
+                    placeholder='0.8 or "passed"'
+                    value={draftResultQuery.exactJson}
+                  />
+                </Field>
+                <Field label="Minimum number">
+                  <input
+                    inputMode="decimal"
+                    onChange={(event) =>
+                      setDraftResultQuery((query) => ({
+                        ...query,
+                        minimum: event.target.value,
+                      }))
+                    }
+                    value={draftResultQuery.minimum}
+                  />
+                </Field>
+                <Field label="Maximum number">
+                  <input
+                    inputMode="decimal"
+                    onChange={(event) =>
+                      setDraftResultQuery((query) => ({
+                        ...query,
+                        maximum: event.target.value,
+                      }))
+                    }
+                    value={draftResultQuery.maximum}
+                  />
+                </Field>
+                <Field label="Sort by field (JSON Pointer)">
+                  <input
+                    onChange={(event) =>
+                      setDraftResultQuery((query) => ({
+                        ...query,
+                        sortPath: event.target.value,
+                      }))
+                    }
+                    value={draftResultQuery.sortPath}
+                  />
+                </Field>
+                <label className={styles.resultDescending}>
+                  <input
+                    checked={draftResultQuery.descending}
+                    onChange={(event) =>
+                      setDraftResultQuery((query) => ({
+                        ...query,
+                        descending: event.target.checked,
+                      }))
+                    }
+                    type="checkbox"
+                  />
+                  Highest first
+                </label>
+                <Field label="Aggregate numeric field (JSON Pointer)">
+                  <input
+                    onChange={(event) =>
+                      setDraftResultQuery((query) => ({
+                        ...query,
+                        aggregatePath: event.target.value,
+                      }))
+                    }
+                    placeholder="/structuredOutput/score"
+                    value={draftResultQuery.aggregatePath}
+                  />
+                </Field>
+                <div className={styles.resultQueryActions}>
+                  <Button type="submit" variant="primary">
+                    Apply result query
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setDraftResultQuery(emptyResultQuery);
+                      setResultQuery(emptyResultQuery);
+                    }}
+                    type="button"
+                  >
+                    Clear query
+                  </Button>
+                </div>
+              </form>
               {visibleResults ? (
-                <p>
-                  {visibleResults.summary.totalCount} results ·{" "}
-                  {visibleResults.summary.succeededCount} succeeded ·{" "}
-                  {visibleResults.summary.failedCount} failed
-                </p>
-              ) : null}
+                <>
+                  <p aria-live="polite">
+                    {visibleResults.summary.totalCount} results ·{" "}
+                    {visibleResults.summary.succeededCount} succeeded ·{" "}
+                    {visibleResults.summary.failedCount} failed
+                  </p>
+                  {resultQuery.aggregatePath ? (
+                    <p aria-label="Numeric result summary">
+                      {visibleResults.summary.numericCount} numeric values
+                      {visibleResults.summary.numericSum !== null
+                        ? ` · Sum: ${visibleResults.summary.numericSum}`
+                        : ""}
+                      {visibleResults.summary.numericMin !== null
+                        ? ` · Min: ${visibleResults.summary.numericMin}`
+                        : ""}
+                      {visibleResults.summary.numericMax !== null
+                        ? ` · Max: ${visibleResults.summary.numericMax}`
+                        : ""}
+                      {visibleResults.summary.numericAverage !== null
+                        ? ` · Average: ${visibleResults.summary.numericAverage}`
+                        : ""}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p aria-live="polite">Loading Result Set…</p>
+              )}
               {visibleResults?.items.map((record) => (
                 <article className={styles.record} key={record.datasetRecordId}>
                   <strong>Record {record.datasetRecordId.slice(0, 8)}</strong>
