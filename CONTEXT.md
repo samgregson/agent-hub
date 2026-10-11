@@ -46,11 +46,11 @@ One host-orchestrated execution of a Workflow Definition against captured inputs
 _Avoid_: Agent Run, Batch Run, mutable result
 
 **Function Definition**:
-A reusable Project operation with named, schema-described inputs and outputs and a reviewable purpose. Its implementation may use Python and declared MCP capabilities; a Workflow references a versioned Function Definition rather than copying its source into each node.
+A reusable Project-owned Python operation with named, schema-described inputs and outputs and a reviewable purpose. A Workflow references a versioned Function Definition rather than copying its source into each node.
 _Avoid_: Transform-only operation, workflow node, arbitrary untracked script
 
 **Function Call**:
-One configured use of a Function Definition in a Workflow graph, connecting its named inputs and outputs to other nodes. A Map call explicitly applies an item-input Function to each member of a collection; a collection-input Function receives the collection once.
+One configured use of a Function Definition or permitted MCP tool in a Workflow graph, connecting named inputs and outputs to other nodes. A Map call explicitly applies an item-input Function or MCP tool to each member of a collection; a collection-input Function receives the collection once.
 _Avoid_: Function Definition, implicit batch mode
 
 **Transform Definition**:

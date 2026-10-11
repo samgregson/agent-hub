@@ -4,6 +4,8 @@
 
 This is the decision-complete architecture for the general-purpose Agent Hub foundation. It reconciles the domain model, ADRs, research, security model, and validated workspace prototype. The foundation deliberately excludes production calculation, unit, diagram, and structural-engineering logic.
 
+ADR 0013 sets the next execution target: Workflow calls reference reusable Python Functions or permitted MCP tools, and an explicit Map call repeats an item-input target over a collection. The Transform, Batch Definition, Binding, and Input Selection sections below describe currently delivered Interfaces. Extend them only where they support that target; do not build a second general-purpose Binding or selection graph.
+
 The word **Module** means a cohesive capability behind one small Interface. Internal classes and packages are implementation details unless they cross a seam described below.
 
 The repository-level dependency rules, composition roots, testing surfaces, and change checklist are defined in `code-structure.md` and form part of this architecture.
@@ -83,7 +85,7 @@ The Artifact catalog projection may repeat queryable envelope fields, but it is 
 
 ### Workspace Module — web
 
-Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The agreed navigation target is Workflow overview, Chats, Library, Operations, Sources, and Plugins. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers; Operations groups Transform and MCP batch-binding definitions with contextual Runs. Datasets now have one primary home in Library, while Batch Definitions and Transforms retain separate destinations until #37 consolidates Operations. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
+Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The agreed navigation target is Workflow overview, Chats, Library, Operations, Sources, and Plugins. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers. Operations currently groups Transform and MCP Batch Definitions with contextual Runs; it will evolve toward reusable Python Functions and permitted MCP tools as #48 lands. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
 
 Its Interface is application state plus navigation commands. It does not know how the agent runs or how a Plugin validates an Artifact.
 
