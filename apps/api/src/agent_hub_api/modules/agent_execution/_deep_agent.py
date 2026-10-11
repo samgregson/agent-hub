@@ -85,6 +85,11 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Dataset and Batch Definition mutations use the approval card automatically. "
         "A queued or running Batch Run has pending results; null output during that state "
         "does not mean its Transform failed. Report outputs only after terminal status.",
+        "For a Dataset whose Records already match a permitted repeat-safe MCP tool's "
+        "input schema, review plan_project_mcp_map and then start_project_mcp_map. "
+        "This explicitly maps the tool over the Records without creating a Batch "
+        "Definition. Python Transform code cannot call MCP tools; put MCP calls in "
+        "their own operation step.",
         "Transform Definitions and Runs are durable Project records. Use the Project "
         "Transform tools to inspect or change them; Definition changes, Run starts, and "
         "output saves use the approval card automatically. Transform source is Python "
@@ -294,6 +299,10 @@ class PostgresDeepAgentRunner:
             interrupt_on["start_project_batch_run"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Start the proposed Batch Run?",
+            }
+            interrupt_on["start_project_mcp_map"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Map this MCP tool over the reviewed Dataset Records?",
             }
         if bindings is not None and subject is not None:
             interrupt_on["bind_project_file_to_batch_definition"] = {
@@ -718,6 +727,61 @@ class PostgresDeepAgentRunner:
         access = ProjectAccess(subject=subject)
 
         @tool
+        async def plan_project_mcp_map(dataset_id: str, plugin_id: str, tool_name: str) -> str:
+            """Review a direct MCP Map over tool-ready Dataset Records.
+
+            Every Record must satisfy the permitted repeat-safe tool's input schema.
+            Returns exact ordered inputs, Dataset version, target, and invocation count.
+            """
+            plan = await batches.plan_mcp_dataset(
+                access, project_id, plugin_id, tool_name, dataset_id
+            )
+            return json.dumps(plan.snapshot())
+
+        @tool
+        async def start_project_mcp_map(
+            dataset_id: str,
+            plugin_id: str,
+            tool_name: str,
+            expected_dataset_version: int,
+            tool_call_id: Annotated[str, InjectedToolCallId],
+        ) -> str:
+            """Start the reviewed MCP Map after approval; each Record invokes the tool once."""
+            key = hashlib.sha256(f"agent-mcp-map:{thread_id}:{tool_call_id}".encode()).hexdigest()
+            run = await batches.submit_mcp_dataset(
+                access,
+                project_id,
+                plugin_id,
+                tool_name,
+                dataset_id,
+                expected_dataset_version,
+                key,
+                initiation=BatchInitiation(
+                    kind="agentRun",
+                    approval="approved",
+                    thread_id=thread_id,
+                    agent_run_id=agent_run_id,
+                    tool_call_id=tool_call_id,
+                ),
+            )
+            task = await batches.enqueue(access, project_id, run.id)
+            try:
+                completed = await asyncio.wait_for(
+                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
+                )
+            except TimeoutError:
+                return (
+                    f"Batch Run {run.id} is still running. Outputs are pending; "
+                    "check its status before interpreting Result Records."
+                )
+            succeeded = sum(record.structured_output is not None for record in completed.records)
+            failed = sum(record.error is not None for record in completed.records)
+            return (
+                f"Batch Run {run.id} {completed.status}: {succeeded} of "
+                f"{len(completed.records)} records produced outputs; {failed} failed."
+            )
+
+        @tool
         async def start_project_batch_run(
             definition_id: str,
             tool_call_id: Annotated[str, InjectedToolCallId],
@@ -867,6 +931,8 @@ class PostgresDeepAgentRunner:
             start_project_batch_run,
             list_project_batch_runs,
             inspect_project_batch_results,
+            plan_project_mcp_map,
+            start_project_mcp_map,
         ]
 
     @staticmethod

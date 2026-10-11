@@ -5,7 +5,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Protocol, cast
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from jsonschema import Draft202012Validator, ValidationError  # type: ignore[import-untyped]
 from psycopg import AsyncConnection
@@ -28,6 +28,7 @@ from agent_hub_api.modules.transforms import (
 from agent_hub_api.settings import Settings
 
 MAX_FILE_BOUND_INVOCATIONS = 100
+MAX_DIRECT_MAP_INVOCATIONS = 100
 
 
 class BatchRunStatus(StrEnum):
@@ -101,6 +102,47 @@ class ResultSummary:
     numeric_average: float | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class McpDatasetMapPlan:
+    dataset_id: str
+    dataset_version: int
+    plugin_id: str
+    tool_name: str
+    records: tuple[DatasetRecord, ...]
+    input_schema: Mapping[str, object]
+    output_schema: Mapping[str, object]
+
+    @property
+    def record_ids(self) -> tuple[str, ...]:
+        return tuple(record.id for record in self.records)
+
+    @property
+    def invocation_count(self) -> int:
+        return len(self.records)
+
+    def snapshot(self) -> Mapping[str, object]:
+        return {
+            "callKind": "mcpMap",
+            "datasetId": self.dataset_id,
+            "datasetVersion": self.dataset_version,
+            "pluginId": self.plugin_id,
+            "toolName": self.tool_name,
+            "invocationCount": self.invocation_count,
+            "recordIds": list(self.record_ids),
+            "inputs": [dict(record.value) for record in self.records],
+            "datasetRecords": [
+                {
+                    "id": record.id,
+                    "position": record.position,
+                    "sourceKey": record.source_key,
+                    "value": dict(record.value),
+                }
+                for record in self.records
+            ],
+            "outputKind": "batchResultSet",
+        }
+
+
 class BatchRunNotFound(Exception):
     pass
 
@@ -159,6 +201,100 @@ class BatchExecutionModule:
         self._transforms = transforms
         self._bindings = bindings
         self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
+
+    async def plan_mcp_dataset(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        dataset_id: str,
+    ) -> McpDatasetMapPlan:
+        """Review a direct Map of tool-ready Dataset Records over an MCP tool."""
+        await self._authorize(access, project_id)
+        dataset = await self._datasets.load_dataset(access, project_id, dataset_id)
+        if not dataset.records:
+            raise DatasetValidationError("Dataset has no Records to map.")
+        if len(dataset.records) > MAX_DIRECT_MAP_INVOCATIONS:
+            raise DatasetValidationError("MCP Map is limited to 100 Records.")
+        input_schema = await self._gateway.input_schema(access, project_id, plugin_id, tool_name)
+        output_schema = await self._gateway.output_schema(access, project_id, plugin_id, tool_name)
+        validator = Draft202012Validator(input_schema)
+        for record in dataset.records:
+            try:
+                validator.validate(record.value)
+            except ValidationError as error:
+                raise DatasetValidationError(
+                    f"Dataset Record {record.position + 1} does not satisfy the MCP input schema."
+                ) from error
+        return McpDatasetMapPlan(
+            dataset.id,
+            dataset.version,
+            plugin_id,
+            tool_name,
+            dataset.records,
+            dict(input_schema),
+            dict(output_schema),
+        )
+
+    async def submit_mcp_dataset(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        dataset_id: str,
+        expected_dataset_version: int,
+        idempotency_key: str | None = None,
+        *,
+        initiation: BatchInitiation | None = None,
+    ) -> BatchRun:
+        """Retain a direct MCP Map without creating a Batch Definition."""
+        await self._authorize(access, project_id)
+        target_id = str(uuid5(NAMESPACE_URL, f"mcp-map:{project_id}:{plugin_id}:{tool_name}"))
+        existing = await self._idempotent_existing(project_id, target_id, idempotency_key)
+        if existing is not None:
+            if (
+                existing.definition_snapshot.get("callKind") != "mcpMap"
+                or existing.definition_snapshot.get("datasetId") != dataset_id
+                or existing.definition_snapshot.get("datasetVersion") != expected_dataset_version
+            ):
+                raise BatchRunIdempotencyConflict(
+                    "This idempotency key identifies another MCP Map."
+                )
+            return existing
+        plan = await self.plan_mcp_dataset(access, project_id, plugin_id, tool_name, dataset_id)
+        if plan.dataset_version != expected_dataset_version:
+            raise DatasetValidationError("Dataset changed; review the MCP Map again.")
+        now = datetime.now(UTC)
+        run = BatchRun(
+            id=str(uuid4()),
+            project_id=project_id,
+            definition_id=target_id,
+            status=BatchRunStatus.queued,
+            definition_snapshot={
+                "callKind": "mcpMap",
+                "datasetId": plan.dataset_id,
+                "definitionName": plan.tool_name,
+                "pluginId": plan.plugin_id,
+                "toolName": plan.tool_name,
+                "inputSchema": dict(plan.input_schema),
+                "outputSchema": dict(plan.output_schema),
+                **_dataset_snapshot(plan.dataset_id, plan.dataset_version, plan.records),
+                "recordIds": list(plan.record_ids),
+                "maxConcurrency": self._max_concurrency,
+            },
+            records=tuple(ResultRecord(record.id, dict(record.value)) for record in plan.records),
+            created_at=now,
+            updated_at=now,
+            idempotency_key=idempotency_key,
+            initiator_subject=access.subject,
+            initiation=_initiation_snapshot(initiation),
+        )
+        stored, _ = await self._store.create_or_load(run)
+        if stored.definition_id != target_id:
+            raise BatchRunIdempotencyConflict("This idempotency key identifies another Batch Run.")
+        return stored
 
     async def define_transform_batch(
         self,

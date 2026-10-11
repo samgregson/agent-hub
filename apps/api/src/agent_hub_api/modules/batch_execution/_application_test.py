@@ -20,6 +20,7 @@ from agent_hub_api.modules.bindings import BindingModule, BindingUnavailable, Me
 from agent_hub_api.modules.datasets import (
     DatasetModule,
     DatasetRecordInput,
+    DatasetValidationError,
     MemoryDatasetStore,
 )
 from agent_hub_api.modules.identity import create_identity_module
@@ -81,6 +82,143 @@ class Gateway:
             "required": ["result"],
             "properties": {"result": {"type": "number"}},
         }
+
+    async def input_schema(self, *_: object) -> Mapping[str, object]:
+        return {
+            "type": "object",
+            "required": ["load"],
+            "properties": {"load": {"type": "number"}},
+        }
+
+
+@pytest.mark.asyncio
+async def test_direct_mcp_map_uses_dataset_records_without_a_batch_definition() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Direct MCP map")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner,
+        project.id,
+        "Inputs",
+        [DatasetRecordInput({"load": 2}), DatasetRecordInput({"load": 3})],
+    )
+    gateway = Gateway(fail_loads={3})
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, gateway), MemoryBatchRunStore()
+    )
+
+    plan = await batches.plan_mcp_dataset(owner, project.id, "fixture", "double", dataset.id)
+    assert plan.dataset_version == dataset.version
+    assert plan.record_ids == tuple(record.id for record in dataset.records)
+    assert plan.invocation_count == 2
+
+    queued = await batches.submit_mcp_dataset(
+        owner,
+        project.id,
+        "fixture",
+        "double",
+        dataset.id,
+        plan.dataset_version,
+        "approved-map-1",
+    )
+    completed = await batches.execute(owner, project.id, queued.id)
+
+    assert len(await datasets.list_definitions(owner, project.id)) == 0
+    assert completed.status == BatchRunStatus.partial
+    assert gateway.calls == [2, 3]
+    assert [record.dataset_record_id for record in completed.records] == list(plan.record_ids)
+    assert completed.records[0].structured_output == {"result": 4}
+    assert completed.records[1].error == "load 3 failed"
+    assert completed.definition_snapshot["datasetVersion"] == dataset.version
+    assert completed.definition_snapshot["callKind"] == "mcpMap"
+    assert (
+        await batches.submit_mcp_dataset(
+            owner,
+            project.id,
+            "fixture",
+            "double",
+            dataset.id,
+            plan.dataset_version,
+            "approved-map-1",
+        )
+    ).id == queued.id
+
+
+@pytest.mark.asyncio
+async def test_direct_mcp_map_http_reviews_then_starts_the_same_captured_records() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Direct MCP map")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner, project.id, "Inputs", [DatasetRecordInput({"load": 2})]
+    )
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, Gateway()), MemoryBatchRunStore()
+    )
+    app = FastAPI()
+    app.include_router(
+        create_batch_execution_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            batches,
+        ),
+        prefix="/api",
+    )
+
+    base = f"/api/projects/{project.id}/batch-runs/mcp-map"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        plan = await client.post(
+            f"{base}/plan",
+            json={"datasetId": dataset.id, "pluginId": "fixture", "toolName": "double"},
+        )
+        started = await client.post(
+            base,
+            json={
+                "datasetId": dataset.id,
+                "pluginId": "fixture",
+                "toolName": "double",
+                "expectedDatasetVersion": dataset.version,
+            },
+        )
+
+    assert plan.status_code == 200
+    assert plan.json()["recordIds"] == [dataset.records[0].id]
+    assert plan.json()["inputs"] == [{"load": 2}]
+    assert started.status_code == 201
+    assert started.json()["recordCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_direct_mcp_map_rejects_invalid_and_stale_dataset_inputs() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Direct MCP map")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner, project.id, "Inputs", [DatasetRecordInput({"other": 2})]
+    )
+    gateway = Gateway()
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, gateway), MemoryBatchRunStore()
+    )
+
+    with pytest.raises(DatasetValidationError, match="Record 1"):
+        await batches.plan_mcp_dataset(owner, project.id, "fixture", "double", dataset.id)
+    updated = await datasets.update_dataset(
+        owner,
+        project.id,
+        dataset.id,
+        dataset.name,
+        [DatasetRecordInput({"load": 2}, id=dataset.records[0].id)],
+        expected_version=dataset.version,
+    )
+    with pytest.raises(DatasetValidationError, match="changed"):
+        await batches.submit_mcp_dataset(
+            owner, project.id, "fixture", "double", dataset.id, dataset.version
+        )
+    assert updated.version == dataset.version + 1
+    assert gateway.calls == []
 
 
 @pytest.mark.asyncio

@@ -15,11 +15,17 @@ from agent_hub_api.modules.batch_execution._application import (
     BatchRunStatus,
 )
 from agent_hub_api.modules.bindings import BindingUnavailable
+from agent_hub_api.modules.datasets import DatasetNotFound, DatasetValidationError
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
     IdentityUnavailable,
     RequestContext,
+)
+from agent_hub_api.modules.plugin_gateway import (
+    PluginNotAvailable,
+    PluginNotEnabled,
+    PluginToolNotAllowed,
 )
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms import TransformExecutionError
@@ -33,6 +39,17 @@ class StartRequest(_Model):
     definition_id: str
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
     record_id: str | None = None
+
+
+class McpMapPlanRequest(_Model):
+    dataset_id: str
+    plugin_id: str
+    tool_name: str
+
+
+class StartMcpMapRequest(McpMapPlanRequest):
+    expected_dataset_version: int = Field(ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class ResultResponse(_Model):
@@ -174,6 +191,58 @@ def create_batch_execution_router(
             raise HTTPException(status_code=409, detail=str(error)) from error
         except BatchRunIdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @router.post("/mcp-map/plan")
+    async def plan_mcp_map(
+        project_id: str, body: McpMapPlanRequest, request_context: Context
+    ) -> dict[str, object]:
+        try:
+            plan = await batches.plan_mcp_dataset(
+                ProjectAccess(subject=request_context.subject),
+                project_id,
+                body.plugin_id,
+                body.tool_name,
+                body.dataset_id,
+            )
+            return dict(plan.snapshot())
+        except (BatchRunNotFound, DatasetNotFound) as error:
+            raise HTTPException(status_code=404, detail="MCP Map source not found") from error
+        except (
+            DatasetValidationError,
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+        ) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+    @router.post("/mcp-map", response_model=BatchRunResponse, status_code=status.HTTP_201_CREATED)
+    async def start_mcp_map(
+        project_id: str, body: StartMcpMapRequest, request_context: Context
+    ) -> BatchRunResponse:
+        try:
+            access = ProjectAccess(subject=request_context.subject)
+            run = await batches.submit_mcp_dataset(
+                access,
+                project_id,
+                body.plugin_id,
+                body.tool_name,
+                body.dataset_id,
+                body.expected_dataset_version,
+                body.idempotency_key,
+            )
+            await batches.enqueue(access, project_id, run.id)
+            return _response(run)
+        except (BatchRunNotFound, DatasetNotFound) as error:
+            raise HTTPException(status_code=404, detail="MCP Map source not found") from error
+        except BatchRunIdempotencyConflict as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except (
+            DatasetValidationError,
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+        ) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @router.get("/{run_id}", response_model=BatchRunDetailResponse)
     async def load(

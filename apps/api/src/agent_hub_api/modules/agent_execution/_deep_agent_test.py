@@ -199,6 +199,10 @@ async def test_agent_exposes_dataset_tools_and_interrupts_mutations(
     assert "create_project_batch_definition" in captured["interrupt_on"]
     assert "start_project_batch_run" in captured["interrupt_on"]
     assert "start_project_batch_run" in names
+    assert "plan_project_mcp_map" in names
+    assert "plan_project_mcp_map" not in captured["interrupt_on"]
+    assert "start_project_mcp_map" in names
+    assert "start_project_mcp_map" in captured["interrupt_on"]
     assert {"list_project_batch_runs", "inspect_project_batch_results"} <= names
     assert "inspect_project_batch_results" not in captured["interrupt_on"]
     assert {"discover_project_transforms", "load_project_transform"} <= names
