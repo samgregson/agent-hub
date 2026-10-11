@@ -1316,8 +1316,6 @@ test("selection planning and runs reach the Project API through the browser", as
   request,
 }) => {
   for (const endpoint of [
-    "selection-plan",
-    "selection-runs",
     "output-selection-plan",
     "output-selection-runs",
     "result-set-selection-plan",
@@ -1332,7 +1330,7 @@ test("selection planning and runs reach the Project API through the browser", as
   }
 });
 
-test("a reviewed Dataset Transform run offers one invocation or per-Record execution", async ({
+test("a Dataset can run once or map a Function with reviewed per-Record results", async ({
   page,
 }) => {
   const project = {
@@ -1467,6 +1465,73 @@ test("a reviewed Dataset Transform run offers one invocation or per-Record execu
         },
       }),
   );
+  await page.route(
+    `**/api/projects/${project.id}/batch-runs/python-map/plan`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        json: {
+          callKind: "pythonMap",
+          datasetId: "dataset-1",
+          datasetVersion: 2,
+          definitionId: definition.id,
+          definitionRevision: 3,
+          name: definition.name,
+          itemInputName: "items",
+          recordIds: selection.recordIds,
+          boundInputs: [
+            { recordId: "record-1", inputs: { items: { score: 1 } } },
+            { recordId: "record-2", inputs: { items: { score: 3 } } },
+          ],
+          parameters: {},
+          runtime: "pyodide",
+          sourceHash: "sourcehash",
+          packageHash: "abc",
+          invocationCount: 2,
+          outputKind: "batchResultSet",
+        },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/batch-runs/python-map`,
+    (route) => {
+      writes.push(route.request().postDataJSON() as Record<string, unknown>);
+      return route.fulfill({
+        status: 201,
+        json: { id: "batch-selection", status: "queued", recordCount: 2 },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/batch-runs/batch-selection`,
+    (route) =>
+      route.fulfill({ json: { id: "batch-selection", status: "partial" } }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/batch-runs/batch-selection/results?**`,
+    (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              datasetRecordId: "record-1",
+              input: { score: 1 },
+              structuredOutput: { result: 2 },
+              error: null,
+            },
+            {
+              datasetRecordId: "record-2",
+              input: { score: 3 },
+              structuredOutput: null,
+              error: "record rejected",
+            },
+          ],
+          nextOffset: null,
+          summary: { totalCount: 2, succeededCount: 1, failedCount: 1 },
+        },
+      }),
+  );
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Project views" })
@@ -1500,27 +1565,40 @@ test("a reviewed Dataset Transform run offers one invocation or per-Record execu
     expectedDatasetVersion: 2,
     expectedTransformRevision: 3,
   });
-  await page
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  const drawer = page.getByRole("dialog", { name: "Project navigation" });
+  await drawer.getByLabel("Input source").selectOption("dataset");
+  await drawer
+    .getByRole("combobox", { name: "Dataset", exact: true })
+    .selectOption("dataset-1");
+  await drawer
     .getByRole("combobox", { name: "Execution mode" })
     .selectOption("perRecord");
-  await page.getByRole("button", { name: "Review Run" }).click();
-  await expect(
-    page.getByRole("region", { name: "Dataset Run plan" }),
-  ).toContainText("2 Records · 2 invocations");
-  await page.getByRole("button", { name: "Start Run" }).click();
-  await expect(page.getByRole("status")).toContainText(
-    "Batch Run batch-se queued",
-  );
+  await drawer.getByRole("button", { name: "Review Map" }).click();
+  const review = drawer.getByRole("region", { name: "Python Map review" });
+  await expect(review).toContainText("2 Records · 2 Function calls");
+  await expect(review).toContainText("items");
+  await review.getByText("Bound inputs").click();
+  await expect(review).toContainText('"score": 1');
+  await review.getByText("Execution details").click();
+  await expect(review).toContainText("sourcehash");
+  await review.getByRole("button", { name: "Start Map" }).click();
+  const results = drawer.getByRole("region", { name: "Python Map results" });
+  await expect(results).toContainText("1 succeeded · 1 failed");
+  await expect(results).toContainText("record rejected");
+  await expect(results).toContainText('"result": 2');
   expect(writes[2]).toMatchObject({
     datasetId: "dataset-1",
-    mode: "perRecord",
+    definitionId: definition.id,
   });
   expect(writes[3]).toMatchObject({
     datasetId: "dataset-1",
-    mode: "perRecord",
+    definitionId: definition.id,
     expectedDatasetVersion: 2,
-    expectedTransformRevision: 3,
+    expectedDefinitionRevision: 3,
   });
+  expect(writes).toHaveLength(4);
 });
 
 test("a retained Transform output selection shows its source and selected values", async ({

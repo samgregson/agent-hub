@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { Button, Field } from "@/shared/ui";
 
+import { PythonMapReview } from "./_python-map-review";
 import styles from "./transform.module.css";
 
 interface Definition {
@@ -1130,7 +1131,7 @@ export function TransformCatalog({
                 >
                   <p>
                     Run once with all ordered Records so Python can filter,
-                    sort, or aggregate them, or run independently for each
+                    sort, or aggregate them. Or map the Function over each
                     Record and retain a Result Set.
                   </p>
                   <div className={styles.formGrid}>
@@ -1164,7 +1165,7 @@ export function TransformCatalog({
                           Dataset-wide · one invocation
                         </option>
                         <option value="perRecord">
-                          Per-Record · Result Set
+                          Map each Record · Result Set
                         </option>
                       </select>
                     </Field>
@@ -1181,12 +1182,14 @@ export function TransformCatalog({
                     />
                   </Field>
                   <div className={styles.actions}>
-                    <Button
-                      disabled={busy !== null || !selectionDatasetId}
-                      onClick={() => void reviewDatasetRun()}
-                    >
-                      {busy === "dataset-plan" ? "Reviewing…" : "Review Run"}
-                    </Button>
+                    {datasetRunMode === "dataset" ? (
+                      <Button
+                        disabled={busy !== null || !selectionDatasetId}
+                        onClick={() => void reviewDatasetRun()}
+                      >
+                        {busy === "dataset-plan" ? "Reviewing…" : "Review Run"}
+                      </Button>
+                    ) : null}
                     <Button
                       onClick={() =>
                         void refreshDatasets()
@@ -1199,7 +1202,16 @@ export function TransformCatalog({
                       Refresh Datasets
                     </Button>
                   </div>
-                  {datasetRunPlan ? (
+                  {datasetRunMode === "perRecord" ? (
+                    <PythonMapReview
+                      key={`${selectedDefinition.id}:${selectionDatasetId}:${parametersJson}`}
+                      datasetId={selectionDatasetId}
+                      definitionId={selectedDefinition.id}
+                      parametersJson={parametersJson}
+                      projectId={projectId}
+                    />
+                  ) : null}
+                  {datasetRunMode === "dataset" && datasetRunPlan ? (
                     <section
                       aria-label="Dataset Run plan"
                       className={styles.preview}

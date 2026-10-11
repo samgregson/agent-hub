@@ -252,11 +252,84 @@
   flex: 1 1 220px;
 }
 
+.mapJourney,
+.mapReview,
+.mapResults,
+.mapSummary {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  justify-items: start;
+}
+
+.mapReview,
+.mapResults {
+  width: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.mapSummary {
+  gap: var(--space-1);
+}
+
+.mapSummary span,
+.mapResultValues span {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+
+.mapReview details {
+  max-width: 100%;
+}
+
+.mapDetails {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0 0;
+  font-size: var(--font-size-meta);
+}
+
+.mapDetails dt {
+  color: var(--text-muted);
+}
+
+.mapDetails dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mapReview pre,
+.mapResult pre {
+  max-width: 100%;
+  max-height: 16rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.mapResult {
+  width: 100%;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.mapResultValues {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
 @media (max-width: 850px) {
   .columns,
   .runLayout,
   .formGrid,
-  .flow {
+  .flow,
+  .mapResultValues {
     grid-template-columns: minmax(0, 1fr);
   }
 
