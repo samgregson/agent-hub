@@ -13,6 +13,7 @@ export interface FoundationContracts {
   agentRun?: AgentRun;
   artifactCatalog?: ArtifactCatalog;
   artifactDocument?: ArtifactDocument;
+  callReview?: CallReview;
   error?: ErrorEnvelope;
   projectFilePreview?: ProjectFilePreview;
   projectFileCatalog?: ProjectFileCatalog;
@@ -88,6 +89,46 @@ export interface ArtifactProvenanceActor {
 export interface ArtifactRelation {
   type: string;
   targetArtifactId: EntityId;
+}
+export interface CallReview {
+  target: CallTarget;
+  shape: "single" | "map";
+  source: CallSource;
+  inputPorts: {
+    [k: string]: {
+      [k: string]: unknown;
+    };
+  };
+  outputPorts: {
+    [k: string]: {
+      [k: string]: unknown;
+    };
+  };
+  /**
+   * @minItems 1
+   */
+  bindings: [CallBinding, ...CallBinding[]];
+  invocationCount: number;
+  maxInvocations: number;
+  outputKind: "transformRun" | "batchResultSet";
+  agentApproval: "required";
+}
+export interface CallTarget {
+  kind: "python" | "mcp";
+  id: string;
+  version: number | string;
+  name: string;
+}
+export interface CallSource {
+  kind: "direct" | "dataset";
+  id?: EntityId;
+  version?: number;
+}
+export interface CallBinding {
+  recordId?: EntityId;
+  inputs: {
+    [k: string]: unknown;
+  };
 }
 export interface ProjectFilePreview {
   path: string;

@@ -39,6 +39,7 @@ apps/api/src/agent_hub_api/
     agent_transport/           # Project-authorized AG-UI orchestration and transport
     project_files/             # project-scoped Deep Agents filesystem
     bindings/                  # host-owned Project File to MCP argument rules
+    call_review/               # common review shape for Python and MCP call plans
     input_selection/           # bounded source-neutral value selection rules
     transform_inputs/          # coordinates retained Result Set and MCP output into Transform Runs
     artifacts/                 # Artifact lifecycle and authority rules
@@ -105,6 +106,8 @@ These directions should be enforced by TypeScript restricted-import rules, Pytho
 The Workspace Module owns selected Project, activity view, selected Thread, selected Artifact or Source, and panel state. Project-scoped state is keyed by Project so switching Projects clears the visible selection and switching back can restore that Project's state.
 
 The Operation Calls web Module owns the shared review/start presentation for direct Python Function and MCP tool calls, including explicit Map calls. It consumes the owning backend Modules' plans and displays their retained Run results; it does not authorize or execute a call itself.
+
+The Call Review API Module defines the common read-only review envelope for those four call shapes. Transform and Batch Execution still own planning, submission, authorization, and execution; the envelope captures their target, source, named ports, exact bindings, invocation bound, output kind, and agent approval rule.
 
 Next.js pages render the Workspace Interface. They do not accumulate fetching, selection state, panel coordination, or assistant-ui behaviour. Views, state transitions, hooks, and tests stay beside the Module that owns them. `shared/ui` contains only presentation primitives with no product vocabulary.
 

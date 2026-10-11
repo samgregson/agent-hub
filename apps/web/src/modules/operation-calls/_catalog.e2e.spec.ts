@@ -94,6 +94,31 @@ for (const target of ["Python Function", "MCP tool"] as const) {
               invocationCount: isMap ? 2 : 1,
               outputKind:
                 isPython && !isMap ? "transformRun" : "batchResultSet",
+              review: {
+                target: {
+                  kind: isPython ? "python" : "mcp",
+                  id: isPython ? "function-1" : "plugin-1/evaluate",
+                  version: isPython ? 4 : "2",
+                  name: isPython ? "Normalize" : "evaluate",
+                },
+                shape: isMap ? "map" : "single",
+                source: isMap
+                  ? { kind: "dataset", id: "dataset-1", version: 3 }
+                  : { kind: "direct" },
+                inputPorts: { item: {} },
+                outputPorts: { result: { type: "object" } },
+                bindings: isMap
+                  ? [
+                      { recordId: "record-1", inputs: { item: { value: 2 } } },
+                      { recordId: "record-2", inputs: { item: { value: 3 } } },
+                    ]
+                  : [{ inputs: { item: { value: 2 } } }],
+                invocationCount: isMap ? 2 : 1,
+                maxInvocations: isMap ? 100 : 1,
+                outputKind:
+                  isPython && !isMap ? "transformRun" : "batchResultSet",
+                agentApproval: "required",
+              },
             },
           });
         },
@@ -235,3 +260,109 @@ for (const target of ["Python Function", "MCP tool"] as const) {
     });
   }
 }
+
+test("invalid arguments and a stale MCP version stay explicit without a Run", async ({
+  page,
+}) => {
+  let reviews = 0;
+  let starts = 0;
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+    route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/projects/${project.id}/plugins`, (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: "plugin-1",
+          name: "Calculator",
+          version: "2",
+          enabled: true,
+          tools: [{ name: "evaluate", readOnly: true }],
+        },
+      ],
+    }),
+  );
+  const base = `**/api/projects/${project.id}/batch-runs/mcp-call`;
+  await page.route(`${base}/plan`, (route) => {
+    reviews += 1;
+    return route.fulfill({
+      json: {
+        callKind: "mcpCall",
+        pluginId: "plugin-1",
+        pluginVersion: "2",
+        toolName: "evaluate",
+        inputs: { load: 2 },
+        invocationCount: 1,
+        outputKind: "batchResultSet",
+        review: {
+          target: {
+            kind: "mcp",
+            id: "plugin-1/evaluate",
+            version: "2",
+            name: "evaluate",
+          },
+          shape: "single",
+          source: { kind: "direct" },
+          inputPorts: { load: { type: "number" } },
+          outputPorts: { result: { type: "object" } },
+          bindings: [{ inputs: { load: 2 } }],
+          invocationCount: 1,
+          maxInvocations: 1,
+          outputKind: "batchResultSet",
+          agentApproval: "required",
+        },
+      },
+    });
+  });
+  await page.route(base, (route) => {
+    starts += 1;
+    return route.fulfill({
+      status: 409,
+      json: { detail: "MCP tool version changed; review the call again." },
+    });
+  });
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Project views" })
+    .getByRole("button", { name: "Operations" })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Operation types" })
+    .getByRole("button", { name: "Calls" })
+    .click();
+  await page.getByRole("combobox", { name: "Target kind" }).selectOption("mcp");
+  await page.getByRole("combobox", { name: "Plugin" }).selectOption("plugin-1");
+  await page.getByRole("combobox", { name: "Tool" }).selectOption("evaluate");
+  const argumentsField = page.getByRole("textbox", {
+    name: "Arguments (JSON object)",
+  });
+  await argumentsField.fill("[2]");
+  await page.getByRole("button", { name: "Review Call" }).click();
+  await expect(
+    page.getByRole("region", { name: "Calls" }).getByRole("alert"),
+  ).toContainText("Arguments must be a JSON object.");
+  expect(reviews).toBe(0);
+  await argumentsField.fill('{"load":2}');
+  await page.getByRole("button", { name: "Review Call" }).click();
+  await expect(page.getByRole("region", { name: "Call review" })).toContainText(
+    "evaluate",
+  );
+  await page.getByRole("button", { name: "Start Call" }).click();
+  await expect(
+    page.getByRole("region", { name: "Calls" }).getByRole("alert"),
+  ).toContainText("MCP tool version changed");
+  await expect(page.getByRole("region", { name: "Call result" })).toHaveCount(
+    0,
+  );
+  expect(reviews).toBe(1);
+  expect(starts).toBe(1);
+});

@@ -1,3 +1,5 @@
+import type { CallReview } from "@/contracts";
+
 export type TargetKind = "python" | "mcp";
 export type CallShape = "single" | "map";
 
@@ -16,6 +18,7 @@ export interface CallPlan {
   callKind: "pythonFunction" | "pythonMap" | "mcpCall" | "mcpMap";
   invocationCount: number;
   outputKind: "transformRun" | "batchResultSet";
+  review: CallReview;
   definitionId?: string;
   definitionRevision?: number;
   name?: string;

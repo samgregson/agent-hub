@@ -103,8 +103,10 @@ async def test_direct_mcp_call_retains_one_reviewed_input_and_output() -> None:
     datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
 
     class DirectGateway(Gateway):
+        version = "1.0.0"
+
         async def tool_version(self, *_: object) -> str:
-            return "1.0.0"
+            return self.version
 
         async def output_schema(self, *_: object, **__: object) -> Mapping[str, object]:
             return await super().output_schema()
@@ -127,6 +129,24 @@ async def test_direct_mcp_call_retains_one_reviewed_input_and_output() -> None:
     assert plan.snapshot()["invocationCount"] == 1
     assert plan.snapshot()["inputs"] == {"load": 3}
     assert plan.snapshot()["pluginVersion"] == "1.0.0"
+    assert plan.snapshot()["review"] == {
+        "target": {"kind": "mcp", "id": "fixture/double", "version": "1.0.0", "name": "double"},
+        "shape": "single",
+        "source": {"kind": "direct"},
+        "inputPorts": {"load": {"type": "number"}},
+        "outputPorts": {
+            "result": {
+                "type": "object",
+                "required": ["result"],
+                "properties": {"result": {"type": "number"}},
+            }
+        },
+        "bindings": [{"inputs": {"load": 3}}],
+        "invocationCount": 1,
+        "maxInvocations": 1,
+        "outputKind": "batchResultSet",
+        "agentApproval": "required",
+    }
 
     queued = await batches.submit_mcp_call(
         owner, project.id, "fixture", "double", {"load": 3}, "1.0.0", "call-1"
@@ -134,6 +154,7 @@ async def test_direct_mcp_call_retains_one_reviewed_input_and_output() -> None:
     completed = await batches.execute(owner, project.id, queued.id)
     assert completed.status == BatchRunStatus.succeeded
     assert completed.definition_snapshot["callKind"] == "mcpCall"
+    assert completed.definition_snapshot["review"] == plan.snapshot()["review"]
     assert completed.records[0].input == {"load": 3}
     assert completed.records[0].structured_output == {"result": 6}
     assert gateway.calls == [3]
@@ -147,6 +168,21 @@ async def test_direct_mcp_call_retains_one_reviewed_input_and_output() -> None:
         await batches.submit_mcp_call(owner, project.id, "fixture", "double", {"load": 3}, "0.9.0")
     with pytest.raises(McpCallValidationError, match="input schema"):
         await batches.plan_mcp_call(owner, project.id, "fixture", "double", {"bad": 3})
+    with pytest.raises(McpCallValidationError, match="exceed 64000 bytes"):
+        await batches.plan_mcp_call(
+            owner, project.id, "fixture", "double", {"load": 2, "padding": "x" * 64_000}
+        )
+
+    stale = await batches.submit_mcp_call(
+        owner, project.id, "fixture", "double", {"load": 4}, "1.0.0"
+    )
+    gateway.version = "1.0.1"
+    failed = await batches.execute(owner, project.id, stale.id)
+    assert failed.status == BatchRunStatus.failed
+    assert failed.records[0].error == (
+        "MCP tool version changed since this Run was queued (1.0.0 → 1.0.1)."
+    )
+    assert gateway.calls == [3]
 
 
 @pytest.mark.asyncio
@@ -218,6 +254,13 @@ async def test_direct_mcp_map_uses_dataset_records_without_a_batch_definition() 
     assert plan.invocation_count == 2
     assert plan.snapshot()["pluginVersion"] == "fixture-v1"
     assert plan.snapshot()["inputSchema"] == dict(plan.input_schema)
+    review = cast(Mapping[str, object], plan.snapshot()["review"])
+    assert review["shape"] == "map"
+    assert review["source"] == {"kind": "dataset", "id": dataset.id, "version": dataset.version}
+    assert review["bindings"] == [
+        {"recordId": record.id, "inputs": dict(record.value)} for record in dataset.records
+    ]
+    assert review["maxInvocations"] == 100
 
     queued = await batches.submit_mcp_dataset(
         owner,
@@ -240,6 +283,7 @@ async def test_direct_mcp_map_uses_dataset_records_without_a_batch_definition() 
     assert completed.definition_snapshot["datasetVersion"] == dataset.version
     assert completed.definition_snapshot["callKind"] == "mcpMap"
     assert completed.definition_snapshot["pluginVersion"] == "fixture-v1"
+    assert completed.definition_snapshot["review"] == plan.snapshot()["review"]
     assert (
         await batches.submit_mcp_dataset(
             owner,
@@ -334,6 +378,41 @@ async def test_direct_mcp_map_rejects_invalid_and_stale_dataset_inputs() -> None
         )
     assert updated.version == dataset.version + 1
     assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_queued_mcp_map_fails_before_dispatch_when_plugin_version_changes() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Pinned MCP map")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    dataset = await datasets.create_dataset(
+        owner,
+        project.id,
+        "Inputs",
+        [DatasetRecordInput({"load": 2}), DatasetRecordInput({"load": 3})],
+    )
+
+    class VersionedGateway(Gateway):
+        version = "fixture-v1"
+
+        async def tool_version(self, *_: object) -> str:
+            return self.version
+
+    gateway = VersionedGateway()
+    batches = BatchExecutionModule(
+        projects, datasets, cast(PluginGatewayModule, gateway), MemoryBatchRunStore()
+    )
+    run = await batches.submit_mcp_dataset(
+        owner, project.id, "fixture", "double", dataset.id, dataset.version, "fixture-v1"
+    )
+    gateway.version = "fixture-v2"
+    completed = await batches.execute(owner, project.id, run.id)
+    assert completed.status == BatchRunStatus.failed
+    assert gateway.calls == []
+    assert [record.error for record in completed.records] == [
+        "MCP tool version changed since this Run was queued (fixture-v1 → fixture-v2)."
+    ] * 2
 
 
 @pytest.mark.asyncio
@@ -488,6 +567,17 @@ async def test_python_function_map_passes_each_record_to_one_named_input() -> No
     assert plan.snapshot()["itemInputName"] == "item"
     assert plan.snapshot()["invocationCount"] == 2
     assert plan.snapshot()["recordIds"] == [record.id for record in dataset.records]
+    review = cast(Mapping[str, object], plan.snapshot()["review"])
+    assert review["target"] == {
+        "kind": "python",
+        "id": definition.id,
+        "version": definition.revision,
+        "name": definition.name,
+    }
+    assert review["shape"] == "map"
+    assert review["source"] == {"kind": "dataset", "id": dataset.id, "version": dataset.version}
+    assert review["inputPorts"] == {"item": {}}
+    assert review["invocationCount"] == 2
     assert cast(list[object], plan.snapshot()["boundInputs"])[0] == {
         "recordId": dataset.records[0].id,
         "inputs": {"item": {"load": 2}},
@@ -510,6 +600,7 @@ async def test_python_function_map_passes_each_record_to_one_named_input() -> No
     ]
     assert completed.records[0].structured_output == {"result": 4}
     assert completed.records[1].error == "record rejected"
+    assert completed.definition_snapshot["review"] == plan.snapshot()["review"]
     assert completed.definition_snapshot["callKind"] == "pythonMap"
     assert (
         await batches.submit_python_dataset_map(

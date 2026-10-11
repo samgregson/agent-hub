@@ -12,6 +12,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from agent_hub_api.modules.bindings import BindingModule, BindingUnavailable, CapturedFileBinding
+from agent_hub_api.modules.call_review import call_review
 from agent_hub_api.modules.datasets import (
     BatchDefinition,
     DatasetModule,
@@ -30,6 +31,17 @@ from agent_hub_api.settings import Settings
 MAX_FILE_BOUND_INVOCATIONS = 100
 MAX_DIRECT_MAP_INVOCATIONS = 100
 MAX_DIRECT_CALL_INPUT_BYTES = 64_000
+
+
+def _input_ports(schema: Mapping[str, object]) -> Mapping[str, Mapping[str, object]]:
+    properties = schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        return {}
+    return {
+        name: cast(Mapping[str, object], port_schema)
+        for name, port_schema in properties.items()
+        if isinstance(name, str) and isinstance(port_schema, Mapping)
+    }
 
 
 class BatchRunStatus(StrEnum):
@@ -145,6 +157,21 @@ class McpDatasetMapPlan:
                 for record in self.records
             ],
             "outputKind": "batchResultSet",
+            "review": call_review(
+                target_kind="mcp",
+                target_id=f"{self.plugin_id}/{self.tool_name}",
+                target_version=self.plugin_version,
+                target_name=self.tool_name,
+                shape="map",
+                source={"kind": "dataset", "id": self.dataset_id, "version": self.dataset_version},
+                input_ports=_input_ports(self.input_schema),
+                output_schema=self.output_schema,
+                bindings=[
+                    {"recordId": record.id, "inputs": dict(record.value)} for record in self.records
+                ],
+                max_invocations=MAX_DIRECT_MAP_INVOCATIONS,
+                output_kind="batchResultSet",
+            ),
         }
 
 
@@ -168,6 +195,19 @@ class McpCallPlan:
             "outputSchema": dict(self.output_schema),
             "invocationCount": 1,
             "outputKind": "batchResultSet",
+            "review": call_review(
+                target_kind="mcp",
+                target_id=f"{self.plugin_id}/{self.tool_name}",
+                target_version=self.plugin_version,
+                target_name=self.tool_name,
+                shape="single",
+                source={"kind": "direct"},
+                input_ports=_input_ports(self.input_schema),
+                output_schema=self.output_schema,
+                bindings=[{"inputs": dict(self.arguments)}],
+                max_invocations=1,
+                output_kind="batchResultSet",
+            ),
         }
 
 
@@ -214,6 +254,22 @@ class PythonDatasetMapPlan:
             "packageHash": self.definition_snapshot["packageHash"],
             "invocationCount": len(self.records),
             "outputKind": "batchResultSet",
+            "review": call_review(
+                target_kind="python",
+                target_id=self.definition_id,
+                target_version=self.definition_revision,
+                target_name=self.definition_name,
+                shape="map",
+                source={"kind": "dataset", "id": self.dataset_id, "version": self.dataset_version},
+                input_ports={self.item_input_name: {}},
+                output_schema=cast(Mapping[str, object], self.definition_snapshot["outputSchema"]),
+                bindings=[
+                    {"recordId": record.id, "inputs": {self.item_input_name: dict(record.value)}}
+                    for record in self.records
+                ],
+                max_invocations=MAX_DIRECT_MAP_INVOCATIONS,
+                output_kind="batchResultSet",
+            ),
         }
 
 
@@ -360,6 +416,7 @@ class BatchExecutionModule:
             status=BatchRunStatus.queued,
             definition_snapshot={
                 **plan.definition_snapshot,
+                "review": plan.snapshot()["review"],
                 **_dataset_snapshot(plan.dataset_id, plan.dataset_version, plan.records),
                 "callKind": "pythonMap",
                 "datasetId": plan.dataset_id,
@@ -554,16 +611,9 @@ class BatchExecutionModule:
             definition_id=target_id,
             status=BatchRunStatus.queued,
             definition_snapshot={
-                "callKind": "mcpMap",
-                "datasetId": plan.dataset_id,
+                **plan.snapshot(),
                 "definitionName": plan.tool_name,
-                "pluginId": plan.plugin_id,
-                "pluginVersion": plan.plugin_version,
-                "toolName": plan.tool_name,
-                "inputSchema": dict(plan.input_schema),
-                "outputSchema": dict(plan.output_schema),
                 **_dataset_snapshot(plan.dataset_id, plan.dataset_version, plan.records),
-                "recordIds": list(plan.record_ids),
                 "maxConcurrency": self._max_concurrency,
             },
             records=tuple(ResultRecord(record.id, dict(record.value)) for record in plan.records),
@@ -830,6 +880,27 @@ class BatchExecutionModule:
             return run
         running = replace(run, status=BatchRunStatus.running, updated_at=datetime.now(UTC))
         await self._store.replace(running)
+        if run.definition_snapshot.get("callKind") in {"mcpCall", "mcpMap"}:
+            try:
+                await self._assert_reviewed_mcp_version(access, project_id, run.definition_snapshot)
+            except Exception as error:
+                records = tuple(
+                    record
+                    if record.structured_output is not None or record.error is not None
+                    else replace(record, error=str(error))
+                    for record in running.records
+                )
+                stopped = replace(
+                    running,
+                    status=(
+                        BatchRunStatus.partial
+                        if any(record.structured_output is not None for record in records)
+                        else BatchRunStatus.failed
+                    ),
+                    records=records,
+                    updated_at=datetime.now(UTC),
+                )
+                return await self._store.replace(stopped) or stopped
         first = running.records[0]
         if first.structured_output is None and first.error is None:
             first = await self._execute_snapshot(access, project_id, running, first)
@@ -906,6 +977,8 @@ class BatchExecutionModule:
             tool_name = run.definition_snapshot.get("toolName")
             if not isinstance(plugin_id, str) or not isinstance(tool_name, str):
                 raise ValueError("The Batch Run has no MCP tool target.")
+            if run.definition_snapshot.get("callKind") in {"mcpCall", "mcpMap"}:
+                await self._assert_reviewed_mcp_version(access, project_id, run.definition_snapshot)
             result = await (
                 self._gateway.call(access, project_id, plugin_id, tool_name, record.input)
                 if run.definition_snapshot.get("callKind") == "mcpCall"
@@ -922,6 +995,21 @@ class BatchExecutionModule:
             return ResultRecord(record.dataset_record_id, record.input, result.structured_content)
         except Exception as error:
             return ResultRecord(record.dataset_record_id, record.input, error=str(error))
+
+    async def _assert_reviewed_mcp_version(
+        self, access: ProjectAccess, project_id: str, snapshot: Mapping[str, object]
+    ) -> None:
+        plugin_id = snapshot.get("pluginId")
+        tool_name = snapshot.get("toolName")
+        if not isinstance(plugin_id, str) or not isinstance(tool_name, str):
+            raise ValueError("The Batch Run has no MCP tool target.")
+        current_version = await self._gateway.tool_version(access, project_id, plugin_id, tool_name)
+        reviewed_version = snapshot.get("pluginVersion")
+        if reviewed_version != current_version:
+            raise ValueError(
+                "MCP tool version changed since this Run was queued "
+                f"({reviewed_version} → {current_version})."
+            )
 
     async def _execute(
         self,

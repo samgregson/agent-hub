@@ -21,6 +21,7 @@ from agent_hub_api.modules.artifacts import (
     ArtifactMutationAccess,
     ArtifactUserActionAccess,
 )
+from agent_hub_api.modules.call_review import call_review
 from agent_hub_api.modules.datasets import (
     Dataset,
     DatasetModule,
@@ -86,6 +87,19 @@ class FunctionCallPlan:
             "packageHash": self.package_hash,
             "invocationCount": 1,
             "outputKind": "transformRun",
+            "review": call_review(
+                target_kind="python",
+                target_id=self.definition_id,
+                target_version=self.definition_revision,
+                target_name=self.name,
+                shape="single",
+                source={"kind": "direct"},
+                input_ports={name: {} for name in self.input_names},
+                output_schema=self.output_schema,
+                bindings=[{"inputs": _snapshot_value(self.inputs)}],
+                max_invocations=1,
+                output_kind="transformRun",
+            ),
         }
 
 
@@ -799,6 +813,25 @@ class TransformModule:
                     "runtime": identity.runtime,
                     "package_hash": identity.package_hash,
                     **({"callKind": "pythonFunction"} if resolved_inputs is not None else {}),
+                    **(
+                        {
+                            "review": call_review(
+                                target_kind="python",
+                                target_id=definition.id,
+                                target_version=definition.revision,
+                                target_name=definition.name,
+                                shape="single",
+                                source={"kind": "direct"},
+                                input_ports={name: {} for name in definition.input_selectors},
+                                output_schema=definition.output_schema,
+                                bindings=[{"inputs": _snapshot_value(inputs)}],
+                                max_invocations=1,
+                                output_kind="transformRun",
+                            )
+                        }
+                        if resolved_inputs is not None
+                        else {}
+                    ),
                     **({"selection": dict(selection_snapshot)} if selection_snapshot else {}),
                 },
                 inputs=inputs,

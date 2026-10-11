@@ -4,9 +4,47 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
+
+
+class Shape(StrEnum):
+    single = "single"
+    map = "map"
+
+
+class OutputKind(StrEnum):
+    transform_run = "transformRun"
+    batch_result_set = "batchResultSet"
+
+
+class Kind(StrEnum):
+    python = "python"
+    mcp = "mcp"
+
+
+class Version(RootModel[int]):
+    root: Annotated[int, Field(ge=1)]
+
+
+class Version1(RootModel[str]):
+    root: Annotated[str, Field(min_length=1)]
+
+
+class CallTarget(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    kind: Kind
+    id: Annotated[str, Field(min_length=1)]
+    version: Version | Version1
+    name: Annotated[str, Field(min_length=1)]
+
+
+class Kind1(StrEnum):
+    direct = "direct"
+    dataset = "dataset"
 
 
 class EntityId(RootModel[str]):
@@ -47,7 +85,7 @@ class ArtifactPluginBinding(BaseModel):
     version: Annotated[str, Field(min_length=1)]
 
 
-class Kind(StrEnum):
+class Kind2(StrEnum):
     agent_run = "agentRun"
     user_action = "userAction"
 
@@ -56,7 +94,7 @@ class ArtifactProvenanceActor(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
-    kind: Kind
+    kind: Kind2
     thread_id: Annotated[EntityId | None, Field(alias="threadId")] = None
     run_id: Annotated[EntityId | None, Field(alias="runId")] = None
     user_action_id: Annotated[EntityId | None, Field(alias="userActionId")] = None
@@ -191,11 +229,44 @@ class Thread(BaseModel):
     updated_at: Annotated[AwareDatetime, Field(alias="updatedAt")]
 
 
+class CallSource(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    kind: Kind1
+    id: EntityId | None = None
+    version: Annotated[int | None, Field(ge=1)] = None
+
+
+class CallBinding(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    record_id: Annotated[EntityId | None, Field(alias="recordId")] = None
+    inputs: dict[str, Any]
+
+
 class ProjectFileCatalog(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
     )
     files: list[ProjectFileSummary]
+
+
+class CallReview(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+    )
+    target: CallTarget
+    shape: Shape
+    source: CallSource
+    input_ports: Annotated[dict[str, dict[str, Any]], Field(alias="inputPorts")]
+    output_ports: Annotated[dict[str, dict[str, Any]], Field(alias="outputPorts")]
+    bindings: Annotated[list[CallBinding], Field(min_length=1)]
+    invocation_count: Annotated[int, Field(alias="invocationCount", ge=1)]
+    max_invocations: Annotated[int, Field(alias="maxInvocations", ge=1)]
+    output_kind: Annotated[OutputKind, Field(alias="outputKind")]
+    agent_approval: Annotated[Literal["required"], Field(alias="agentApproval")]
 
 
 class FoundationContracts(BaseModel):
@@ -205,6 +276,7 @@ class FoundationContracts(BaseModel):
     agent_run: Annotated[AgentRun | None, Field(alias="agentRun")] = None
     artifact_catalog: Annotated[ArtifactCatalog | None, Field(alias="artifactCatalog")] = None
     artifact_document: Annotated[ArtifactDocument | None, Field(alias="artifactDocument")] = None
+    call_review: Annotated[CallReview | None, Field(alias="callReview")] = None
     error: ErrorEnvelope | None = None
     project_file_preview: Annotated[
         ProjectFilePreview | None, Field(alias="projectFilePreview")

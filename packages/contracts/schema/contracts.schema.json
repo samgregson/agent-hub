@@ -9,6 +9,7 @@
     "agentRun": { "$ref": "#/$defs/AgentRun" },
     "artifactCatalog": { "$ref": "#/$defs/ArtifactCatalog" },
     "artifactDocument": { "$ref": "#/$defs/ArtifactDocument" },
+    "callReview": { "$ref": "#/$defs/CallReview" },
     "error": { "$ref": "#/$defs/ErrorEnvelope" },
     "projectFilePreview": { "$ref": "#/$defs/ProjectFilePreview" },
     "projectFileCatalog": { "$ref": "#/$defs/ProjectFileCatalog" },
@@ -17,6 +18,53 @@
     "thread": { "$ref": "#/$defs/Thread" }
   },
   "$defs": {
+    "CallReview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "shape", "source", "inputPorts", "outputPorts", "bindings", "invocationCount", "maxInvocations", "outputKind", "agentApproval"],
+      "properties": {
+        "target": { "$ref": "#/$defs/CallTarget" },
+        "shape": { "type": "string", "enum": ["single", "map"] },
+        "source": { "$ref": "#/$defs/CallSource" },
+        "inputPorts": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": true } },
+        "outputPorts": { "type": "object", "additionalProperties": { "type": "object", "additionalProperties": true } },
+        "bindings": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/CallBinding" } },
+        "invocationCount": { "type": "integer", "minimum": 1 },
+        "maxInvocations": { "type": "integer", "minimum": 1 },
+        "outputKind": { "type": "string", "enum": ["transformRun", "batchResultSet"] },
+        "agentApproval": { "type": "string", "const": "required" }
+      }
+    },
+    "CallTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "version", "name"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["python", "mcp"] },
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "oneOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "minLength": 1 }] },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CallSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["direct", "dataset"] },
+        "id": { "$ref": "#/$defs/EntityId" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "CallBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inputs"],
+      "properties": {
+        "recordId": { "$ref": "#/$defs/EntityId" },
+        "inputs": { "type": "object", "additionalProperties": true }
+      }
+    },
     "EntityId": {
       "type": "string",
       "minLength": 1,

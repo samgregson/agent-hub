@@ -266,15 +266,12 @@ export function OperationCallCatalog({ projectId }: { projectId: string }) {
   const selectedPlugin = plugins.find(
     (plugin) => plugin.id === selection.pluginId,
   );
-  const bindings = plan?.boundInputs ?? plan?.datasetRecords ?? plan?.inputs;
-  const targetName =
-    plan?.name ?? [plan?.pluginId, plan?.toolName].filter(Boolean).join(" · ");
+  const bindings = plan?.review.bindings;
+  const targetName = plan?.review.target.name;
   const datasetName = datasets.find(
     (dataset) => dataset.id === plan?.datasetId,
   )?.name;
-  const runTargetName =
-    runPlan?.name ??
-    [runPlan?.pluginId, runPlan?.toolName].filter(Boolean).join(" · ");
+  const runTargetName = runPlan?.review.target.name;
 
   return (
     <section aria-label="Calls" className={styles.catalog}>
@@ -437,9 +434,9 @@ export function OperationCallCatalog({ projectId }: { projectId: string }) {
           <div className={styles.summary}>
             <strong>{targetName}</strong>
             <span>
-              {plan.invocationCount} invocation
-              {plan.invocationCount === 1 ? "" : "s"} ·{" "}
-              {plan.outputKind === "transformRun"
+              {plan.review.invocationCount} invocation
+              {plan.review.invocationCount === 1 ? "" : "s"} ·{" "}
+              {plan.review.outputKind === "transformRun"
                 ? "Transform Run"
                 : "Result Set"}
             </span>
@@ -456,11 +453,26 @@ export function OperationCallCatalog({ projectId }: { projectId: string }) {
           </div>
           <p>
             Review this target and its inputs before starting. Agent starts
-            require approval.
+            require approval. Limit: {plan.review.maxInvocations} invocation
+            {plan.review.maxInvocations === 1 ? "" : "s"}.
           </p>
           <details open>
             <summary>Bound inputs</summary>
             <pre>{JSON.stringify(bindings, null, 2)}</pre>
+          </details>
+          <details>
+            <summary>Ports and output</summary>
+            <pre>
+              {JSON.stringify(
+                {
+                  inputPorts: plan.review.inputPorts,
+                  outputPorts: plan.review.outputPorts,
+                  outputKind: plan.review.outputKind,
+                },
+                null,
+                2,
+              )}
+            </pre>
           </details>
           {plan.runtime ||
           plan.sourceHash ||
@@ -527,14 +539,7 @@ export function OperationCallCatalog({ projectId }: { projectId: string }) {
               <pre>
                 {JSON.stringify(
                   {
-                    target: {
-                      definitionId: runPlan.definitionId,
-                      pluginId: runPlan.pluginId,
-                      toolName: runPlan.toolName,
-                    },
-                    datasetId: runPlan.datasetId,
-                    recordIds: runPlan.recordIds,
-                    inputs: runPlan.boundInputs ?? runPlan.inputs,
+                    ...runPlan.review,
                     parameters: runPlan.parameters,
                   },
                   null,

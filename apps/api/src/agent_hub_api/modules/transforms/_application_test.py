@@ -214,6 +214,23 @@ async def test_python_function_call_uses_named_inputs_without_selection_rules() 
     )
     assert plan.snapshot()["inputNames"] == ["values"]
     assert plan.snapshot()["invocationCount"] == 1
+    assert plan.snapshot()["review"] == {
+        "target": {
+            "kind": "python",
+            "id": definition.id,
+            "version": definition.revision,
+            "name": definition.name,
+        },
+        "shape": "single",
+        "source": {"kind": "direct"},
+        "inputPorts": {"values": {}},
+        "outputPorts": {"result": {"type": "object", "required": ["ordered"]}},
+        "bindings": [{"inputs": {"values": [3, 1, 2]}}],
+        "invocationCount": 1,
+        "maxInvocations": 1,
+        "outputKind": "transformRun",
+        "agentApproval": "required",
+    }
 
     run = await transforms.start_function_call(
         owner,
@@ -223,6 +240,7 @@ async def test_python_function_call_uses_named_inputs_without_selection_rules() 
         {},
         expected_revision=plan.definition_revision,
     )
+    assert run.definition_snapshot["review"] == plan.snapshot()["review"]
     assert run.status == "succeeded"
     assert run.inputs == {"values": [3, 1, 2]}
     assert run.output == {"ordered": [1, 2, 3]}
