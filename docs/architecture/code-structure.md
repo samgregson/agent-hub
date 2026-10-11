@@ -24,6 +24,7 @@ apps/web/src/
     workspace/                 # Project selection, navigation and panel state
     agent-ui/                  # assistant-ui composition and AG-UI adapter
     artifact-view-host/        # trusted chrome, sandbox host and fallback view
+    operation-calls/           # review/start and result inspection for Python and MCP calls
   shared/
     config/                    # validated browser/server configuration
     http/                      # shared same-origin backend forwarding
@@ -102,6 +103,8 @@ These directions should be enforced by TypeScript restricted-import rules, Pytho
 ## Frontend ownership
 
 The Workspace Module owns selected Project, activity view, selected Thread, selected Artifact or Source, and panel state. Project-scoped state is keyed by Project so switching Projects clears the visible selection and switching back can restore that Project's state.
+
+The Operation Calls web Module owns the shared review/start presentation for direct Python Function and MCP tool calls, including explicit Map calls. It consumes the owning backend Modules' plans and displays their retained Run results; it does not authorize or execute a call itself.
 
 Next.js pages render the Workspace Interface. They do not accumulate fetching, selection state, panel coordination, or assistant-ui behaviour. Views, state transitions, hooks, and tests stay beside the Module that owns them. `shared/ui` contains only presentation primitives with no product vocabulary.
 

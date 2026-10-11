@@ -17,6 +17,7 @@ import {
 } from "@/modules/agent-ui";
 import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
 import { DatasetCatalog, DatasetFilePreview } from "@/modules/datasets";
+import { OperationCallCatalog } from "@/modules/operation-calls";
 import { TransformCatalog } from "@/modules/transforms";
 import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
@@ -467,7 +468,7 @@ export function ProjectWorkspace() {
           />
           <aside
             aria-label="Project navigation"
-            className={`${styles.mobileNavigationDrawer} ${selectedActivity === "operations" && selectedWorkspace?.operationKind === "transforms" ? styles.mobileNavigationDrawerWide : ""}`}
+            className={`${styles.mobileNavigationDrawer} ${selectedActivity === "operations" && (selectedWorkspace?.operationKind === "transforms" || selectedWorkspace?.operationKind === "calls") ? styles.mobileNavigationDrawerWide : ""}`}
             id="mobile-project-navigation"
             role="dialog"
           >
@@ -768,6 +769,13 @@ function OperationsCatalog({
     <>
       <nav aria-label="Operation types" className={styles.operationTypes}>
         <button
+          aria-pressed={operationKind === "calls"}
+          onClick={() => onSelectKind("calls")}
+          type="button"
+        >
+          Calls
+        </button>
+        <button
           aria-pressed={operationKind === "batchDefinitions"}
           onClick={() => onSelectKind("batchDefinitions")}
           type="button"
@@ -782,7 +790,9 @@ function OperationsCatalog({
           Transforms
         </button>
       </nav>
-      {operationKind === "batchDefinitions" ? (
+      {operationKind === "calls" ? (
+        <OperationCallCatalog key={projectId} projectId={projectId} />
+      ) : operationKind === "batchDefinitions" ? (
         <DatasetCatalog
           key={projectId}
           mode="definitions"

@@ -1330,9 +1330,7 @@ test("selection planning and runs reach the Project API through the browser", as
   }
 });
 
-test("a Dataset can run once or map a Function with reviewed per-Record results", async ({
-  page,
-}) => {
+test("a Dataset Transform runs once over ordered Records", async ({ page }) => {
   const project = {
     id: "project-selection",
     name: "Selection review",
@@ -1394,16 +1392,8 @@ test("a Dataset can run once or map a Function with reviewed per-Record results"
           transformRevision: 3,
           recordIds: selection.recordIds,
           mode: (route.request().postDataJSON() as { mode: string }).mode,
-          invocationCount:
-            (route.request().postDataJSON() as { mode: string }).mode ===
-            "dataset"
-              ? 1
-              : 2,
-          outputKind:
-            (route.request().postDataJSON() as { mode: string }).mode ===
-            "dataset"
-              ? "transformRun"
-              : "batchResultSet",
+          invocationCount: 1,
+          outputKind: "transformRun",
         },
       });
     },
@@ -1414,19 +1404,11 @@ test("a Dataset can run once or map a Function with reviewed per-Record results"
       writes.push(route.request().postDataJSON() as Record<string, unknown>);
       return route.fulfill({
         status: 201,
-        json:
-          (route.request().postDataJSON() as { mode: string }).mode ===
-          "dataset"
-            ? {
-                id: "run-selection",
-                status: "succeeded",
-                outputKind: "transformRun",
-              }
-            : {
-                id: "batch-selection",
-                status: "queued",
-                outputKind: "batchResultSet",
-              },
+        json: {
+          id: "run-selection",
+          status: "succeeded",
+          outputKind: "transformRun",
+        },
       });
     },
   );
@@ -1465,73 +1447,6 @@ test("a Dataset can run once or map a Function with reviewed per-Record results"
         },
       }),
   );
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs/python-map/plan`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        json: {
-          callKind: "pythonMap",
-          datasetId: "dataset-1",
-          datasetVersion: 2,
-          definitionId: definition.id,
-          definitionRevision: 3,
-          name: definition.name,
-          itemInputName: "items",
-          recordIds: selection.recordIds,
-          boundInputs: [
-            { recordId: "record-1", inputs: { items: { score: 1 } } },
-            { recordId: "record-2", inputs: { items: { score: 3 } } },
-          ],
-          parameters: {},
-          runtime: "pyodide",
-          sourceHash: "sourcehash",
-          packageHash: "abc",
-          invocationCount: 2,
-          outputKind: "batchResultSet",
-        },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs/python-map`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        status: 201,
-        json: { id: "batch-selection", status: "queued", recordCount: 2 },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs/batch-selection`,
-    (route) =>
-      route.fulfill({ json: { id: "batch-selection", status: "partial" } }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs/batch-selection/results?**`,
-    (route) =>
-      route.fulfill({
-        json: {
-          items: [
-            {
-              datasetRecordId: "record-1",
-              input: { score: 1 },
-              structuredOutput: { result: 2 },
-              error: null,
-            },
-            {
-              datasetRecordId: "record-2",
-              input: { score: 3 },
-              structuredOutput: null,
-              error: "record rejected",
-            },
-          ],
-          nextOffset: null,
-          summary: { totalCount: 2, succeededCount: 1, failedCount: 1 },
-        },
-      }),
-  );
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Project views" })
@@ -1565,40 +1480,6 @@ test("a Dataset can run once or map a Function with reviewed per-Record results"
     expectedDatasetVersion: 2,
     expectedTransformRevision: 3,
   });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Open Project navigation" }).click();
-  const drawer = page.getByRole("dialog", { name: "Project navigation" });
-  await drawer.getByLabel("Input source").selectOption("dataset");
-  await drawer
-    .getByRole("combobox", { name: "Dataset", exact: true })
-    .selectOption("dataset-1");
-  await drawer
-    .getByRole("combobox", { name: "Execution mode" })
-    .selectOption("perRecord");
-  await drawer.getByRole("button", { name: "Review Map" }).click();
-  const review = drawer.getByRole("region", { name: "Python Map review" });
-  await expect(review).toContainText("2 Records · 2 Function calls");
-  await expect(review).toContainText("items");
-  await review.getByText("Bound inputs").click();
-  await expect(review).toContainText('"score": 1');
-  await review.getByText("Execution details").click();
-  await expect(review).toContainText("sourcehash");
-  await review.getByRole("button", { name: "Start Map" }).click();
-  const results = drawer.getByRole("region", { name: "Python Map results" });
-  await expect(results).toContainText("1 succeeded · 1 failed");
-  await expect(results).toContainText("record rejected");
-  await expect(results).toContainText('"result": 2');
-  expect(writes[2]).toMatchObject({
-    datasetId: "dataset-1",
-    definitionId: definition.id,
-  });
-  expect(writes[3]).toMatchObject({
-    datasetId: "dataset-1",
-    definitionId: definition.id,
-    expectedDatasetVersion: 2,
-    expectedDefinitionRevision: 3,
-  });
-  expect(writes).toHaveLength(4);
 });
 
 test("a retained Transform output selection shows its source and selected values", async ({

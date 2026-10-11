@@ -1,0 +1,110 @@
+.catalog,
+.form,
+.review,
+.summary {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  justify-items: start;
+}
+
+.catalog {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding-bottom: var(--space-5);
+}
+
+.heading h1 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: var(--font-size-heading);
+}
+
+.heading p,
+.review p,
+.hint {
+  color: var(--text-muted);
+}
+
+.form,
+.review {
+  width: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface-card);
+}
+
+.fieldGrid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.fieldset {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fieldGrid textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: var(--font-size-meta);
+}
+
+.summary {
+  gap: var(--space-1);
+}
+
+.summary span,
+.values span {
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+
+.review details {
+  max-width: 100%;
+}
+
+.review pre {
+  max-width: 100%;
+  max-height: 18rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.result {
+  width: 100%;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--line);
+}
+
+.values {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.values > div {
+  min-width: 0;
+}
+
+.error {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--danger);
+}
+
+@media (max-width: 850px) {
+  .fieldGrid,
+  .values {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

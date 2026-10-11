@@ -14,7 +14,7 @@ export const activityViews = [
 ] as const;
 
 export type ActivityView = (typeof activityViews)[number];
-export type OperationKind = "batchDefinitions" | "transforms";
+export type OperationKind = "batchDefinitions" | "transforms" | "calls";
 
 export interface ProjectWorkspaceState {
   activity: ActivityView;

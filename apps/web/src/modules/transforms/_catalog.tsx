@@ -4,7 +4,6 @@ import { FormEvent, useEffect, useState } from "react";
 
 import { Button, Field } from "@/shared/ui";
 
-import { PythonMapReview } from "./_python-map-review";
 import styles from "./transform.module.css";
 
 interface Definition {
@@ -88,9 +87,9 @@ interface DatasetRunPlan {
   transformDefinitionId: string;
   transformRevision: number;
   recordIds: string[];
-  mode: "dataset" | "perRecord";
+  mode: "dataset";
   invocationCount: number;
-  outputKind: "transformRun" | "batchResultSet";
+  outputKind: "transformRun";
 }
 
 interface BatchRunOption {
@@ -208,9 +207,6 @@ export function TransformCatalog({
     Array<{ id: string; title: string; documentVersion: number }>
   >([]);
   const [selectionDatasetId, setSelectionDatasetId] = useState("");
-  const [datasetRunMode, setDatasetRunMode] = useState<"dataset" | "perRecord">(
-    "dataset",
-  );
   const [datasetRunPlan, setDatasetRunPlan] = useState<DatasetRunPlan | null>(
     null,
   );
@@ -530,7 +526,7 @@ export function TransformCatalog({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             datasetId: selectionDatasetId,
-            mode: datasetRunMode,
+            mode: "dataset",
             parameters: jsonObject(parametersJson, "Parameters"),
           }),
         },
@@ -566,7 +562,7 @@ export function TransformCatalog({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             datasetId: datasetRunPlan.datasetId,
-            mode: datasetRunPlan.mode,
+            mode: "dataset",
             expectedDatasetVersion: datasetRunPlan.datasetVersion,
             expectedTransformRevision: datasetRunPlan.transformRevision,
             parameters: jsonObject(parametersJson, "Parameters"),
@@ -580,40 +576,29 @@ export function TransformCatalog({
       const started = (await response.json()) as {
         id: string;
         status: string;
-        outputKind: string;
       };
       setDatasetRunPlan(null);
-      if (started.outputKind === "batchResultSet") {
-        setNotice(
-          `Batch Run ${shortId(started.id)} ${started.status}. Inspect its Result Set under Operations → Batch Definitions.`,
-        );
-      } else {
-        onSelectRunScope(selectedDefinition.id);
-        const detail = await fetch(
-          `${root}/runs/${encodeURIComponent(started.id)}`,
-          {
-            cache: "no-store",
-          },
-        );
-        if (!detail.ok)
-          throw new Error("Run started, but its details could not be loaded.");
-        const run = (await detail.json()) as Run;
-        setRunPage((current) => ({
-          items: [
-            run,
-            ...(current?.scope === selectedDefinition.id
-              ? current.items.filter((item) => item.id !== run.id)
-              : []),
-          ],
-          nextOffset:
-            current?.scope === selectedDefinition.id
-              ? current.nextOffset
-              : null,
-          scope: selectedDefinition.id,
-        }));
-        setSelectedRunId(run.id);
-        setNotice(`Transform Run ${shortId(run.id)} ${run.status}.`);
-      }
+      onSelectRunScope(selectedDefinition.id);
+      const detail = await fetch(
+        `${root}/runs/${encodeURIComponent(started.id)}`,
+        { cache: "no-store" },
+      );
+      if (!detail.ok)
+        throw new Error("Run started, but its details could not be loaded.");
+      const run = (await detail.json()) as Run;
+      setRunPage((current) => ({
+        items: [
+          run,
+          ...(current?.scope === selectedDefinition.id
+            ? current.items.filter((item) => item.id !== run.id)
+            : []),
+        ],
+        nextOffset:
+          current?.scope === selectedDefinition.id ? current.nextOffset : null,
+        scope: selectedDefinition.id,
+      }));
+      setSelectedRunId(run.id);
+      setNotice(`Transform Run ${shortId(run.id)} ${run.status}.`);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Run could not be started.",
@@ -1131,8 +1116,8 @@ export function TransformCatalog({
                 >
                   <p>
                     Run once with all ordered Records so Python can filter,
-                    sort, or aggregate them. Or map the Function over each
-                    Record and retain a Result Set.
+                    sort, or aggregate them. To run one call per Record, use
+                    Calls → Map Dataset.
                   </p>
                   <div className={styles.formGrid}>
                     <Field label="Dataset">
@@ -1151,24 +1136,6 @@ export function TransformCatalog({
                         ))}
                       </select>
                     </Field>
-                    <Field label="Execution mode">
-                      <select
-                        onChange={(event) => {
-                          setDatasetRunMode(
-                            event.target.value as "dataset" | "perRecord",
-                          );
-                          setDatasetRunPlan(null);
-                        }}
-                        value={datasetRunMode}
-                      >
-                        <option value="dataset">
-                          Dataset-wide · one invocation
-                        </option>
-                        <option value="perRecord">
-                          Map each Record · Result Set
-                        </option>
-                      </select>
-                    </Field>
                   </div>
                   <Field label="Parameters (JSON object)">
                     <textarea
@@ -1182,14 +1149,12 @@ export function TransformCatalog({
                     />
                   </Field>
                   <div className={styles.actions}>
-                    {datasetRunMode === "dataset" ? (
-                      <Button
-                        disabled={busy !== null || !selectionDatasetId}
-                        onClick={() => void reviewDatasetRun()}
-                      >
-                        {busy === "dataset-plan" ? "Reviewing…" : "Review Run"}
-                      </Button>
-                    ) : null}
+                    <Button
+                      disabled={busy !== null || !selectionDatasetId}
+                      onClick={() => void reviewDatasetRun()}
+                    >
+                      {busy === "dataset-plan" ? "Reviewing…" : "Review Run"}
+                    </Button>
                     <Button
                       onClick={() =>
                         void refreshDatasets()
@@ -1202,16 +1167,7 @@ export function TransformCatalog({
                       Refresh Datasets
                     </Button>
                   </div>
-                  {datasetRunMode === "perRecord" ? (
-                    <PythonMapReview
-                      key={`${selectedDefinition.id}:${selectionDatasetId}:${parametersJson}`}
-                      datasetId={selectionDatasetId}
-                      definitionId={selectedDefinition.id}
-                      parametersJson={parametersJson}
-                      projectId={projectId}
-                    />
-                  ) : null}
-                  {datasetRunMode === "dataset" && datasetRunPlan ? (
+                  {datasetRunPlan ? (
                     <section
                       aria-label="Dataset Run plan"
                       className={styles.preview}
@@ -1223,10 +1179,8 @@ export function TransformCatalog({
                       </strong>
                       <p>
                         Dataset v{datasetRunPlan.datasetVersion} · Transform
-                        revision {datasetRunPlan.transformRevision} →{" "}
-                        {datasetRunPlan.outputKind === "batchResultSet"
-                          ? "Batch Result Set"
-                          : "Transform Run output"}
+                        revision {datasetRunPlan.transformRevision} → Transform
+                        Run output
                       </p>
                       <details>
                         <summary>Captured Record IDs</summary>
