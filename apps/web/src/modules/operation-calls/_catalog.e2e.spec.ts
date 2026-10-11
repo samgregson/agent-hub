@@ -79,14 +79,6 @@ for (const target of ["Python Function", "MCP tool"] as const) {
               inputs: isMap
                 ? [{ value: 2 }, { value: 3 }]
                 : { item: { value: 2 } },
-              boundInputs:
-                isPython && isMap
-                  ? [
-                      { recordId: "record-1", inputs: { item: { value: 2 } } },
-                      { recordId: "record-2", inputs: { item: { value: 3 } } },
-                    ]
-                  : undefined,
-              recordIds: isMap ? ["record-1", "record-2"] : undefined,
               parameters: isPython ? {} : undefined,
               runtime: isPython ? "pyodide" : undefined,
               sourceHash: isPython && isMap ? "sourcehash" : undefined,

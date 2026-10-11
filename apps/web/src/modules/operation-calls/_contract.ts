@@ -27,10 +27,7 @@ export interface CallPlan {
   toolName?: string;
   datasetId?: string;
   datasetVersion?: number;
-  recordIds?: string[];
   inputs?: unknown;
-  boundInputs?: unknown;
-  datasetRecords?: unknown;
   parameters?: Record<string, unknown>;
   runtime?: string | null;
   sourceHash?: string;

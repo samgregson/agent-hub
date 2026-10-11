@@ -25,6 +25,7 @@ apps/web/src/
     agent-ui/                  # assistant-ui composition and AG-UI adapter
     artifact-view-host/        # trusted chrome, sandbox host and fallback view
     operation-calls/           # review/start and result inspection for Python and MCP calls
+    workflows/                 # Workflow route forwarding and later overview/editor
   shared/
     config/                    # validated browser/server configuration
     http/                      # shared same-origin backend forwarding
@@ -45,6 +46,7 @@ apps/api/src/agent_hub_api/
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
     transforms/                # Project Transform Definitions, previews, and durable Runs
+    workflows/                 # versioned Workflow Definitions and graph validation
     persistence/               # shared transaction and database facilities
 
 apps/transform-runner/         # isolated Deno/Pyodide execution service
@@ -108,6 +110,8 @@ The Workspace Module owns selected Project, activity view, selected Thread, sele
 The Operation Calls web Module owns the shared review/start presentation for direct Python Function and MCP tool calls, including explicit Map calls. It consumes the owning backend Modules' plans and displays their retained Run results; it does not authorize or execute a call itself.
 
 The Call Review API Module defines the common read-only review envelope for those four call shapes. Transform and Batch Execution still own planning, submission, authorization, and execution; the envelope captures their target, source, named ports, exact bindings, invocation bound, output kind, and agent approval rule.
+
+The Workflow Module owns saved Project graph definitions, version checks, and static port/cardinality/cycle validation. It resolves Dataset, Function, and MCP target references through those Modules' Interfaces. Workflow execution and Runs are subsequent slices; call execution remains with Transform and Batch Execution.
 
 Next.js pages render the Workspace Interface. They do not accumulate fetching, selection state, panel coordination, or assistant-ui behaviour. Views, state transitions, hooks, and tests stay beside the Module that owns them. `shared/ui` contains only presentation primitives with no product vocabulary.
 

@@ -50,6 +50,10 @@ from agent_hub_api.modules.transforms import (
     create_postgres_transform_module,
     create_transform_router,
 )
+from agent_hub_api.modules.workflows import (
+    create_postgres_workflow_module,
+    create_workflow_router,
+)
 from agent_hub_api.settings import Settings, get_settings
 
 
@@ -99,6 +103,13 @@ def create_app(
     resolved_transform_inputs = TransformInputModule(
         resolved_batches, resolved_transforms, resolved_artifacts, resolved_datasets
     )
+    resolved_workflows = create_postgres_workflow_module(
+        resolved_settings,
+        resolved_projects,
+        resolved_datasets,
+        resolved_transforms,
+        resolved_plugin_gateway,
+    )
     deep_agent_runner = None
     if agent_execution is None:
         deep_agent_runner = PostgresDeepAgentRunner(
@@ -111,6 +122,7 @@ def create_app(
             resolved_transforms,
             resolved_bindings,
             resolved_transform_inputs,
+            resolved_workflows,
         )
         resolved_agent_execution = create_postgres_agent_execution(
             resolved_settings, deep_agent_runner
@@ -166,6 +178,9 @@ def create_app(
     application.include_router(
         create_transform_input_router(resolved_identity, resolved_transform_inputs),
         prefix="/api",
+    )
+    application.include_router(
+        create_workflow_router(resolved_identity, resolved_workflows), prefix="/api"
     )
     application.include_router(
         create_plugin_gateway_router(resolved_identity, resolved_plugin_gateway),

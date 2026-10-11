@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 
 from agent_hub_api.contracts import CallReview
 
+MAX_MAP_INVOCATIONS = 100
+
 
 def call_review(
     *,
@@ -20,6 +22,8 @@ def call_review(
     output_kind: str,
 ) -> Mapping[str, object]:
     """Capture the target, ports, source, bounds, bindings and approval rule for review."""
+    if not 1 <= len(bindings) <= max_invocations:
+        raise ValueError("Call bindings exceed the reviewed invocation bound.")
     review = {
         "target": {
             "kind": target_kind,

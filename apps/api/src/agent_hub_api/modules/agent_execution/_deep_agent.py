@@ -3,6 +3,7 @@ import hashlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
+from dataclasses import asdict
 from typing import Annotated, Any, cast
 
 from ag_ui.core import BaseEvent, RunAgentInput
@@ -63,6 +64,7 @@ from agent_hub_api.modules.transforms import (
     TransformModule,
     TransformValidationError,
 )
+from agent_hub_api.modules.workflows import WorkflowDefinitionModule, WorkflowGraph
 from agent_hub_api.settings import Settings
 
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
@@ -115,6 +117,11 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         'Record value to inputs["record"]. Both modes accept parameters.',
         "Never claim access to the host filesystem. When referring to a virtual file in "
         "a response, link it as Markdown using its absolute /project or /scratch path.",
+        "Workflow Definitions are saved Project DAGs. Use list_project_workflows and "
+        "load_project_workflow to inspect them, then create_project_workflow or "
+        "revise_project_workflow for a user-requested change. The graph JSON has nodes, "
+        "edges, and named outputs. Creating or revising a Workflow invokes the approval "
+        "card automatically. A saved Definition does not execute until a Workflow Run is started.",
     )
 )
 
@@ -166,6 +173,7 @@ class PostgresDeepAgentRunner:
         transforms: TransformModule | None = None,
         bindings: BindingModule | None = None,
         transform_inputs: TransformInputModule | None = None,
+        workflows: WorkflowDefinitionModule | None = None,
     ) -> None:
         self._settings = settings
         self._project_files = project_files
@@ -176,6 +184,7 @@ class PostgresDeepAgentRunner:
         self._transforms = transforms
         self._bindings = bindings
         self._transform_inputs = transform_inputs
+        self._workflows = workflows
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
@@ -250,6 +259,9 @@ class PostgresDeepAgentRunner:
                     transform_inputs, project_id, subject, thread_id, run_id
                 )
             )
+        workflows = getattr(self, "_workflows", None)
+        if workflows is not None and subject is not None:
+            tools.extend(self._workflow_tools(workflows, project_id, subject))
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -378,6 +390,15 @@ class PostgresDeepAgentRunner:
             interrupt_on["start_project_transform_artifact_selection_run"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Run the reviewed MCP output selection through this Transform?",
+            }
+        if workflows is not None and subject is not None:
+            interrupt_on["create_project_workflow"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Create this Workflow Definition?",
+            }
+            interrupt_on["revise_project_workflow"] = {
+                "allowed_decisions": ["approve", "reject"],
+                "description": "Revise this Workflow Definition?",
             }
         graph = create_deep_agent(
             model=self._model,
@@ -1078,6 +1099,63 @@ class PostgresDeepAgentRunner:
             start_project_mcp_call,
             plan_project_mcp_map,
             start_project_mcp_map,
+        ]
+
+    @staticmethod
+    def _workflow_tools(
+        workflows: WorkflowDefinitionModule, project_id: str, subject: str
+    ) -> list[BaseTool]:
+        access = ProjectAccess(subject=subject)
+
+        @tool
+        async def list_project_workflows() -> str:
+            """List saved Workflow Definitions in this Project."""
+            items = await workflows.list(access, project_id)
+            return json.dumps(
+                [{"id": item.id, "name": item.name, "version": item.version} for item in items]
+            )
+
+        @tool
+        async def load_project_workflow(workflow_id: str) -> str:
+            """Read one saved Workflow Definition and its graph."""
+            item = await workflows.load(access, project_id, workflow_id)
+            return json.dumps(
+                {
+                    "id": item.id,
+                    "name": item.name,
+                    "version": item.version,
+                    "graph": asdict(item.graph),
+                }
+            )
+
+        @tool
+        async def create_project_workflow(name: str, graph_json: str) -> str:
+            """Create a Workflow after approval; graph_json uses snake_case keys."""
+            graph = WorkflowGraph.from_json(graph_json)
+            item = await workflows.create(access, project_id, name, graph)
+            return json.dumps({"id": item.id, "name": item.name, "version": item.version})
+
+        @tool
+        async def revise_project_workflow(
+            workflow_id: str, name: str, graph_json: str, expected_version: int
+        ) -> str:
+            """Revise a Workflow after approval; graph_json uses snake_case node and edge keys."""
+            graph = WorkflowGraph.from_json(graph_json)
+            item = await workflows.revise(
+                access,
+                project_id,
+                workflow_id,
+                name,
+                graph,
+                expected_version=expected_version,
+            )
+            return json.dumps({"id": item.id, "name": item.name, "version": item.version})
+
+        return [
+            list_project_workflows,
+            load_project_workflow,
+            create_project_workflow,
+            revise_project_workflow,
         ]
 
     @staticmethod

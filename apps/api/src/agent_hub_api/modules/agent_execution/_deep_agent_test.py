@@ -33,6 +33,7 @@ from agent_hub_api.modules.transforms import (
     TransformInitiation,
     TransformModule,
 )
+from agent_hub_api.modules.workflows import MemoryWorkflowStore, WorkflowDefinitionModule
 
 
 def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:
@@ -78,6 +79,81 @@ def test_agent_instructions_describe_transform_language_and_selectors() -> None:
     assert "transform(inputs, parameters)" in _AGENT_SYSTEM_PROMPT
     assert '{"record":""}' in _AGENT_SYSTEM_PROMPT
     assert "null output during that state" in _AGENT_SYSTEM_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_agent_workflow_edits_are_approval_gated_and_readable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Workflow tools")
+
+    class Schemas:
+        async def input_schema(self, *_: object) -> dict[str, object]:
+            return {"type": "object"}
+
+    datasets = DatasetModule(projects, MemoryDatasetStore(), Schemas())
+    dataset = await datasets.create_dataset(
+        owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
+    )
+    workflows = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        TransformModule(projects, MemoryTransformStore()),
+        None,
+        MemoryWorkflowStore(),
+    )
+    runner = object.__new__(PostgresDeepAgentRunner)
+    runner._checkpointer = cast(Any, object())
+    runner._model = cast(Any, object())
+    runner._project_files = cast(Any, object())
+    runner._plugin_gateway = None
+    runner._workflows = workflows
+    runner._settings = cast(
+        Any, SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False)
+    )
+    captured: dict[str, Any] = {}
+
+    def create_agent(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(nodes={})
+
+    monkeypatch.setattr(deep_agent, "create_deep_agent", create_agent)
+    await runner._agent_for(project.id, subject="sam")
+    assert captured["interrupt_on"]["create_project_workflow"]["allowed_decisions"] == [
+        "approve",
+        "reject",
+    ]
+    assert captured["interrupt_on"]["revise_project_workflow"]["allowed_decisions"] == [
+        "approve",
+        "reject",
+    ]
+    tools = {registered.name: registered for registered in captured["tools"]}
+    graph_json = json.dumps(
+        {
+            "nodes": [{"id": "source", "kind": "dataset", "ref_id": dataset.id, "version": 1}],
+            "edges": [],
+            "outputs": [{"name": "records", "node": "source", "port": "records"}],
+        }
+    )
+    created = json.loads(
+        await tools["create_project_workflow"].ainvoke(
+            {
+                "name": "Inspect",
+                "graph_json": graph_json,
+            }
+        )
+    )
+    assert created["version"] == 1
+    loaded = json.loads(
+        await tools["load_project_workflow"].ainvoke(
+            {
+                "workflow_id": created["id"],
+            }
+        )
+    )
+    assert loaded["graph"]["outputs"][0]["name"] == "records"
 
 
 @pytest.mark.asyncio

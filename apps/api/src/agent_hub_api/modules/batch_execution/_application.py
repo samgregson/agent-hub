@@ -12,7 +12,7 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from agent_hub_api.modules.bindings import BindingModule, BindingUnavailable, CapturedFileBinding
-from agent_hub_api.modules.call_review import call_review
+from agent_hub_api.modules.call_review import MAX_MAP_INVOCATIONS, call_review
 from agent_hub_api.modules.datasets import (
     BatchDefinition,
     DatasetModule,
@@ -29,7 +29,6 @@ from agent_hub_api.modules.transforms import (
 from agent_hub_api.settings import Settings
 
 MAX_FILE_BOUND_INVOCATIONS = 100
-MAX_DIRECT_MAP_INVOCATIONS = 100
 MAX_DIRECT_CALL_INPUT_BYTES = 64_000
 
 
@@ -169,7 +168,7 @@ class McpDatasetMapPlan:
                 bindings=[
                     {"recordId": record.id, "inputs": dict(record.value)} for record in self.records
                 ],
-                max_invocations=MAX_DIRECT_MAP_INVOCATIONS,
+                max_invocations=MAX_MAP_INVOCATIONS,
                 output_kind="batchResultSet",
             ),
         }
@@ -267,7 +266,7 @@ class PythonDatasetMapPlan:
                     {"recordId": record.id, "inputs": {self.item_input_name: dict(record.value)}}
                     for record in self.records
                 ],
-                max_invocations=MAX_DIRECT_MAP_INVOCATIONS,
+                max_invocations=MAX_MAP_INVOCATIONS,
                 output_kind="batchResultSet",
             ),
         }
@@ -351,7 +350,7 @@ class BatchExecutionModule:
         dataset = await self._datasets.load_dataset(access, project_id, dataset_id)
         if not dataset.records:
             raise DatasetValidationError("Dataset has no Records to map.")
-        if len(dataset.records) > MAX_DIRECT_MAP_INVOCATIONS:
+        if len(dataset.records) > MAX_MAP_INVOCATIONS:
             raise DatasetValidationError("Python Map is limited to 100 Records.")
         definition, item_input_name = await self._transforms.function_map_snapshot(
             access,
@@ -547,7 +546,7 @@ class BatchExecutionModule:
         dataset = await self._datasets.load_dataset(access, project_id, dataset_id)
         if not dataset.records:
             raise DatasetValidationError("Dataset has no Records to map.")
-        if len(dataset.records) > MAX_DIRECT_MAP_INVOCATIONS:
+        if len(dataset.records) > MAX_MAP_INVOCATIONS:
             raise DatasetValidationError("MCP Map is limited to 100 Records.")
         plugin_version = await self._gateway.tool_version(access, project_id, plugin_id, tool_name)
         input_schema = await self._gateway.input_schema(access, project_id, plugin_id, tool_name)
