@@ -127,8 +127,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "edges, and named outputs. Creating or revising a Workflow invokes the approval "
         "card automatically. Use prepare_project_workflow_run when the user wants "
         "to capture exact inputs for a Run, then execute_project_workflow_run to run "
-        "the Python graph. Both actions require an approval card. MCP execution is "
-        "not available yet; do not claim an MCP Workflow has run.",
+        "the graph. Both actions require an approval card. Python Functions run through "
+        "the host Python runner, and MCP nodes run through the Project-enabled Plugin "
+        "Gateway. Inspect the saved Run to report node outputs and failures.",
     )
 )
 
@@ -417,7 +418,7 @@ class PostgresDeepAgentRunner:
                 }
                 interrupt_on["execute_project_workflow_run"] = {
                     "allowed_decisions": ["approve", "reject"],
-                    "description": "Execute this Python Workflow Run?",
+                    "description": "Execute this Workflow Run?",
                 }
         graph = create_deep_agent(
             model=self._model,
@@ -1217,7 +1218,7 @@ class PostgresDeepAgentRunner:
 
             @tool
             async def execute_project_workflow_run(run_id: str) -> str:
-                """After approval, execute a prepared Python-only Workflow Run."""
+                """After approval, execute a prepared Python and MCP Workflow Run."""
                 run = await workflow_runs.execute(
                     access,
                     project_id,

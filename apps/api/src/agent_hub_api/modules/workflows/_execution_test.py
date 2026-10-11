@@ -3,7 +3,7 @@ from typing import cast
 import pytest
 
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput, MemoryDatasetStore
-from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
+from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolResult
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
     MemoryTransformRunStore,
@@ -19,7 +19,6 @@ from agent_hub_api.modules.workflows import (
     WorkflowGraph,
     WorkflowNode,
     WorkflowOutput,
-    WorkflowRunConflict,
     WorkflowRunModule,
 )
 
@@ -136,7 +135,7 @@ async def test_execute_runs_branching_python_map_dag_and_is_idempotent() -> None
 
 
 @pytest.mark.asyncio
-async def test_mcp_workflow_is_rejected_before_run_enters_execution() -> None:
+async def test_mcp_workflow_without_structured_output_fails_after_dispatch() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
@@ -156,6 +155,9 @@ async def test_mcp_workflow_is_rejected_before_run_enters_execution() -> None:
             self, *_: object, require_repeat_safe: bool = False
         ) -> dict[str, object]:
             return {"type": "object"}
+
+        async def call(self, *_: object) -> PluginToolResult:
+            return PluginToolResult(("done",), None)
 
     transforms = TransformModule(projects, MemoryTransformStore())
     definitions = WorkflowDefinitionModule(
@@ -185,9 +187,185 @@ async def test_mcp_workflow_is_rejected_before_run_enters_execution() -> None:
         access, project.id, definition.id, "request-1", expected_version=1
     )
 
-    with pytest.raises(WorkflowRunConflict, match="MCP Workflow execution is not available"):
-        await workflows.execute(access, project.id, prepared.id)
-    assert (await workflows.load(access, project.id, prepared.id)).status == "prepared"
+    completed = await workflows.execute(access, project.id, prepared.id)
+    assert completed.status == "failed"
+    assert completed.execution["error"] == {
+        "nodeId": "remote",
+        "code": "missing_structured_output",
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_dispatches_single_mcp_call_and_retains_output() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Workflow execution")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    dataset = await datasets.create_dataset(
+        access, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
+    )
+
+    class Gateway:
+        calls: list[tuple[str, str, dict[str, object]]]
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def tool_version(self, *_: object) -> str:
+            return "v1"
+
+        async def input_schema(self, *_: object) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {"items": {"type": "array"}},
+                "required": ["items"],
+            }
+
+        async def output_schema(
+            self, *_: object, require_repeat_safe: bool = False
+        ) -> dict[str, object]:
+            return {
+                "type": "object",
+                "required": ["count"],
+                "properties": {"count": {"type": "integer"}},
+            }
+
+        async def call(
+            self,
+            _access: object,
+            _project_id: str,
+            plugin_id: str,
+            tool_name: str,
+            arguments: dict[str, object],
+        ) -> PluginToolResult:
+            self.calls.append((plugin_id, tool_name, arguments))
+            return PluginToolResult((), {"count": len(cast(list[object], arguments["items"]))})
+
+    gateway = Gateway()
+    transforms = TransformModule(projects, MemoryTransformStore())
+    definitions = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowStore(),
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "dataset", dataset.id, dataset.version),
+            WorkflowNode("remote", "mcp", "plugin", "v1", tool_name="count"),
+        ),
+        (WorkflowEdge("source", "records", "remote", "items"),),
+        (WorkflowOutput("result", "remote", "result"),),
+    )
+    definition = await definitions.create(access, project.id, "Count", graph)
+    workflows = WorkflowRunModule(
+        definitions,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowRunStore(),
+    )
+    prepared = await workflows.prepare(
+        access, project.id, definition.id, "request-1", expected_version=1
+    )
+
+    completed = await workflows.execute(access, project.id, prepared.id)
+
+    assert completed.status == "succeeded"
+    assert completed.execution["outputs"] == {"result": {"count": 1}}
+    nodes = cast(dict[str, object], completed.execution["nodes"])
+    assert cast(dict[str, object], nodes["remote"])["output"] == {"count": 1}
+    assert gateway.calls == [("plugin", "count", {"items": [{"value": 2}]})]
+
+
+@pytest.mark.asyncio
+async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Workflow execution")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    dataset = await datasets.create_dataset(
+        access,
+        project.id,
+        "Inputs",
+        [DatasetRecordInput({"value": 2}), DatasetRecordInput({"value": 5})],
+    )
+
+    class Gateway:
+        calls: list[tuple[str, dict[str, object]]]
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def tool_version(self, *_: object) -> str:
+            return "v1"
+
+        async def input_schema(self, *_: object) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {"value": {"type": "integer"}},
+                "required": ["value"],
+            }
+
+        async def output_schema(
+            self, *_: object, require_repeat_safe: bool = False
+        ) -> dict[str, object]:
+            assert require_repeat_safe
+            return {
+                "type": "object",
+                "required": ["doubled"],
+                "properties": {"doubled": {"type": "integer"}},
+            }
+
+        async def batch_call(
+            self,
+            _access: object,
+            _project_id: str,
+            _plugin_id: str,
+            tool_name: str,
+            arguments: dict[str, object],
+        ) -> PluginToolResult:
+            self.calls.append((tool_name, arguments))
+            return PluginToolResult((), {"doubled": cast(int, arguments["value"]) * 2})
+
+    gateway = Gateway()
+    transforms = TransformModule(projects, MemoryTransformStore())
+    definitions = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowStore(),
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "dataset", dataset.id, dataset.version),
+            WorkflowNode("mapped", "mcp", "plugin", "v1", shape="map", tool_name="double"),
+        ),
+        (WorkflowEdge("source", "records", "mapped", "items"),),
+        (WorkflowOutput("results", "mapped", "result"),),
+    )
+    definition = await definitions.create(access, project.id, "Double values", graph)
+    workflows = WorkflowRunModule(
+        definitions,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowRunStore(),
+    )
+    prepared = await workflows.prepare(
+        access, project.id, definition.id, "request-1", expected_version=1
+    )
+
+    completed = await workflows.execute(access, project.id, prepared.id)
+
+    assert completed.status == "succeeded"
+    assert completed.execution["outputs"] == {"results": [{"doubled": 4}, {"doubled": 10}]}
+    node = cast(dict[str, object], cast(dict[str, object], completed.execution["nodes"])["mapped"])
+    items = cast(list[dict[str, object]], node["items"])
+    assert [item["itemId"] for item in items] == [record.id for record in dataset.records]
+    assert gateway.calls == [("double", {"value": 2}), ("double", {"value": 5})]
 
 
 @pytest.mark.asyncio

@@ -7,13 +7,19 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema import ValidationError as JsonSchemaValidationError
+
 from agent_hub_api.modules.call_review import MAX_MAP_INVOCATIONS
 from agent_hub_api.modules.datasets import DatasetModule, DatasetNotFound
 from agent_hub_api.modules.plugin_gateway import (
+    PluginCallLimitExceeded,
     PluginGatewayModule,
     PluginNotAvailable,
     PluginNotEnabled,
     PluginToolNotAllowed,
+    PluginToolResult,
+    PluginTransportError,
 )
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms import (
@@ -244,8 +250,6 @@ class WorkflowRunModule:
         if not isinstance(graph_raw, dict):
             raise WorkflowValidationError("Workflow Run graph snapshot is invalid.")
         graph = WorkflowGraph.from_json(json.dumps(graph_raw))
-        if any(node.kind == "mcp" for node in graph.nodes):
-            raise WorkflowRunConflict("MCP Workflow execution is not available in this slice.")
         execution_start = replace(run, status="running", execution={"nodes": {}})
         run = await self._replace(execution_start, "prepared")
         source_snapshots = _mapping(run.snapshot.get("sources"))
@@ -269,6 +273,25 @@ class WorkflowRunModule:
                 inputs[edge.target_port] = outputs[edge.source_port]
             target_snapshots = _mapping(run.snapshot.get("targets"))
             target = _mapping(target_snapshots.get(node.id))
+            if node.kind == "mcp":
+                mcp_result, run, error_code = await self._execute_mcp_node(
+                    access,
+                    project_id,
+                    node,
+                    target,
+                    inputs,
+                    edges,
+                    graph,
+                    source_snapshots,
+                    execution_nodes,
+                    run,
+                )
+                if error_code is not None:
+                    return await self._fail(run, execution_nodes, node.id, error_code)
+                assert mcp_result is not None
+                node_outputs[node.id] = {"result": mcp_result}
+                run = await self._save_progress(run, execution_nodes)
+                continue
             input_names = target.get("inputNames")
             if not isinstance(input_names, list) or not all(
                 isinstance(name, str) for name in input_names
@@ -410,6 +433,208 @@ class WorkflowRunModule:
             "running",
         )
 
+    async def _execute_mcp_node(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        node: WorkflowNode,
+        target: Mapping[str, object],
+        inputs: Mapping[str, object],
+        edges: Sequence[WorkflowEdge],
+        graph: WorkflowGraph,
+        source_snapshots: Mapping[str, object],
+        execution_nodes: dict[str, object],
+        run: WorkflowRun,
+    ) -> tuple[object | None, WorkflowRun, str | None]:
+        """Dispatch a snapshotted MCP target through Plugin Gateway."""
+        plugin_id = target.get("pluginId")
+        tool_name = target.get("toolName")
+        input_schema = target.get("inputSchema")
+        output_schema = target.get("outputSchema")
+        if (
+            self._gateway is None
+            or not isinstance(plugin_id, str)
+            or not isinstance(tool_name, str)
+            or not isinstance(input_schema, Mapping)
+            or not isinstance(output_schema, Mapping)
+        ):
+            return None, run, "invalid_target_snapshot"
+        version = target.get("version")
+        if not isinstance(version, str):
+            return None, run, "invalid_target_snapshot"
+        try:
+            current_version = await self._gateway.tool_version(
+                access, project_id, plugin_id, tool_name
+            )
+        except (
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+        ) as error:
+            code = _plugin_error_code(error)
+            execution_nodes[node.id] = {"status": "failed", "error": code}
+            return None, run, code
+        if current_version != version:
+            execution_nodes[node.id] = {"status": "failed", "error": "stale_target"}
+            return None, run, "stale_target"
+
+        if node.shape == "single":
+            try:
+                Draft202012Validator(input_schema).validate(dict(inputs))
+            except JsonSchemaValidationError:
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": dict(inputs),
+                    "error": "invalid_mcp_input",
+                }
+                return None, run, "invalid_mcp_input"
+            execution_nodes[node.id] = {
+                "status": "running",
+                "inputs": dict(inputs),
+                "mcpCall": {"pluginId": plugin_id, "toolName": tool_name},
+            }
+            run = await self._save_progress(run, execution_nodes)
+            try:
+                result = await self._gateway.call(access, project_id, plugin_id, tool_name, inputs)
+            except (
+                PluginCallLimitExceeded,
+                PluginNotAvailable,
+                PluginNotEnabled,
+                PluginToolNotAllowed,
+                PluginTransportError,
+            ) as error:
+                code = _plugin_error_code(error)
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": dict(inputs),
+                    "error": code,
+                }
+                return None, run, code
+            output = _structured_output(result)
+            if output is None:
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": dict(inputs),
+                    "error": "missing_structured_output",
+                }
+                return None, run, "missing_structured_output"
+            try:
+                Draft202012Validator(output_schema).validate(output)
+            except JsonSchemaValidationError:
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": dict(inputs),
+                    "output": output,
+                    "error": "invalid_mcp_output",
+                }
+                return None, run, "invalid_mcp_output"
+            execution_nodes[node.id] = {
+                "status": "succeeded",
+                "inputs": dict(inputs),
+                "mcpCall": {"pluginId": plugin_id, "toolName": tool_name},
+                "output": output,
+            }
+            return output, run, None
+
+        items = inputs.get("items")
+        if not isinstance(items, list) or len(items) > MAX_MAP_INVOCATIONS:
+            execution_nodes[node.id] = {
+                "status": "failed",
+                "inputs": dict(inputs),
+                "error": "map_input",
+            }
+            return None, run, "map_input"
+        records = _source_records_for_edge(graph, source_snapshots, edges[0])
+        item_results: list[dict[str, object]] = []
+        outputs: list[object] = []
+        for index, item in enumerate(items):
+            if not isinstance(item, Mapping):
+                item_results.append(
+                    {"index": index, "input": item, "status": "failed", "error": "map_input"}
+                )
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": dict(inputs),
+                    "items": item_results,
+                }
+                return None, run, "map_input"
+            item_identity = (
+                _mapping(records[index]).get("id")
+                if records is not None and index < len(records)
+                else f"{node.id}:{index}"
+            )
+            item_results.append(
+                {
+                    "index": index,
+                    "itemId": item_identity,
+                    "input": dict(item),
+                    "status": "running",
+                    "mcpCall": {"pluginId": plugin_id, "toolName": tool_name},
+                }
+            )
+            execution_nodes[node.id] = {
+                "status": "running",
+                "inputs": dict(inputs),
+                "items": item_results,
+            }
+            run = await self._save_progress(run, execution_nodes)
+            try:
+                Draft202012Validator(input_schema).validate(dict(item))
+            except JsonSchemaValidationError:
+                code = "invalid_mcp_input"
+            else:
+                try:
+                    result = await self._gateway.batch_call(
+                        access, project_id, plugin_id, tool_name, item
+                    )
+                except (
+                    PluginCallLimitExceeded,
+                    PluginNotAvailable,
+                    PluginNotEnabled,
+                    PluginToolNotAllowed,
+                    PluginTransportError,
+                ) as error:
+                    code = _plugin_error_code(error)
+                else:
+                    output = _structured_output(result)
+                    if output is None:
+                        code = "missing_structured_output"
+                    else:
+                        try:
+                            Draft202012Validator(output_schema).validate(output)
+                        except JsonSchemaValidationError:
+                            code = "invalid_mcp_output"
+                        else:
+                            code = ""
+            if not code:
+                outputs.append(output)
+                item_results[-1] = {
+                    **item_results[-1],
+                    "status": "succeeded",
+                    "output": output,
+                }
+                execution_nodes[node.id] = {
+                    "status": "running",
+                    "inputs": dict(inputs),
+                    "items": item_results,
+                }
+                run = await self._save_progress(run, execution_nodes)
+                continue
+            item_results[-1] = {**item_results[-1], "status": "failed", "error": code}
+            execution_nodes[node.id] = {
+                "status": "failed",
+                "inputs": dict(inputs),
+                "items": item_results,
+            }
+            return None, run, code
+        execution_nodes[node.id] = {
+            "status": "succeeded",
+            "inputs": dict(inputs),
+            "items": item_results,
+            "output": outputs,
+        }
+        return outputs, run, None
+
     async def _save_progress(self, run: WorkflowRun, nodes: Mapping[str, object]) -> WorkflowRun:
         return await self._replace(replace(run, execution={"nodes": dict(nodes)}), "running")
 
@@ -477,3 +702,20 @@ def _source_records_for_edge(
         return None
     records = _mapping(sources.get(node.id)).get("records")
     return records if isinstance(records, list) else None
+
+
+def _structured_output(result: PluginToolResult) -> dict[str, object] | None:
+    value = result.structured_content
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _plugin_error_code(error: Exception) -> str:
+    if isinstance(error, PluginCallLimitExceeded):
+        return "plugin_call_limit"
+    if isinstance(error, PluginNotAvailable):
+        return "plugin_unavailable"
+    if isinstance(error, PluginNotEnabled):
+        return "plugin_not_enabled"
+    if isinstance(error, PluginToolNotAllowed):
+        return "plugin_tool_not_allowed"
+    return "plugin_transport_error"
