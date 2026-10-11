@@ -39,6 +39,8 @@ class _Runner:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.active_calls = 0
         self.maximum_active_calls = 0
+        self.active_by_function: dict[str, int] = {}
+        self.maximum_active_by_function: dict[str, int] = {}
 
     async def identity(self) -> TransformRuntimeIdentity:
         return TransformRuntimeIdentity("fixture", "fixture-hash")
@@ -48,10 +50,23 @@ class _Runner:
     ) -> tuple[object, str]:
         del parameters
         self.calls.append((source, inputs))
+        marker = next(
+            (
+                name
+                for name in ("# double", "# triple", "# combine", "# template")
+                if name in source
+            ),
+            "unknown",
+        )
         self.active_calls += 1
         self.maximum_active_calls = max(self.maximum_active_calls, self.active_calls)
+        self.active_by_function[marker] = self.active_by_function.get(marker, 0) + 1
+        self.maximum_active_by_function[marker] = max(
+            self.maximum_active_by_function.get(marker, 0), self.active_by_function[marker]
+        )
         await asyncio.sleep(0.01)
         self.active_calls -= 1
+        self.active_by_function[marker] -= 1
         if "# double" in source:
             value = cast(dict[str, int], inputs["record"])
             return {"value": value["value"] * 2}, "fixture"
@@ -213,6 +228,8 @@ async def test_execute_runs_branching_python_map_dag_and_is_idempotent() -> None
     assert cast(dict[str, object], nodes["double"])["items"]
     assert len(runner.calls) == 5
     assert runner.maximum_active_calls >= 2
+    assert runner.maximum_active_by_function["# double"] == 2
+    assert runner.maximum_active_calls <= 4
     assert await workflows.execute(access, project.id, prepared.id) == completed
     assert len(runner.calls) == 5
 
@@ -293,7 +310,7 @@ async def test_recovery_reuses_completed_function_call_after_checkpoint_gap(
     monkeypatch.setattr(transforms, "start_function_call", crash_after_function_call)
     with pytest.raises(RuntimeError, match="after child completion"):
         await workflows.execute(access, project.id, prepared.id)
-    assert len(runner.calls) == 1
+    assert len(runner.calls) == 2
 
     assert await workflows.recover() == 1
     completed = await workflows.execute(access, project.id, prepared.id)
@@ -525,7 +542,10 @@ async def test_execute_dispatches_single_mcp_call_and_retains_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records() -> None:
+@pytest.mark.parametrize("first_item_succeeds", [True, False])
+async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
+    first_item_succeeds: bool,
+) -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
@@ -534,14 +554,18 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records() -> None
         access,
         project.id,
         "Inputs",
-        [DatasetRecordInput({"value": 2}), DatasetRecordInput({"value": 5})],
+        [DatasetRecordInput({"value": value}) for value in range(2, 7)],
     )
 
     class Gateway:
         calls: list[tuple[str, dict[str, object]]]
 
-        def __init__(self) -> None:
+        def __init__(self, *, first_item_succeeds: bool) -> None:
             self.calls = []
+            self.active_calls = 0
+            self.maximum_active_calls = 0
+            self.first_item_completed = False
+            self.first_item_succeeds = first_item_succeeds
 
         async def tool_version(self, *_: object) -> str:
             return "v1"
@@ -572,9 +596,20 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records() -> None
             arguments: dict[str, object],
         ) -> PluginToolResult:
             self.calls.append((tool_name, arguments))
-            return PluginToolResult((), {"doubled": cast(int, arguments["value"]) * 2})
+            value = cast(int, arguments["value"])
+            if value != 2:
+                assert self.first_item_completed
+            self.active_calls += 1
+            self.maximum_active_calls = max(self.maximum_active_calls, self.active_calls)
+            await asyncio.sleep(0.01)
+            self.active_calls -= 1
+            if value == 2:
+                self.first_item_completed = True
+                if not self.first_item_succeeds:
+                    return PluginToolResult((), None)
+            return PluginToolResult((), {"doubled": value * 2})
 
-    gateway = Gateway()
+    gateway = Gateway(first_item_succeeds=first_item_succeeds)
     transforms = TransformModule(projects, MemoryTransformStore())
     definitions = WorkflowDefinitionModule(
         projects,
@@ -605,12 +640,25 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records() -> None
 
     completed = await workflows.execute(access, project.id, prepared.id)
 
+    if not first_item_succeeds:
+        assert completed.status == "failed"
+        assert cast(dict[str, object], completed.execution["error"])["code"] == (
+            "missing_structured_output"
+        )
+        assert gateway.calls == [("double", {"value": 2})]
+        return
+
     assert completed.status == "succeeded"
-    assert completed.execution["outputs"] == {"results": [{"doubled": 4}, {"doubled": 10}]}
+    assert completed.execution["outputs"] == {
+        "results": [{"doubled": value * 2} for value in range(2, 7)]
+    }
     node = cast(dict[str, object], cast(dict[str, object], completed.execution["nodes"])["mapped"])
     items = cast(list[dict[str, object]], node["items"])
     assert [item["itemId"] for item in items] == [record.id for record in dataset.records]
-    assert gateway.calls == [("double", {"value": 2}), ("double", {"value": 5})]
+    assert gateway.calls[0] == ("double", {"value": 2})
+    assert {cast(int, arguments["value"]) for _, arguments in gateway.calls} == set(range(2, 7))
+    assert gateway.maximum_active_calls >= 2
+    assert gateway.maximum_active_calls <= 4
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,8 @@ from ._application import (
     _project_file_path,
 )
 
+MAX_WORKFLOW_CONCURRENCY = 4
+
 
 @dataclass(frozen=True, slots=True)
 class WorkflowRun:
@@ -318,6 +320,7 @@ class WorkflowRunModule:
                 node_outputs[node.id] = {"result": previous["output"]}
 
         checkpoint_lock = asyncio.Lock()
+        call_semaphore = asyncio.Semaphore(MAX_WORKFLOW_CONCURRENCY)
 
         async def checkpoint() -> None:
             nonlocal run
@@ -336,7 +339,7 @@ class WorkflowRunModule:
                     for edge in graph.edges
                     if edge.target_node == node_id
                 )
-            )[:4]
+            )[:MAX_WORKFLOW_CONCURRENCY]
             if not ready:
                 return await self._fail(run, execution_nodes, min(pending), "upstream_output")
             work: list[tuple[WorkflowNode, dict[str, object], list[WorkflowEdge]]] = []
@@ -363,6 +366,7 @@ class WorkflowRunModule:
                         source_snapshots,
                         execution_nodes,
                         checkpoint,
+                        call_semaphore,
                         run.id,
                         initiation,
                     )
@@ -404,6 +408,7 @@ class WorkflowRunModule:
         source_snapshots: Mapping[str, object],
         execution_nodes: dict[str, object],
         checkpoint: Callable[[], Awaitable[None]],
+        call_semaphore: asyncio.Semaphore,
         workflow_run_id: str,
         initiation: TransformInitiation | None,
     ) -> tuple[object | None, str | None]:
@@ -419,6 +424,7 @@ class WorkflowRunModule:
                 source_snapshots,
                 execution_nodes,
                 checkpoint,
+                call_semaphore,
             )
 
         input_names = target.get("inputNames")
@@ -439,14 +445,20 @@ class WorkflowRunModule:
                 return None, "map_input"
             records = _source_records_for_edge(graph, source_snapshots, edges[0])
             item_results = _indexed_progress(previous.get("items"))
-            outputs: list[object] = []
+            outputs: dict[int, object] = {}
+            pending_items: list[tuple[int, object]] = []
             for index, item in enumerate(items):
                 saved_item = item_results.get(index)
                 if saved_item is not None and saved_item.get("status") == "succeeded":
                     if "output" not in saved_item:
                         return None, "checkpoint_output"
-                    outputs.append(saved_item["output"])
+                    outputs[index] = saved_item["output"]
                     continue
+                pending_items.append((index, item))
+
+            async def execute_item(
+                index: int, item: object
+            ) -> tuple[int, object | None, str | None]:
                 item_identity = (
                     _mapping(records[index]).get("id")
                     if records is not None and index < len(records)
@@ -465,16 +477,17 @@ class WorkflowRunModule:
                 }
                 await checkpoint()
                 try:
-                    child = await self._transforms.start_function_call(
-                        access,
-                        project_id,
-                        node.ref_id,
-                        {input_names[0]: item},
-                        {},
-                        expected_revision=int(node.version),
-                        initiation=call_context,
-                        run_id=_child_run_id(workflow_run_id, node.id, index),
-                    )
+                    async with call_semaphore:
+                        child = await self._transforms.start_function_call(
+                            access,
+                            project_id,
+                            node.ref_id,
+                            {input_names[0]: item},
+                            {},
+                            expected_revision=int(node.version),
+                            initiation=call_context,
+                            run_id=_child_run_id(workflow_run_id, node.id, index),
+                        )
                 except (
                     TransformExecutionError,
                     TransformNotFound,
@@ -496,8 +509,10 @@ class WorkflowRunModule:
                         "items": _ordered_items(item_results),
                     }
                     await checkpoint()
-                    return None, (
-                        error.code if isinstance(error, TransformExecutionError) else "stale_target"
+                    return index, None, (
+                        error.code
+                        if isinstance(error, TransformExecutionError)
+                        else "stale_target"
                     )
                 item_results[index] = {
                     "index": index,
@@ -515,15 +530,41 @@ class WorkflowRunModule:
                         "items": _ordered_items(item_results),
                     }
                     await checkpoint()
-                    return None, "child_call_failed"
-                outputs.append(child.output)
+                    return index, None, "child_call_failed"
                 execution_nodes[node.id] = {
                     "status": "running",
                     "inputs": inputs,
                     "items": _ordered_items(item_results),
                 }
                 await checkpoint()
-            result: object = outputs
+                return index, child.output, None
+
+            item_results_by_index = await asyncio.gather(
+                *(execute_item(index, item) for index, item in pending_items),
+                return_exceptions=True,
+            )
+            for item_result in item_results_by_index:
+                if isinstance(item_result, BaseException):
+                    raise item_result
+            errors: list[str] = []
+            for item_result in item_results_by_index:
+                index, output, error_code = cast(
+                    tuple[int, object | None, str | None], item_result
+                )
+                if error_code is not None:
+                    errors.append(error_code)
+                else:
+                    outputs[index] = output
+            if errors:
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": inputs,
+                    "items": _ordered_items(item_results),
+                }
+                await checkpoint()
+                return None, errors[0]
+            ordered_outputs = [outputs[index] for index in range(len(items))]
+            result: object = ordered_outputs
             execution_nodes[node.id] = {
                 "status": "succeeded",
                 "inputs": inputs,
@@ -536,16 +577,17 @@ class WorkflowRunModule:
         execution_nodes[node.id] = {"status": "running", "inputs": inputs}
         await checkpoint()
         try:
-            child = await self._transforms.start_function_call(
-                access,
-                project_id,
-                node.ref_id,
-                inputs,
-                {},
-                expected_revision=int(node.version),
-                initiation=call_context,
-                run_id=_child_run_id(workflow_run_id, node.id),
-            )
+            async with call_semaphore:
+                child = await self._transforms.start_function_call(
+                    access,
+                    project_id,
+                    node.ref_id,
+                    inputs,
+                    {},
+                    expected_revision=int(node.version),
+                    initiation=call_context,
+                    run_id=_child_run_id(workflow_run_id, node.id),
+                )
         except (TransformExecutionError, TransformNotFound, TransformValidationError) as error:
             execution_nodes[node.id] = {
                 "status": "failed",
@@ -580,14 +622,16 @@ class WorkflowRunModule:
         source_snapshots: Mapping[str, object],
         execution_nodes: dict[str, object],
         checkpoint: Callable[[], Awaitable[None]],
+        call_semaphore: asyncio.Semaphore,
     ) -> tuple[object | None, str | None]:
         """Dispatch a snapshotted MCP target through Plugin Gateway."""
         plugin_id = target.get("pluginId")
         tool_name = target.get("toolName")
         input_schema = target.get("inputSchema")
         output_schema = target.get("outputSchema")
+        gateway = self._gateway
         if (
-            self._gateway is None
+            gateway is None
             or not isinstance(plugin_id, str)
             or not isinstance(tool_name, str)
             or not isinstance(input_schema, Mapping)
@@ -598,9 +642,7 @@ class WorkflowRunModule:
         if not isinstance(version, str):
             return None, "invalid_target_snapshot"
         try:
-            current_version = await self._gateway.tool_version(
-                access, project_id, plugin_id, tool_name
-            )
+            current_version = await gateway.tool_version(access, project_id, plugin_id, tool_name)
         except (
             PluginNotAvailable,
             PluginNotEnabled,
@@ -638,7 +680,10 @@ class WorkflowRunModule:
             }
             await checkpoint()
             try:
-                result = await self._gateway.call(access, project_id, plugin_id, tool_name, inputs)
+                async with call_semaphore:
+                    result = await gateway.call(
+                        access, project_id, plugin_id, tool_name, inputs
+                    )
             except (
                 PluginCallLimitExceeded,
                 PluginNotAvailable,
@@ -693,14 +738,20 @@ class WorkflowRunModule:
             return None, "map_input"
         records = _source_records_for_edge(graph, source_snapshots, edges[0])
         item_results = _indexed_progress(previous.get("items"))
-        outputs: list[object] = []
+        outputs: dict[int, object] = {}
+        pending_items: list[tuple[int, object]] = []
         for index, item in enumerate(items):
             saved_item = item_results.get(index)
             if saved_item is not None and saved_item.get("status") == "succeeded":
                 if "output" not in saved_item:
                     return None, "checkpoint_output"
-                outputs.append(saved_item["output"])
+                outputs[index] = saved_item["output"]
                 continue
+            pending_items.append((index, item))
+
+        async def execute_item(
+            index: int, item: object
+        ) -> tuple[int, object | None, str | None]:
             if not isinstance(item, Mapping):
                 item_results[index] = {
                     "index": index,
@@ -714,7 +765,7 @@ class WorkflowRunModule:
                     "items": _ordered_items(item_results),
                 }
                 await checkpoint()
-                return None, "map_input"
+                return index, None, "map_input"
             item_identity = (
                 _mapping(records[index]).get("id")
                 if records is not None and index < len(records)
@@ -739,9 +790,10 @@ class WorkflowRunModule:
                 code = "invalid_mcp_input"
             else:
                 try:
-                    result = await self._gateway.batch_call(
-                        access, project_id, plugin_id, tool_name, item
-                    )
+                    async with call_semaphore:
+                        result = await gateway.batch_call(
+                            access, project_id, plugin_id, tool_name, item
+                        )
                 except (
                     PluginCallLimitExceeded,
                     PluginNotAvailable,
@@ -762,7 +814,6 @@ class WorkflowRunModule:
                         else:
                             code = ""
             if not code:
-                outputs.append(output)
                 item_results[index] = {
                     **item_results[index],
                     "status": "succeeded",
@@ -774,23 +825,62 @@ class WorkflowRunModule:
                     "items": _ordered_items(item_results),
                 }
                 await checkpoint()
-                continue
+                return index, output, None
             item_results[index] = {**item_results[index], "status": "failed", "error": code}
+            execution_nodes[node.id] = {
+                "status": "running",
+                "inputs": dict(inputs),
+                "items": _ordered_items(item_results),
+            }
+            await checkpoint()
+            return index, None, code
+
+        first_pending = next(((index, item) for index, item in pending_items if index == 0), None)
+        if first_pending is not None:
+            first_result = await execute_item(*first_pending)
+            if first_result[2] is not None:
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": dict(inputs),
+                    "items": _ordered_items(item_results),
+                }
+                await checkpoint()
+                return None, first_result[2]
+            outputs[0] = first_result[1]
+        remaining = [(index, item) for index, item in pending_items if index != 0]
+        item_results_by_index = await asyncio.gather(
+            *(execute_item(index, item) for index, item in remaining),
+            return_exceptions=True,
+        )
+        for item_result in item_results_by_index:
+            if isinstance(item_result, BaseException):
+                raise item_result
+        errors: list[str] = []
+        for item_result in item_results_by_index:
+            index, mapped_output, error_code = cast(
+                tuple[int, object | None, str | None], item_result
+            )
+            if error_code is not None:
+                errors.append(error_code)
+            else:
+                outputs[index] = mapped_output
+        if errors:
             execution_nodes[node.id] = {
                 "status": "failed",
                 "inputs": dict(inputs),
                 "items": _ordered_items(item_results),
             }
             await checkpoint()
-            return None, code
+            return None, errors[0]
+        ordered_outputs = [outputs[index] for index in range(len(items))]
         execution_nodes[node.id] = {
             "status": "succeeded",
             "inputs": dict(inputs),
             "items": _ordered_items(item_results),
-            "output": outputs,
+            "output": ordered_outputs,
         }
         await checkpoint()
-        return outputs, None
+        return ordered_outputs, None
 
     async def _save_progress(self, run: WorkflowRun, nodes: Mapping[str, object]) -> WorkflowRun:
         return await self._replace(replace(run, execution={"nodes": dict(nodes)}), "running")
