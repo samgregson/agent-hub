@@ -332,6 +332,10 @@ class PostgresDeepAgentRunner:
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Start the proposed Transform Run?",
                     },
+                    "start_project_function_call": {
+                        "allowed_decisions": ["approve", "reject"],
+                        "description": "Run this Python Function with the reviewed named inputs?",
+                    },
                     "save_project_transform_run_as_dataset": {
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Save this Transform Run output as a Dataset?",
@@ -1115,6 +1119,48 @@ class PostgresDeepAgentRunner:
             return f"Transform Run {run.id} {run.status}."
 
         @tool
+        async def plan_project_function_call(
+            definition_id: str, inputs_json: str, parameters_json: str = "{}"
+        ) -> str:
+            """Review one Python Function call with named JSON inputs and parameters.
+
+            The input names must match the Transform Definition's declared names.
+            This call does not apply its JSON Pointer selectors.
+            """
+            plan = await transforms.plan_function_call(
+                access,
+                project_id,
+                definition_id,
+                object_json(inputs_json),
+                object_json(parameters_json),
+            )
+            return json.dumps(plan.snapshot())
+
+        @tool
+        async def start_project_function_call(
+            definition_id: str,
+            inputs_json: str,
+            expected_revision: int,
+            parameters_json: str = "{}",
+        ) -> str:
+            """Start one durable Python Function Run after reviewing inputs and approval."""
+            run = await transforms.start_function_call(
+                access,
+                project_id,
+                definition_id,
+                object_json(inputs_json),
+                object_json(parameters_json),
+                expected_revision=expected_revision,
+                initiation=TransformInitiation(
+                    kind="agentRun",
+                    approval="approved",
+                    thread_id=thread_id,
+                    agent_run_id=agent_run_id,
+                ),
+            )
+            return f"Transform Run {run.id} {run.status}."
+
+        @tool
         async def plan_project_transform_output_selection(
             definition_id: str, selection_json: str, parameters_json: str = "{}"
         ) -> str:
@@ -1163,6 +1209,8 @@ class PostgresDeepAgentRunner:
             update_project_transform,
             delete_project_transform,
             start_project_transform_run,
+            plan_project_function_call,
+            start_project_function_call,
             plan_project_transform_output_selection,
             start_project_transform_output_selection_run,
             save_project_transform_run_as_dataset,

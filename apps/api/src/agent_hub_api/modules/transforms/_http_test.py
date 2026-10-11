@@ -22,6 +22,60 @@ class _PinnedRunner:
 
 
 @pytest.mark.asyncio
+async def test_named_function_call_is_reviewed_and_run_through_project_api() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Functions")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, _source: str, inputs: dict[str, object], _parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert inputs == {"values": [3, 1, 2]}
+            return {"ordered": [1, 2, 3]}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+    )
+    definition = await transforms.define(
+        owner,
+        project.id,
+        "Sort values",
+        "def transform(inputs, parameters):\n    return {'ordered': sorted(inputs['values'])}\n",
+        {"values": "/selection/values"},
+        {"type": "object", "required": ["ordered"]},
+    )
+    app = FastAPI()
+    app.include_router(
+        create_transform_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
+            transforms,
+        ),
+        prefix="/api",
+    )
+    root = f"/api/projects/{project.id}/transforms/{definition.id}"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        plan = await client.post(
+            f"{root}/call/plan", json={"inputs": {"values": [3, 1, 2]}, "parameters": {}}
+        )
+        started = await client.post(
+            f"{root}/call",
+            json={
+                "inputs": {"values": [3, 1, 2]},
+                "parameters": {},
+                "expectedRevision": definition.revision,
+            },
+        )
+
+    assert plan.status_code == 200
+    assert plan.json()["inputNames"] == ["values"]
+    assert started.status_code == 201
+    assert started.json()["inputs"] == {"values": [3, 1, 2]}
+    assert started.json()["definitionSnapshot"]["callKind"] == "pythonFunction"
+
+
+@pytest.mark.asyncio
 async def test_completed_transform_run_output_is_reviewed_through_project_api() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="sam")

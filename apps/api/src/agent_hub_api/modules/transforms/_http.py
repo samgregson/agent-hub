@@ -55,6 +55,15 @@ class PreviewRequest(_Model):
     parameters: dict[str, object]
 
 
+class FunctionCallRequest(_Model):
+    inputs: dict[str, object]
+    parameters: dict[str, object] = Field(default_factory=dict)
+
+
+class StartFunctionCallRequest(FunctionCallRequest):
+    expected_revision: int = Field(ge=1)
+
+
 class PreviewResponse(_Model):
     output: object
     runtime: str
@@ -288,6 +297,49 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                 runtime=result.runtime,
                 source_hash=result.source_hash,
             )
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+
+    @router.post("/{definition_id}/call/plan")
+    async def plan_function_call(
+        project_id: str,
+        definition_id: str,
+        body: FunctionCallRequest,
+        request_context: Context,
+    ) -> dict[str, object]:
+        try:
+            plan = await transforms.plan_function_call(
+                access(request_context),
+                project_id,
+                definition_id,
+                body.inputs,
+                body.parameters,
+            )
+            return dict(plan.snapshot())
+        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+            raise failure(error) from error
+
+    @router.post(
+        "/{definition_id}/call",
+        response_model=RunResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def start_function_call(
+        project_id: str,
+        definition_id: str,
+        body: StartFunctionCallRequest,
+        request_context: Context,
+    ) -> RunResponse:
+        try:
+            run = await transforms.start_function_call(
+                access(request_context),
+                project_id,
+                definition_id,
+                body.inputs,
+                body.parameters,
+                expected_revision=body.expected_revision,
+            )
+            return _run_response(run)
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error
 

@@ -61,6 +61,35 @@ class TransformPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class FunctionCallPlan:
+    definition_id: str
+    definition_revision: int
+    name: str
+    input_names: tuple[str, ...]
+    inputs: Mapping[str, object]
+    parameters: Mapping[str, object]
+    output_schema: Mapping[str, object]
+    runtime: str
+    package_hash: str
+
+    def snapshot(self) -> Mapping[str, object]:
+        return {
+            "callKind": "pythonFunction",
+            "definitionId": self.definition_id,
+            "definitionRevision": self.definition_revision,
+            "name": self.name,
+            "inputNames": list(self.input_names),
+            "inputs": _snapshot_value(self.inputs),
+            "parameters": _snapshot_value(self.parameters),
+            "outputSchema": dict(self.output_schema),
+            "runtime": self.runtime,
+            "packageHash": self.package_hash,
+            "invocationCount": 1,
+            "outputKind": "transformRun",
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class TransformRuntimeIdentity:
     runtime: str
     package_hash: str
@@ -442,6 +471,63 @@ class TransformModule:
             expected_revision=None,
         )
 
+    async def plan_function_call(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        inputs: Mapping[str, object],
+        parameters: Mapping[str, object],
+    ) -> FunctionCallPlan:
+        """Review named inputs without applying Definition selectors."""
+        definition = await self.load(access, project_id, definition_id)
+        if self._runner is None:
+            raise TransformExecutionError("runner_unavailable")
+        identity = await self._runner.identity()
+        if definition.runtime and (
+            definition.runtime != identity.runtime
+            or definition.package_hash != identity.package_hash
+        ):
+            raise TransformExecutionError("runtime_mismatch")
+        input_values, parameter_values = _function_inputs(definition, inputs, parameters)
+        return FunctionCallPlan(
+            definition.id,
+            definition.revision,
+            definition.name,
+            tuple(definition.input_selectors),
+            input_values,
+            parameter_values,
+            dict(definition.output_schema),
+            identity.runtime,
+            identity.package_hash,
+        )
+
+    async def start_function_call(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        definition_id: str,
+        inputs: Mapping[str, object],
+        parameters: Mapping[str, object],
+        *,
+        expected_revision: int,
+        initiation: TransformInitiation | None = None,
+    ) -> TransformRun:
+        """Run one reviewed Python Function call through the Transform runner."""
+        if expected_revision < 1:
+            raise TransformValidationError("Function revision must be positive.")
+        return await self._start_run(
+            access,
+            project_id,
+            definition_id,
+            {},
+            parameters,
+            initiation,
+            selection_snapshot=None,
+            expected_revision=expected_revision,
+            resolved_inputs=inputs,
+        )
+
     async def plan_dataset_selection(
         self,
         access: ProjectAccess,
@@ -645,6 +731,7 @@ class TransformModule:
         *,
         selection_snapshot: Mapping[str, object] | None,
         expected_revision: int | None,
+        resolved_inputs: Mapping[str, object] | None = None,
     ) -> TransformRun:
         definition = await self.load(access, project_id, definition_id)
         if expected_revision is not None and definition.revision != expected_revision:
@@ -661,7 +748,11 @@ class TransformModule:
             or definition.package_hash != identity.package_hash
         ):
             raise TransformExecutionError("runtime_mismatch")
-        inputs, parameter_values = _inputs(definition, record, parameters)
+        inputs, parameter_values = (
+            _function_inputs(definition, resolved_inputs, parameters)
+            if resolved_inputs is not None
+            else _inputs(definition, record, parameters)
+        )
         input_bytes = _canonical({"inputs": inputs, "parameters": parameter_values})
         now = datetime.now(UTC)
         context = initiation or TransformInitiation("directUser", "notRequired")
@@ -679,6 +770,7 @@ class TransformModule:
                     "revision": definition.revision,
                     "runtime": identity.runtime,
                     "package_hash": identity.package_hash,
+                    **({"callKind": "pythonFunction"} if resolved_inputs is not None else {}),
                     **({"selection": dict(selection_snapshot)} if selection_snapshot else {}),
                 },
                 inputs=inputs,
@@ -904,6 +996,23 @@ def _inputs(
     except (TypeError, ValueError) as error:
         raise TransformValidationError("Transform inputs must be JSON values.") from error
     return inputs, parameter_values
+
+
+def _function_inputs(
+    definition: TransformDefinition,
+    inputs: Mapping[str, object],
+    parameters: Mapping[str, object],
+) -> tuple[dict[str, object], dict[str, object]]:
+    if set(inputs) != set(definition.input_selectors):
+        raise TransformValidationError("Function input names must match its declared inputs.")
+    try:
+        values = cast(dict[str, object], _snapshot_value(dict(inputs)))
+        parameter_values = cast(dict[str, object], _snapshot_value(dict(parameters)))
+        if len(_canonical({"inputs": values, "parameters": parameter_values})) > 64_000:
+            raise TransformValidationError("Function inputs exceed 64000 bytes.")
+    except (TypeError, ValueError) as error:
+        raise TransformValidationError("Function inputs must be JSON values.") from error
+    return values, parameter_values
 
 
 class MemoryTransformRunStore:

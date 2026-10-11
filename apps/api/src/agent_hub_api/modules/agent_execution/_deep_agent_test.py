@@ -639,6 +639,63 @@ async def test_agent_transform_tools_call_the_project_module() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_reviews_named_python_function_inputs_before_approved_run() -> None:
+    class Transforms:
+        started: tuple[dict[str, object], int, TransformInitiation] | None = None
+
+        async def plan_function_call(
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            inputs: dict[str, object],
+            parameters: dict[str, object],
+        ) -> object:
+            assert inputs == {"values": [3, 1, 2]}
+            assert parameters == {}
+            return SimpleNamespace(snapshot=lambda: {"definitionRevision": 2, "inputs": inputs})
+
+        async def start_function_call(
+            self,
+            _access: object,
+            _project_id: str,
+            _definition_id: str,
+            inputs: dict[str, object],
+            _parameters: dict[str, object],
+            *,
+            expected_revision: int,
+            initiation: TransformInitiation,
+        ) -> object:
+            self.started = inputs, expected_revision, initiation
+            return SimpleNamespace(id="run-2", status="succeeded")
+
+    transforms = Transforms()
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._transform_tools(
+            cast(Any, transforms), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    plan = await tools["plan_project_function_call"].ainvoke(
+        {"definition_id": "definition-1", "inputs_json": '{"values":[3,1,2]}'}
+    )
+    run = await tools["start_project_function_call"].ainvoke(
+        {
+            "definition_id": "definition-1",
+            "inputs_json": '{"values":[3,1,2]}',
+            "expected_revision": 2,
+        }
+    )
+    assert json.loads(plan) == {"definitionRevision": 2, "inputs": {"values": [3, 1, 2]}}
+    assert run == "Transform Run run-2 succeeded."
+    assert transforms.started == (
+        {"values": [3, 1, 2]},
+        2,
+        TransformInitiation("agentRun", "approved", "thread-1", "agent-run-1"),
+    )
+
+
+@pytest.mark.asyncio
 async def test_invalid_approved_transform_proposal_returns_actionable_tool_error() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="sam")

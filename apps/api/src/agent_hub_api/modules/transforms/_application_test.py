@@ -184,6 +184,68 @@ class _PinnedRunner:
 
 
 @pytest.mark.asyncio
+async def test_python_function_call_uses_named_inputs_without_selection_rules() -> None:
+    from agent_hub_api.modules.transforms import MemoryTransformRunStore
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="sam")
+    project = await projects.create(owner, "Functions")
+
+    class Runner(_PinnedRunner):
+        async def execute(
+            self, _source: str, inputs: dict[str, object], _parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            assert inputs == {"values": [3, 1, 2]}
+            return {"ordered": [1, 2, 3]}, "deno:2.9.7;pyodide:314.0.7"
+
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore()
+    )
+    definition = await transforms.define(
+        owner,
+        project.id,
+        "Sort values",
+        "def transform(inputs, parameters):\n    return {'ordered': sorted(inputs['values'])}\n",
+        {"values": "/selection/values"},
+        {"type": "object", "required": ["ordered"]},
+    )
+    plan = await transforms.plan_function_call(
+        owner, project.id, definition.id, {"values": [3, 1, 2]}, {}
+    )
+    assert plan.snapshot()["inputNames"] == ["values"]
+    assert plan.snapshot()["invocationCount"] == 1
+
+    run = await transforms.start_function_call(
+        owner,
+        project.id,
+        definition.id,
+        {"values": [3, 1, 2]},
+        {},
+        expected_revision=plan.definition_revision,
+    )
+    assert run.status == "succeeded"
+    assert run.inputs == {"values": [3, 1, 2]}
+    assert run.output == {"ordered": [1, 2, 3]}
+    assert run.definition_snapshot["callKind"] == "pythonFunction"
+    assert "selection" not in run.definition_snapshot
+
+    with pytest.raises(TransformValidationError, match="revision changed"):
+        await transforms.start_function_call(
+            owner,
+            project.id,
+            definition.id,
+            {"values": [3, 1, 2]},
+            {},
+            expected_revision=plan.definition_revision + 1,
+        )
+
+    with pytest.raises(TransformValidationError, match="input names"):
+        await transforms.plan_function_call(
+            owner, project.id, definition.id, {"unknown": [3, 1, 2]}, {}
+        )
+
+
+@pytest.mark.asyncio
 async def test_successful_run_can_be_explicitly_saved_as_project_artifact() -> None:
     from agent_hub_api.modules.transforms import MemoryTransformRunStore
 
