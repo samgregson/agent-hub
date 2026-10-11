@@ -110,6 +110,7 @@ def create_app(
         resolved_datasets,
         resolved_transforms,
         resolved_plugin_gateway,
+        resolved_project_files,
     )
     resolved_workflow_runs = create_postgres_workflow_run_module(
         resolved_settings,
@@ -117,6 +118,7 @@ def create_app(
         resolved_datasets,
         resolved_transforms,
         resolved_plugin_gateway,
+        resolved_project_files,
     )
     deep_agent_runner = None
     if agent_execution is None:

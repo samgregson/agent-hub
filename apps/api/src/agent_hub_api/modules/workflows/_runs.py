@@ -22,6 +22,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginToolResult,
     PluginTransportError,
 )
+from agent_hub_api.modules.project_files import ProjectFileError, ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms import (
     TransformExecutionError,
@@ -38,6 +39,7 @@ from ._application import (
     WorkflowNode,
     WorkflowNotFound,
     WorkflowValidationError,
+    _project_file_path,
 )
 
 
@@ -129,12 +131,15 @@ class WorkflowRunModule:
         transforms: TransformModule,
         gateway: PluginGatewayModule | None,
         store: WorkflowRunStore,
+        *,
+        project_files: ProjectFilesModule | None = None,
     ) -> None:
         self._definitions = definitions
         self._datasets = datasets
         self._transforms = transforms
         self._gateway = gateway
         self._store = store
+        self._project_files = project_files
 
     async def recover(self) -> int:
         """Mark Runs left active by a stopped API process for guarded resumption."""
@@ -177,6 +182,26 @@ class WorkflowRunModule:
                         {"id": record.id, "position": record.position, "value": record.value}
                         for record in dataset.records
                     ],
+                }
+            elif node.kind == "file":
+                if self._project_files is None:
+                    raise WorkflowValidationError("Project File input is unavailable.")
+                try:
+                    file = await self._project_files.load_ordinary_file(
+                        project_id, _project_file_path(node.ref_id)
+                    )
+                except ProjectFileError as error:
+                    raise WorkflowValidationError(
+                        "Project File input is unavailable."
+                    ) from error
+                if file.version != node.version:
+                    raise WorkflowValidationError(
+                        "Project File version changed; review the Workflow again."
+                    )
+                sources[node.id] = {
+                    "path": f"/project{file.path}",
+                    "version": file.version,
+                    "content": file.content,
                 }
             elif node.kind == "python":
                 try:
@@ -280,6 +305,12 @@ class WorkflowRunModule:
                 node_outputs[node.id] = {
                     "records": [_mapping(record).get("value") for record in records]
                 }
+            elif node.kind == "file":
+                source = _mapping(source_snapshots.get(node.id))
+                content = source.get("content")
+                if not isinstance(content, str):
+                    return await self._fail(run, execution_nodes, node.id, "source_snapshot")
+                node_outputs[node.id] = {"content": content}
             elif _mapping(execution_nodes.get(node.id)).get("status") == "succeeded":
                 previous = _mapping(execution_nodes.get(node.id))
                 if "output" not in previous:
@@ -293,7 +324,7 @@ class WorkflowRunModule:
             async with checkpoint_lock:
                 run = await self._save_progress(run, execution_nodes)
 
-        pending = {node.id for node in graph.nodes if node.kind != "dataset"}
+        pending = {node.id for node in graph.nodes if node.kind not in {"dataset", "file"}}
         pending.difference_update(node_outputs)
         target_snapshots = _mapping(run.snapshot.get("targets"))
         while pending:

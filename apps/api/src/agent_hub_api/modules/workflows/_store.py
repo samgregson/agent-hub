@@ -11,6 +11,7 @@ from psycopg.rows import dict_row
 
 from agent_hub_api.modules.datasets import DatasetModule
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
+from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectModule
 from agent_hub_api.modules.transforms import TransformModule
 from agent_hub_api.settings import Settings
@@ -119,7 +120,13 @@ def create_postgres_workflow_module(
     datasets: DatasetModule,
     transforms: TransformModule,
     gateway: PluginGatewayModule | None,
+    project_files: ProjectFilesModule | None = None,
 ) -> WorkflowDefinitionModule:
     return WorkflowDefinitionModule(
-        projects, datasets, transforms, gateway, PostgresWorkflowStore(settings)
+        projects,
+        datasets,
+        transforms,
+        gateway,
+        PostgresWorkflowStore(settings),
+        project_files=project_files,
     )

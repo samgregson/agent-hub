@@ -195,6 +195,16 @@ class ProjectFilesModule:
             raise ProjectFileNotFound
         return file
 
+    async def load_ordinary_file(self, project_id: str, path: str) -> ProjectFile:
+        """Load text content while preserving registered Dataset and Artifact ownership."""
+        normalized = _normalize_file_path(path)
+        if any(
+            normalized == root or normalized.startswith(f"{root}/")
+            for root in (ARTIFACT_ROOT, DATASET_ROOT)
+        ):
+            raise ProjectFileNotFound
+        return await self.load(project_id, normalized)
+
     async def preview(self, access: ProjectFileAccess, project_id: str, path: str) -> ProjectFile:
         """Load a Project file only after confirming the caller can see its Project."""
         try:

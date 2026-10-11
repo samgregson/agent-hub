@@ -6,6 +6,7 @@ import pytest
 
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput, MemoryDatasetStore
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolResult
+from agent_hub_api.modules.project_files import create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
     MemoryTransformRunStore,
@@ -24,6 +25,7 @@ from agent_hub_api.modules.workflows import (
     WorkflowNode,
     WorkflowOutput,
     WorkflowRunModule,
+    WorkflowValidationError,
 )
 
 
@@ -60,7 +62,77 @@ class _Runner:
             left = cast(list[dict[str, int]], inputs["left"])
             right = cast(list[dict[str, int]], inputs["right"])
             return {"total": sum(item["value"] for item in left + right)}, "fixture"
+        if "# template" in source:
+            return {"template": inputs["template"]}, "fixture"
         raise AssertionError("Unexpected transform source")
+
+
+@pytest.mark.asyncio
+async def test_workflow_captures_project_file_content_before_execution() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Workflow files")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    project_files = create_memory_project_files(projects)
+    file = await project_files.write(project.id, "/calculations/check.py", "template-v1")
+    runner = _Runner()
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), runner, MemoryTransformRunStore()
+    )
+    function = await transforms.define(
+        access,
+        project.id,
+        "Use template",
+        "# template\ndef transform(inputs, parameters):\n    return {}\n",
+        {"template": ""},
+        {
+            "type": "object",
+            "required": ["template"],
+            "properties": {"template": {"type": "string"}},
+        },
+    )
+    definitions = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        transforms,
+        None,
+        MemoryWorkflowStore(),
+        project_files=project_files,
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("file", "file", f"/project{file.path}", file.version),
+            WorkflowNode("function", "python", function.id, function.revision),
+        ),
+        (WorkflowEdge("file", "content", "function", "template"),),
+        (WorkflowOutput("rendered", "function", "result"),),
+    )
+    definition = await definitions.create(access, project.id, "Use a project file", graph)
+    runs = WorkflowRunModule(
+        definitions,
+        datasets,
+        transforms,
+        None,
+        MemoryWorkflowRunStore(),
+        project_files=project_files,
+    )
+
+    prepared = await runs.prepare(access, project.id, definition.id, "file-run", expected_version=1)
+    await project_files.write(project.id, file.path, "template-v2")
+    with pytest.raises(WorkflowValidationError, match="Project File version changed"):
+        await runs.prepare(access, project.id, definition.id, "new-file-run", expected_version=1)
+    completed = await runs.execute(access, project.id, prepared.id)
+
+    assert completed.status == "succeeded", completed.execution
+    sources = cast(dict[str, object], prepared.snapshot["sources"])
+    assert sources["file"] == {
+        "path": f"/project{file.path}",
+        "version": 1,
+        "content": "template-v1",
+    }
+    nodes = cast(dict[str, object], completed.execution["nodes"])
+    assert cast(dict[str, object], nodes["function"])["inputs"] == {"template": "template-v1"}
+    assert completed.execution["outputs"] == {"rendered": {"template": "template-v1"}}
 
 
 @pytest.mark.asyncio

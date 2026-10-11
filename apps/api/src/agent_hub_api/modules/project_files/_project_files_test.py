@@ -36,6 +36,10 @@ async def test_limits_search_and_load_use_the_same_module() -> None:
     assert search.matches == (ProjectFileSearchMatch("/small.md", 1, "beam check"),)
     with pytest.raises(ProjectFileNotFound):
         await files.load("project-b", "/small.md")
+    with pytest.raises(ProjectFileNotFound):
+        await files.load_ordinary_file("project-a", "/.datasets/dataset.json")
+    with pytest.raises(ProjectFileNotFound):
+        await files.load_ordinary_file("project-a", "/.artifacts/result.json")
 
     with pytest.raises(ProjectFileLimitExceeded, match="configured 12-byte limit"):
         await files.write("project-a", "/large.md", "x" * 13)

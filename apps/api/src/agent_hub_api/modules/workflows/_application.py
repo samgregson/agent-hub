@@ -19,6 +19,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginNotEnabled,
     PluginToolNotAllowed,
 )
+from agent_hub_api.modules.project_files import ProjectFileError, ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.modules.transforms import TransformModule, TransformNotFound
 
@@ -143,12 +144,15 @@ class WorkflowDefinitionModule:
         transforms: TransformModule,
         gateway: PluginGatewayModule | None,
         store: WorkflowStore,
+        *,
+        project_files: ProjectFilesModule | None = None,
     ) -> None:
         self._projects = projects
         self._datasets = datasets
         self._transforms = transforms
         self._gateway = gateway
         self._store = store
+        self._project_files = project_files
 
     async def create(
         self, access: ProjectAccess, project_id: str, name: str, graph: WorkflowGraph
@@ -279,6 +283,25 @@ class WorkflowDefinitionModule:
                 raise WorkflowValidationError("Workflow output refers to an unknown port.")
 
     async def _describe(self, access: ProjectAccess, project_id: str, node: WorkflowNode) -> _Ports:
+        if node.kind == "file":
+            if (
+                self._project_files is None
+                or node.tool_name is not None
+                or node.shape != "single"
+                or not isinstance(node.version, int)
+            ):
+                raise WorkflowValidationError("Project File node has an invalid reference.")
+            try:
+                file = await self._project_files.load_ordinary_file(
+                    project_id, _project_file_path(node.ref_id)
+                )
+            except ProjectFileError as error:
+                raise WorkflowValidationError("Project File input is unavailable.") from error
+            if file.version != node.version:
+                raise WorkflowValidationError(
+                    "Project File version changed; review the Workflow again."
+                )
+            return _Ports({}, frozenset(), {"content": {"type": "string"}})
         if node.kind == "dataset":
             if (
                 node.tool_name is not None
@@ -375,6 +398,12 @@ def _name(value: str) -> str:
     if not 1 <= len(normalized) <= 120:
         raise WorkflowValidationError("Workflow name must contain 1–120 characters.")
     return normalized
+
+
+def _project_file_path(value: str) -> str:
+    if not value.startswith("/project/"):
+        raise WorkflowValidationError("Project File reference must use an absolute /project path.")
+    return value.removeprefix("/project")
 
 
 def _compatible(source: Mapping[str, object], target: Mapping[str, object]) -> bool:
