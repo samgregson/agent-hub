@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { WorkflowDefinitionEditor } from "./_editor";
 import styles from "./workflow-overview.module.css";
 
 type WorkflowNode = {
@@ -26,7 +27,7 @@ type WorkflowGraph = {
   outputs: { name: string; node: string; port: string }[];
 };
 
-type WorkflowDefinition = {
+export type WorkflowDefinition = {
   id: string;
   name: string;
   version: number;
@@ -205,6 +206,9 @@ export function WorkflowOverview({
   );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(
+    null,
+  );
   const [isRunning, setIsRunning] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -365,6 +369,21 @@ export function WorkflowOverview({
     }
   }
 
+  function acceptRevisedDefinition(revised: WorkflowDefinition) {
+    setResult((current) =>
+      current.projectId !== projectId || current.workflows === null
+        ? current
+        : {
+            ...current,
+            workflows: current.workflows.map((item) =>
+              item.id === revised.id ? revised : item,
+            ),
+          },
+    );
+    setEditingDefinitionId(null);
+    setSelectedNodeId(null);
+  }
+
   if (workflows === null) {
     return (
       <section aria-label="Workflow overview" className={styles.overview}>
@@ -438,6 +457,13 @@ export function WorkflowOverview({
           </p>
         </div>
         <div className={styles.headerActions}>
+          <button
+            className={styles.secondaryButton}
+            onClick={() => setEditingDefinitionId(workflow.id)}
+            type="button"
+          >
+            Edit Workflow
+          </button>
           {runs.length > 0 ? (
             <label className={styles.runPicker}>
               <span>Run history</span>
@@ -469,6 +495,15 @@ export function WorkflowOverview({
         <p className={styles.error} role="alert">
           {actionError}
         </p>
+      ) : null}
+
+      {editingDefinitionId === workflow.id ? (
+        <WorkflowDefinitionEditor
+          definition={workflow}
+          onCancel={() => setEditingDefinitionId(null)}
+          onSaved={acceptRevisedDefinition}
+          projectId={projectId}
+        />
       ) : null}
 
       <section aria-label="Workflow outputs" className={styles.outputs}>

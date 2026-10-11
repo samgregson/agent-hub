@@ -276,6 +276,27 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     },
   );
   let preparedRequest: Record<string, unknown> | undefined;
+  let revisedRequest: Record<string, unknown> | undefined;
+  let savedGraph: unknown;
+  await page.route(
+    `**/api/projects/${project.id}/workflows/${workflow.id}`,
+    async (route) => {
+      if (route.request().method() !== "PUT") return route.continue();
+      revisedRequest = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      savedGraph = revisedRequest.graph;
+      await route.fulfill({
+        json: {
+          ...workflow,
+          graph: savedGraph,
+          name: "Beam review v2",
+          version: 4,
+        },
+      });
+    },
+  );
   await page.route(
     `**/api/projects/${project.id}/workflows/${workflow.id}/runs/prepare`,
     async (route) => {
@@ -284,7 +305,13 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
         unknown
       >;
       await route.fulfill({
-        json: { ...run, id: "workflow-run-prepared", status: "prepared" },
+        json: {
+          ...run,
+          definitionVersion: 4,
+          id: "workflow-run-prepared",
+          snapshot: { ...run.snapshot, graph: savedGraph },
+          status: "prepared",
+        },
         status: 201,
       });
     },
@@ -295,7 +322,13 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
       await route.fulfill({
         json: {
           ...run,
+          definitionVersion: 4,
+          execution: {
+            ...run.execution,
+            outputs: { Quality: { checked: 1, passed: 1 } },
+          },
           id: "workflow-run-3",
+          snapshot: { ...run.snapshot, graph: savedGraph },
           createdAt: "2026-10-11T10:00:00.000Z",
         },
       });
@@ -323,8 +356,23 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(
     page.getByRole("region", { name: "Node lineage" }),
   ).toContainText("filter-function");
+  await page.getByRole("button", { name: "Edit Workflow" }).click();
+  await page.getByLabel("Workflow name").fill("Beam review v2");
+  await page.getByLabel("Name", { exact: true }).fill("Quality");
+  await page
+    .getByRole("button", { name: "Save new Definition version" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Beam review v2" }),
+  ).toBeVisible();
+  await expect.poll(() => revisedRequest?.expectedVersion).toBe(3);
+  expect(revisedRequest?.name).toBe("Beam review v2");
+  expect(
+    (revisedRequest?.graph as { outputs: Array<{ name: string }> }).outputs[0]
+      ?.name,
+  ).toBe("Quality");
   await page.getByRole("button", { name: "Run Workflow" }).click();
-  await expect.poll(() => preparedRequest?.expectedVersion).toBe(3);
+  await expect.poll(() => preparedRequest?.expectedVersion).toBe(4);
   expect(preparedRequest?.idempotencyKey).toEqual(expect.any(String));
   await expect(
     page.getByRole("region", { name: "Workflow outputs" }),
@@ -340,6 +388,10 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(
     page.getByRole("list", { name: "Workflow dependencies" }),
   ).toContainText("calculate");
+  await page.getByRole("button", { name: "Edit Workflow" }).click();
+  await expect(
+    page.getByRole("region", { name: "Edit Workflow Definition" }),
+  ).toBeVisible();
   await expect
     .poll(() =>
       page.evaluate(

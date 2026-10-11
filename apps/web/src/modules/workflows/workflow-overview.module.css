@@ -69,7 +69,9 @@
 }
 
 .runButton,
-.empty button {
+.empty button,
+.secondaryButton,
+.editor button {
   min-height: 40px;
   padding: 0 16px;
   border: 1px solid var(--accent);
@@ -78,6 +80,104 @@
   color: var(--accent-ink);
   font-weight: 750;
   cursor: pointer;
+}
+
+.secondaryButton,
+.editor button {
+  border-color: var(--line);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.editor {
+  margin: 0 0 32px;
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+
+.editor p {
+  margin: 8px 0 0;
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+
+.editorField,
+.editorRow label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.editorField {
+  max-width: 420px;
+  margin: 18px 0;
+}
+
+.editor input,
+.editor select {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+.editorGroup {
+  margin: 22px 0;
+}
+
+.editorGroup h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.editorRow {
+  display: grid;
+  grid-template-columns:
+    minmax(100px, 1fr) minmax(90px, 0.8fr) 20px minmax(100px, 1fr)
+    minmax(90px, 0.8fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+}
+
+.editorArrow::after {
+  display: block;
+  color: var(--accent);
+  content: "→";
+  font-size: 20px;
+  text-align: center;
+}
+
+.editorActions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 8px;
+}
+
+.editorActions button {
+  min-height: 42px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.editor button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .runButton:disabled {
@@ -286,6 +386,9 @@
 }
 
 .overview button:focus-visible,
+.editor button:focus-visible,
+.editor input:focus-visible,
+.editor select:focus-visible,
 .overview select:focus-visible,
 .empty button:focus-visible {
   outline: 3px solid var(--accent);
@@ -309,6 +412,18 @@
   .headerActions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .editor {
+    padding: 16px;
+  }
+
+  .editorRow {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .editorArrow {
+    display: none;
   }
 
   .runPicker,
