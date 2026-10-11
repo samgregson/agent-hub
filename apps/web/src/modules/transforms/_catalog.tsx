@@ -73,6 +73,10 @@ interface Preview {
   output: unknown;
   runtime: string;
   sourceHash: string;
+  source: string;
+  revision: number;
+  record: Record<string, unknown>;
+  parameters: Record<string, unknown>;
 }
 
 interface DatasetOption {
@@ -463,6 +467,7 @@ export function TransformCatalog({
     setBusy(mode);
     setError(null);
     setNotice(null);
+    if (mode === "preview") setPreview(null);
     try {
       const body = {
         record: jsonObject(recordJson, "Input record"),
@@ -481,7 +486,17 @@ export function TransformCatalog({
           await responseError(response, "Function could not be executed."),
         );
       if (mode === "preview") {
-        setPreview((await response.json()) as Preview);
+        const result = (await response.json()) as Omit<
+          Preview,
+          "source" | "revision" | "record" | "parameters"
+        >;
+        setPreview({
+          ...result,
+          source: selectedDefinition.source,
+          revision: selectedDefinition.revision,
+          record: body.record,
+          parameters: body.parameters,
+        });
       } else {
         const run = (await response.json()) as Run;
         onSelectRunScope(selectedDefinition.id);
@@ -1049,6 +1064,7 @@ export function TransformCatalog({
                     );
                     setSelectionPlan(null);
                     setDatasetRunPlan(null);
+                    setPreview(null);
                     if (event.target.value === "resultSet") {
                       void refreshBatchRuns().catch(() =>
                         setError("Batch Runs could not be loaded."),
@@ -1076,7 +1092,11 @@ export function TransformCatalog({
                   <div className={styles.formGrid}>
                     <Field label="Input record (JSON object)">
                       <textarea
-                        onChange={(event) => setRecordJson(event.target.value)}
+                        disabled={busy !== null}
+                        onChange={(event) => {
+                          setRecordJson(event.target.value);
+                          setPreview(null);
+                        }}
                         rows={5}
                         spellCheck={false}
                         value={recordJson}
@@ -1084,9 +1104,11 @@ export function TransformCatalog({
                     </Field>
                     <Field label="Parameters (JSON object)">
                       <textarea
-                        onChange={(event) =>
-                          setParametersJson(event.target.value)
-                        }
+                        disabled={busy !== null}
+                        onChange={(event) => {
+                          setParametersJson(event.target.value);
+                          setPreview(null);
+                        }}
                         rows={5}
                         spellCheck={false}
                         value={parametersJson}
@@ -1454,7 +1476,24 @@ export function TransformCatalog({
               )}
               {preview ? (
                 <section aria-label="Preview output" className={styles.preview}>
-                  <strong>Preview · not saved</strong>
+                  <strong>Preview · transient, not saved</strong>
+                  <p>
+                    Function revision {preview.revision} · Runtime identity:{" "}
+                    <code>{preview.runtime}</code>
+                  </p>
+                  <p>
+                    Source SHA-256: <code>{preview.sourceHash}</code>
+                  </p>
+                  <details>
+                    <summary>Captured source and inputs</summary>
+                    <h3>Python source</h3>
+                    <pre>{preview.source}</pre>
+                    <h3>Input record</h3>
+                    <pre>{JSON.stringify(preview.record, null, 2)}</pre>
+                    <h3>Parameters</h3>
+                    <pre>{JSON.stringify(preview.parameters, null, 2)}</pre>
+                  </details>
+                  <h3>Output</h3>
                   <pre>{JSON.stringify(preview.output, null, 2)}</pre>
                 </section>
               ) : null}
