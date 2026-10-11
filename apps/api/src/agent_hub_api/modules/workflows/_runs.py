@@ -2,11 +2,12 @@
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
+from agent_hub_api.modules.call_review import MAX_MAP_INVOCATIONS
 from agent_hub_api.modules.datasets import DatasetModule, DatasetNotFound
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
@@ -15,9 +16,22 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginToolNotAllowed,
 )
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transforms import TransformModule, TransformNotFound
+from agent_hub_api.modules.transforms import (
+    TransformExecutionError,
+    TransformInitiation,
+    TransformModule,
+    TransformNotFound,
+    TransformValidationError,
+)
 
-from ._application import WorkflowDefinitionModule, WorkflowNotFound, WorkflowValidationError
+from ._application import (
+    WorkflowDefinitionModule,
+    WorkflowEdge,
+    WorkflowGraph,
+    WorkflowNode,
+    WorkflowNotFound,
+    WorkflowValidationError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +42,7 @@ class WorkflowRun:
     definition_version: int
     status: str
     snapshot: Mapping[str, object]
+    execution: Mapping[str, object]
     initiator_subject: str
     idempotency_key: str
     created_at: datetime
@@ -42,6 +57,7 @@ class WorkflowRunStore(Protocol):
     async def load(self, project_id: str, run_id: str) -> WorkflowRun | None: ...
     async def by_key(self, project_id: str, key: str) -> WorkflowRun | None: ...
     async def list(self, project_id: str, workflow_id: str) -> Sequence[WorkflowRun]: ...
+    async def update(self, run: WorkflowRun, expected_status: str) -> WorkflowRun | None: ...
 
 
 class MemoryWorkflowRunStore:
@@ -77,6 +93,14 @@ class MemoryWorkflowRunStore:
                 reverse=True,
             )
         )
+
+    async def update(self, run: WorkflowRun, expected_status: str) -> WorkflowRun | None:
+        key = (run.project_id, run.id)
+        current = self._items.get(key)
+        if current is None or current.status != expected_status:
+            return None
+        self._items[key] = run
+        return run
 
 
 class WorkflowRunModule:
@@ -195,11 +219,211 @@ class WorkflowRunModule:
             definition.version,
             "prepared",
             snapshot,
+            {},
             access.subject,
             idempotency_key,
             datetime.now(UTC),
         )
         return _same_workflow(await self._store.create_or_load(run), workflow_id)
+
+    async def execute(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        run_id: str,
+        *,
+        initiation: TransformInitiation | None = None,
+    ) -> WorkflowRun:
+        """Execute a Python-only DAG through the owning Transform Module."""
+        run = await self.load(access, project_id, run_id)
+        if run.status == "succeeded":
+            return run
+        if run.status != "prepared":
+            raise WorkflowRunConflict("Workflow Run is already executing or terminal.")
+        graph_raw = run.snapshot.get("graph")
+        if not isinstance(graph_raw, dict):
+            raise WorkflowValidationError("Workflow Run graph snapshot is invalid.")
+        graph = WorkflowGraph.from_json(json.dumps(graph_raw))
+        if any(node.kind == "mcp" for node in graph.nodes):
+            raise WorkflowRunConflict("MCP Workflow execution is not available in this slice.")
+        execution_start = replace(run, status="running", execution={"nodes": {}})
+        run = await self._replace(execution_start, "prepared")
+        source_snapshots = _mapping(run.snapshot.get("sources"))
+        node_outputs: dict[str, dict[str, object]] = {}
+        execution_nodes: dict[str, object] = {}
+        for node in _topological_nodes(graph):
+            if node.kind == "dataset":
+                source = _mapping(source_snapshots.get(node.id))
+                records = source.get("records")
+                if not isinstance(records, list):
+                    return await self._fail(run, execution_nodes, node.id, "source_snapshot")
+                values = [_mapping(record).get("value") for record in records]
+                node_outputs[node.id] = {"records": values}
+                continue
+            edges = [edge for edge in graph.edges if edge.target_node == node.id]
+            inputs: dict[str, object] = {}
+            for edge in edges:
+                outputs = node_outputs.get(edge.source_node)
+                if outputs is None or edge.source_port not in outputs:
+                    return await self._fail(run, execution_nodes, node.id, "upstream_output")
+                inputs[edge.target_port] = outputs[edge.source_port]
+            target_snapshots = _mapping(run.snapshot.get("targets"))
+            target = _mapping(target_snapshots.get(node.id))
+            input_names = target.get("inputNames")
+            if not isinstance(input_names, list) or not all(
+                isinstance(name, str) for name in input_names
+            ):
+                return await self._fail(run, execution_nodes, node.id, "target_snapshot")
+            call_context = initiation or TransformInitiation("workflowRun", "notRequired")
+            if node.shape == "map":
+                items = inputs.get("items")
+                if (
+                    not isinstance(items, list)
+                    or len(items) > MAX_MAP_INVOCATIONS
+                    or len(input_names) != 1
+                ):
+                    return await self._fail(run, execution_nodes, node.id, "map_input")
+                records = _source_records_for_edge(graph, source_snapshots, edges[0])
+                item_results: list[dict[str, object]] = []
+                results: list[object] = []
+                for index, item in enumerate(items):
+                    try:
+                        child = await self._transforms.start_function_call(
+                            access,
+                            project_id,
+                            node.ref_id,
+                            {input_names[0]: item},
+                            {},
+                            expected_revision=int(node.version),
+                            initiation=call_context,
+                        )
+                    except (
+                        TransformExecutionError,
+                        TransformNotFound,
+                        TransformValidationError,
+                    ) as error:
+                        item_results.append(
+                            {
+                                "index": index,
+                                "input": item,
+                                "status": "failed",
+                                "error": error.code
+                                if isinstance(error, TransformExecutionError)
+                                else str(error),
+                            }
+                        )
+                        execution_nodes[node.id] = {
+                            "status": "failed",
+                            "inputs": inputs,
+                            "items": item_results,
+                        }
+                        code = (
+                            error.code
+                            if isinstance(error, TransformExecutionError)
+                            else "stale_target"
+                        )
+                        return await self._fail(run, execution_nodes, node.id, code)
+                    item_identity = (
+                        _mapping(records[index]).get("id")
+                        if records is not None and index < len(records)
+                        else f"{edges[0].source_node}:{index}"
+                    )
+                    item_results.append(
+                        {
+                            "index": index,
+                            "itemId": item_identity,
+                            "input": item,
+                            "status": child.status,
+                            "transformRunId": child.id,
+                            **({"output": child.output} if child.status == "succeeded" else {}),
+                            **({"error": child.error} if child.error else {}),
+                        }
+                    )
+                    if child.status != "succeeded":
+                        execution_nodes[node.id] = {
+                            "status": "failed",
+                            "inputs": inputs,
+                            "items": item_results,
+                        }
+                        return await self._fail(run, execution_nodes, node.id, "child_call_failed")
+                    results.append(child.output)
+                    execution_nodes[node.id] = {
+                        "status": "running",
+                        "inputs": inputs,
+                        "items": item_results,
+                    }
+                    run = await self._save_progress(run, execution_nodes)
+                node_outputs[node.id] = {"result": results}
+                execution_nodes[node.id] = {
+                    "status": "succeeded",
+                    "inputs": inputs,
+                    "items": item_results,
+                    "output": results,
+                }
+            else:
+                try:
+                    child = await self._transforms.start_function_call(
+                        access,
+                        project_id,
+                        node.ref_id,
+                        inputs,
+                        {},
+                        expected_revision=int(node.version),
+                        initiation=call_context,
+                    )
+                except (
+                    TransformExecutionError,
+                    TransformNotFound,
+                    TransformValidationError,
+                ) as error:
+                    execution_nodes[node.id] = {
+                        "status": "failed",
+                        "inputs": inputs,
+                        "error": (
+                            error.code if isinstance(error, TransformExecutionError) else str(error)
+                        ),
+                    }
+                    code = (
+                        error.code if isinstance(error, TransformExecutionError) else "stale_target"
+                    )
+                    return await self._fail(run, execution_nodes, node.id, code)
+                execution_nodes[node.id] = {
+                    "status": child.status,
+                    "inputs": inputs,
+                    "transformRunId": child.id,
+                    **({"output": child.output} if child.status == "succeeded" else {}),
+                    **({"error": child.error} if child.error else {}),
+                }
+                if child.status != "succeeded":
+                    return await self._fail(run, execution_nodes, node.id, "child_call_failed")
+                node_outputs[node.id] = {"result": child.output}
+            run = await self._save_progress(run, execution_nodes)
+        named_outputs: dict[str, object] = {}
+        for output in graph.outputs:
+            named_outputs[output.name] = node_outputs[output.node][output.port]
+        return await self._replace(
+            replace(
+                run,
+                status="succeeded",
+                execution={"nodes": execution_nodes, "outputs": named_outputs},
+            ),
+            "running",
+        )
+
+    async def _save_progress(self, run: WorkflowRun, nodes: Mapping[str, object]) -> WorkflowRun:
+        return await self._replace(replace(run, execution={"nodes": dict(nodes)}), "running")
+
+    async def _fail(
+        self, run: WorkflowRun, nodes: Mapping[str, object], node_id: str, code: str
+    ) -> WorkflowRun:
+        execution = {"nodes": dict(nodes), "error": {"nodeId": node_id, "code": code}}
+        return await self._replace(replace(run, status="failed", execution=execution), "running")
+
+    async def _replace(self, run: WorkflowRun, expected_status: str) -> WorkflowRun:
+        saved = await self._store.update(run, expected_status)
+        if saved is None:
+            raise WorkflowRunConflict("Workflow Run changed while it was executing.")
+        return saved
 
     async def load(self, access: ProjectAccess, project_id: str, run_id: str) -> WorkflowRun:
         await self._definitions.list(access, project_id)
@@ -219,3 +443,37 @@ def _same_workflow(run: WorkflowRun, workflow_id: str) -> WorkflowRun:
     if run.workflow_id != workflow_id:
         raise WorkflowRunConflict("Request key already names another Workflow.")
     return run
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _topological_nodes(graph: WorkflowGraph) -> tuple[WorkflowNode, ...]:
+    nodes = {node.id: node for node in graph.nodes}
+    dependencies: dict[str, set[str]] = {node.id: set() for node in graph.nodes}
+    for edge in graph.edges:
+        dependencies[edge.target_node].add(edge.source_node)
+    ordered: list[WorkflowNode] = []
+    while dependencies:
+        ready = sorted(node for node, parents in dependencies.items() if not parents)
+        if not ready:
+            raise WorkflowValidationError("Workflow graph contains a cycle.")
+        for node_id in ready:
+            ordered.append(nodes[node_id])
+            dependencies.pop(node_id)
+        for parents in dependencies.values():
+            parents.difference_update(ready)
+    return tuple(ordered)
+
+
+def _source_records_for_edge(
+    graph: WorkflowGraph,
+    sources: Mapping[str, object],
+    edge: WorkflowEdge,
+) -> list[object] | None:
+    node = next((item for item in graph.nodes if item.id == edge.source_node), None)
+    if node is None or node.kind != "dataset" or edge.source_port != "records":
+        return None
+    records = _mapping(sources.get(node.id)).get("records")
+    return records if isinstance(records, list) else None

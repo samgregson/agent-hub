@@ -57,6 +57,10 @@ async def test_workflow_definition_round_trips_through_postgres() -> None:
                 access, project.id, saved.id, "integration-request", expected_version=1
             )
         ) == prepared
+        completed = await runs.execute(access, project.id, prepared.id)
+        assert completed.status == "succeeded"
+        assert completed.execution["outputs"] == {"records": [{"value": 2}]}
+        assert await runs.execute(access, project.id, prepared.id) == completed
         assert [run.id for run in await runs.list(access, project.id, saved.id)] == [prepared.id]
         assert await workflows.load(access, project.id, saved.id) == saved
         assert [item.id for item in await workflows.list(access, project.id)] == [saved.id]

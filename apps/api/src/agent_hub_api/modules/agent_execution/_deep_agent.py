@@ -126,8 +126,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "revise_project_workflow for a user-requested change. The graph JSON has nodes, "
         "edges, and named outputs. Creating or revising a Workflow invokes the approval "
         "card automatically. Use prepare_project_workflow_run when the user wants "
-        "to capture exact inputs for a Run. Preparation requires an approval card and "
-        "does not execute the graph; do not claim it has run.",
+        "to capture exact inputs for a Run, then execute_project_workflow_run to run "
+        "the Python graph. Both actions require an approval card. MCP execution is "
+        "not available yet; do not claim an MCP Workflow has run.",
     )
 )
 
@@ -413,6 +414,10 @@ class PostgresDeepAgentRunner:
                 interrupt_on["prepare_project_workflow_run"] = {
                     "allowed_decisions": ["approve", "reject"],
                     "description": "Prepare this Workflow Run snapshot?",
+                }
+                interrupt_on["execute_project_workflow_run"] = {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Execute this Python Workflow Run?",
                 }
         graph = create_deep_agent(
             model=self._model,
@@ -1201,9 +1206,33 @@ class PostgresDeepAgentRunner:
             async def load_project_workflow_run(run_id: str) -> str:
                 """Inspect a prepared Workflow Run and its captured sources and targets."""
                 run = await workflow_runs.load(access, project_id, run_id)
-                return json.dumps({"id": run.id, "status": run.status, "snapshot": run.snapshot})
+                return json.dumps(
+                    {
+                        "id": run.id,
+                        "status": run.status,
+                        "snapshot": run.snapshot,
+                        "execution": run.execution,
+                    }
+                )
 
-            tools.extend([prepare_project_workflow_run, load_project_workflow_run])
+            @tool
+            async def execute_project_workflow_run(run_id: str) -> str:
+                """After approval, execute a prepared Python-only Workflow Run."""
+                run = await workflow_runs.execute(
+                    access,
+                    project_id,
+                    run_id,
+                    initiation=TransformInitiation("agent", "approved"),
+                )
+                return json.dumps({"id": run.id, "status": run.status, "execution": run.execution})
+
+            tools.extend(
+                [
+                    prepare_project_workflow_run,
+                    execute_project_workflow_run,
+                    load_project_workflow_run,
+                ]
+            )
         return tools
 
     @staticmethod

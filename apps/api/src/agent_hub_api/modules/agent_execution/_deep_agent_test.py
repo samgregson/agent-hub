@@ -143,6 +143,10 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         "approve",
         "reject",
     ]
+    assert captured["interrupt_on"]["execute_project_workflow_run"]["allowed_decisions"] == [
+        "approve",
+        "reject",
+    ]
     tools = {registered.name: registered for registered in captured["tools"]}
     graph_json = json.dumps(
         {

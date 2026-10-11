@@ -198,3 +198,7 @@ async def test_prepared_run_route_round_trips_without_dispatching_calls() -> Non
         assert created.json()["snapshot"]["graph"] == json.loads(json.dumps(asdict(graph)))
         assert (await client.get(base)).json()[0]["id"] == created.json()["id"]
         assert (await client.get(f"{base}/{created.json()['id']}")).json() == created.json()
+        executed = await client.post(f"{base}/{created.json()['id']}/execute")
+        assert executed.status_code == 200
+        assert executed.json()["status"] == "succeeded"
+        assert executed.json()["execution"]["outputs"] == {"result": []}

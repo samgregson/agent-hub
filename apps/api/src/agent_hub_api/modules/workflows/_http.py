@@ -85,6 +85,7 @@ class WorkflowRunResponse(_Model):
     definition_version: int
     status: str
     snapshot: dict[str, object]
+    execution: dict[str, object]
     initiator_subject: str
     created_at: datetime
 
@@ -111,6 +112,7 @@ def _run_response(value: WorkflowRun) -> WorkflowRunResponse:
         definition_version=value.definition_version,
         status=value.status,
         snapshot=dict(value.snapshot),
+        execution=dict(value.execution),
         initiator_subject=value.initiator_subject,
         created_at=value.created_at,
     )
@@ -200,6 +202,30 @@ def create_workflow_router(
         return _response(item)
 
     if runs is not None:
+
+        @router.post(
+            "/{workflow_id}/runs/{run_id}/execute",
+            response_model=WorkflowRunResponse,
+        )
+        async def execute_run(
+            project_id: str, workflow_id: str, run_id: str, request_context: Context
+        ) -> WorkflowRunResponse:
+            try:
+                existing = await runs.load(
+                    ProjectAccess(request_context.subject), project_id, run_id
+                )
+                if existing.workflow_id != workflow_id:
+                    raise WorkflowNotFound
+                item = await runs.execute(
+                    ProjectAccess(request_context.subject), project_id, run_id
+                )
+            except WorkflowNotFound as error:
+                raise HTTPException(status_code=404, detail="Run is unavailable.") from error
+            except WorkflowRunConflict as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            except WorkflowValidationError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            return _run_response(item)
 
         @router.post(
             "/{workflow_id}/runs/prepare",

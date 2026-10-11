@@ -34,8 +34,8 @@ class PostgresWorkflowRunStore:
             cursor = await connection.execute(
                 """INSERT INTO workflow_runs
                 (project_id,run_id,workflow_id,definition_version,status,snapshot,
-                 initiator_subject,idempotency_key,created_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                 execution,initiator_subject,idempotency_key,created_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (project_id,idempotency_key) DO NOTHING RETURNING *""",
                 (
                     run.project_id,
@@ -44,6 +44,7 @@ class PostgresWorkflowRunStore:
                     run.definition_version,
                     run.status,
                     json.dumps(run.snapshot),
+                    json.dumps(run.execution),
                     run.initiator_subject,
                     run.idempotency_key,
                     run.created_at,
@@ -91,6 +92,24 @@ class PostgresWorkflowRunStore:
             rows = await cursor.fetchall()
         return tuple(_from_row(row) for row in rows)
 
+    async def update(self, run: WorkflowRun, expected_status: str) -> WorkflowRun | None:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """UPDATE workflow_runs SET status=%s,execution=%s
+                WHERE project_id=%s AND run_id=%s AND status=%s""",
+                (
+                    run.status,
+                    json.dumps(run.execution),
+                    run.project_id,
+                    run.id,
+                    expected_status,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+        return run
+
 
 def _from_row(row: Mapping[str, object]) -> WorkflowRun:
     raw = row["snapshot"]
@@ -103,10 +122,16 @@ def _from_row(row: Mapping[str, object]) -> WorkflowRun:
         definition_version=int(str(row["definition_version"])),
         status=str(row["status"]),
         snapshot=snapshot,
+        execution=_decode(row["execution"]),
         initiator_subject=str(row["initiator_subject"]),
         idempotency_key=str(row["idempotency_key"]),
         created_at=cast(datetime, row["created_at"]),
     )
+
+
+def _decode(raw: object) -> Mapping[str, object]:
+    value = json.loads(raw) if isinstance(raw, str) else raw
+    return value if isinstance(value, dict) else {}
 
 
 def create_postgres_workflow_run_module(
