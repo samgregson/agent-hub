@@ -642,6 +642,64 @@ async def test_agent_reviews_and_starts_single_mcp_call_with_provenance() -> Non
 
 
 @pytest.mark.asyncio
+async def test_agent_reviews_and_starts_mcp_map_with_plugin_version() -> None:
+    class Batches:
+        initiation: BatchInitiation | None = None
+
+        async def plan_mcp_dataset(self, *_: object) -> object:
+            return SimpleNamespace(
+                snapshot=lambda: {"datasetVersion": 2, "pluginVersion": "1.0", "invocationCount": 2}
+            )
+
+        async def submit_mcp_dataset(self, *args: object, **kwargs: object) -> object:
+            assert args[5:7] == (2, "1.0")
+            self.initiation = cast(BatchInitiation, kwargs["initiation"])
+            return SimpleNamespace(id="run-1")
+
+        async def enqueue(self, *_: object) -> asyncio.Task[object]:
+            async def complete() -> object:
+                return SimpleNamespace(
+                    status=BatchRunStatus.partial,
+                    records=(
+                        SimpleNamespace(structured_output={"result": 4}, error=None),
+                        SimpleNamespace(structured_output=None, error="failed"),
+                    ),
+                )
+
+            return asyncio.create_task(complete())
+
+    batches = Batches()
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._batch_tools(
+            cast(Any, batches), "project-1", "sam", "thread-1", "agent-run-1"
+        )
+    }
+    plan = await tools["plan_project_mcp_map"].ainvoke(
+        {"plugin_id": "fixture", "tool_name": "double", "dataset_id": "dataset-1"}
+    )
+    started = await tools["start_project_mcp_map"].ainvoke(
+        {
+            "name": "start_project_mcp_map",
+            "type": "tool_call",
+            "id": "call-1",
+            "args": {
+                "plugin_id": "fixture",
+                "tool_name": "double",
+                "dataset_id": "dataset-1",
+                "expected_dataset_version": 2,
+                "expected_plugin_version": "1.0",
+            },
+        }
+    )
+    assert json.loads(plan)["pluginVersion"] == "1.0"
+    assert "1 of 2 records produced outputs; 1 failed" in started.content
+    assert batches.initiation == BatchInitiation(
+        "agentRun", "approved", "thread-1", "agent-run-1", "call-1"
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_reviews_and_starts_python_function_map_with_provenance() -> None:
     class Batches:
         initiation: BatchInitiation | None = None

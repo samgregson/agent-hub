@@ -883,9 +883,10 @@ class PostgresDeepAgentRunner:
             plugin_id: str,
             tool_name: str,
             expected_dataset_version: int,
+            expected_plugin_version: str,
             tool_call_id: Annotated[str, InjectedToolCallId],
         ) -> str:
-            """Start the reviewed MCP Map after approval; each Record invokes the tool once."""
+            """Start the reviewed MCP Map after approval using its Dataset and Plugin versions."""
             key = hashlib.sha256(f"agent-mcp-map:{thread_id}:{tool_call_id}".encode()).hexdigest()
             run = await batches.submit_mcp_dataset(
                 access,
@@ -894,6 +895,7 @@ class PostgresDeepAgentRunner:
                 tool_name,
                 dataset_id,
                 expected_dataset_version,
+                expected_plugin_version,
                 key,
                 initiation=BatchInitiation(
                     kind="agentRun",

@@ -54,6 +54,7 @@ class McpMapPlanRequest(_Model):
 
 class StartMcpMapRequest(McpMapPlanRequest):
     expected_dataset_version: int = Field(ge=1)
+    expected_plugin_version: str = Field(min_length=1)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=128)
 
 
@@ -353,6 +354,7 @@ def create_batch_execution_router(
                 body.tool_name,
                 body.dataset_id,
                 body.expected_dataset_version,
+                body.expected_plugin_version,
                 body.idempotency_key,
             )
             await batches.enqueue(access, project_id, run.id)
@@ -363,6 +365,7 @@ def create_batch_execution_router(
             raise HTTPException(status_code=409, detail=str(error)) from error
         except (
             DatasetValidationError,
+            McpCallValidationError,
             PluginNotAvailable,
             PluginNotEnabled,
             PluginToolNotAllowed,

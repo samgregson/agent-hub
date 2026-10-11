@@ -91,6 +91,9 @@ class Gateway:
             "properties": {"load": {"type": "number"}},
         }
 
+    async def tool_version(self, *_: object) -> str:
+        return "fixture-v1"
+
 
 @pytest.mark.asyncio
 async def test_direct_mcp_call_retains_one_reviewed_input_and_output() -> None:
@@ -213,6 +216,8 @@ async def test_direct_mcp_map_uses_dataset_records_without_a_batch_definition() 
     assert plan.dataset_version == dataset.version
     assert plan.record_ids == tuple(record.id for record in dataset.records)
     assert plan.invocation_count == 2
+    assert plan.snapshot()["pluginVersion"] == "fixture-v1"
+    assert plan.snapshot()["inputSchema"] == dict(plan.input_schema)
 
     queued = await batches.submit_mcp_dataset(
         owner,
@@ -221,6 +226,7 @@ async def test_direct_mcp_map_uses_dataset_records_without_a_batch_definition() 
         "double",
         dataset.id,
         plan.dataset_version,
+        "fixture-v1",
         "approved-map-1",
     )
     completed = await batches.execute(owner, project.id, queued.id)
@@ -233,6 +239,7 @@ async def test_direct_mcp_map_uses_dataset_records_without_a_batch_definition() 
     assert completed.records[1].error == "load 3 failed"
     assert completed.definition_snapshot["datasetVersion"] == dataset.version
     assert completed.definition_snapshot["callKind"] == "mcpMap"
+    assert completed.definition_snapshot["pluginVersion"] == "fixture-v1"
     assert (
         await batches.submit_mcp_dataset(
             owner,
@@ -241,6 +248,7 @@ async def test_direct_mcp_map_uses_dataset_records_without_a_batch_definition() 
             "double",
             dataset.id,
             plan.dataset_version,
+            "fixture-v1",
             "approved-map-1",
         )
     ).id == queued.id
@@ -280,12 +288,14 @@ async def test_direct_mcp_map_http_reviews_then_starts_the_same_captured_records
                 "pluginId": "fixture",
                 "toolName": "double",
                 "expectedDatasetVersion": dataset.version,
+                "expectedPluginVersion": "fixture-v1",
             },
         )
 
     assert plan.status_code == 200
     assert plan.json()["recordIds"] == [dataset.records[0].id]
     assert plan.json()["inputs"] == [{"load": 2}]
+    assert plan.json()["pluginVersion"] == "fixture-v1"
     assert started.status_code == 201
     assert started.json()["recordCount"] == 1
 
@@ -316,7 +326,11 @@ async def test_direct_mcp_map_rejects_invalid_and_stale_dataset_inputs() -> None
     )
     with pytest.raises(DatasetValidationError, match="changed"):
         await batches.submit_mcp_dataset(
-            owner, project.id, "fixture", "double", dataset.id, dataset.version
+            owner, project.id, "fixture", "double", dataset.id, dataset.version, "fixture-v1"
+        )
+    with pytest.raises(McpCallValidationError, match="version changed"):
+        await batches.submit_mcp_dataset(
+            owner, project.id, "fixture", "double", dataset.id, updated.version, "old-version"
         )
     assert updated.version == dataset.version + 1
     assert gateway.calls == []

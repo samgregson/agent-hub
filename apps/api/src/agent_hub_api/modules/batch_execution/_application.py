@@ -108,6 +108,7 @@ class McpDatasetMapPlan:
     dataset_id: str
     dataset_version: int
     plugin_id: str
+    plugin_version: str
     tool_name: str
     records: tuple[DatasetRecord, ...]
     input_schema: Mapping[str, object]
@@ -127,7 +128,10 @@ class McpDatasetMapPlan:
             "datasetId": self.dataset_id,
             "datasetVersion": self.dataset_version,
             "pluginId": self.plugin_id,
+            "pluginVersion": self.plugin_version,
             "toolName": self.tool_name,
+            "inputSchema": dict(self.input_schema),
+            "outputSchema": dict(self.output_schema),
             "invocationCount": self.invocation_count,
             "recordIds": list(self.record_ids),
             "inputs": [dict(record.value) for record in self.records],
@@ -488,6 +492,7 @@ class BatchExecutionModule:
             raise DatasetValidationError("Dataset has no Records to map.")
         if len(dataset.records) > MAX_DIRECT_MAP_INVOCATIONS:
             raise DatasetValidationError("MCP Map is limited to 100 Records.")
+        plugin_version = await self._gateway.tool_version(access, project_id, plugin_id, tool_name)
         input_schema = await self._gateway.input_schema(access, project_id, plugin_id, tool_name)
         output_schema = await self._gateway.output_schema(access, project_id, plugin_id, tool_name)
         validator = Draft202012Validator(input_schema)
@@ -502,6 +507,7 @@ class BatchExecutionModule:
             dataset.id,
             dataset.version,
             plugin_id,
+            plugin_version,
             tool_name,
             dataset.records,
             dict(input_schema),
@@ -516,6 +522,7 @@ class BatchExecutionModule:
         tool_name: str,
         dataset_id: str,
         expected_dataset_version: int,
+        expected_plugin_version: str,
         idempotency_key: str | None = None,
         *,
         initiation: BatchInitiation | None = None,
@@ -529,6 +536,7 @@ class BatchExecutionModule:
                 existing.definition_snapshot.get("callKind") != "mcpMap"
                 or existing.definition_snapshot.get("datasetId") != dataset_id
                 or existing.definition_snapshot.get("datasetVersion") != expected_dataset_version
+                or existing.definition_snapshot.get("pluginVersion") != expected_plugin_version
             ):
                 raise BatchRunIdempotencyConflict(
                     "This idempotency key identifies another MCP Map."
@@ -537,6 +545,8 @@ class BatchExecutionModule:
         plan = await self.plan_mcp_dataset(access, project_id, plugin_id, tool_name, dataset_id)
         if plan.dataset_version != expected_dataset_version:
             raise DatasetValidationError("Dataset changed; review the MCP Map again.")
+        if plan.plugin_version != expected_plugin_version:
+            raise McpCallValidationError("MCP tool version changed; review the Map again.")
         now = datetime.now(UTC)
         run = BatchRun(
             id=str(uuid4()),
@@ -548,6 +558,7 @@ class BatchExecutionModule:
                 "datasetId": plan.dataset_id,
                 "definitionName": plan.tool_name,
                 "pluginId": plan.plugin_id,
+                "pluginVersion": plan.plugin_version,
                 "toolName": plan.tool_name,
                 "inputSchema": dict(plan.input_schema),
                 "outputSchema": dict(plan.output_schema),

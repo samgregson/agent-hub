@@ -141,6 +141,7 @@ export function startRequest(plan: CallPlan): {
     case "mcpMap":
       if (
         !plan.pluginId ||
+        !plan.pluginVersion ||
         !plan.toolName ||
         !plan.datasetId ||
         !plan.datasetVersion
@@ -153,6 +154,7 @@ export function startRequest(plan: CallPlan): {
           toolName: plan.toolName,
           datasetId: plan.datasetId,
           expectedDatasetVersion: plan.datasetVersion,
+          expectedPluginVersion: plan.pluginVersion,
         },
       };
   }

@@ -220,11 +220,18 @@ for (const target of ["Python Function", "MCP tool"] as const) {
       await result.getByText("Captured call").click();
       await expect(result).toContainText(isMap ? "dataset-1" : "item");
       expect(writes.map((write) => write.path)).toEqual(["plan", "start"]);
-      if (isMap)
+      if (isMap) {
         expect(writes[1].body).toMatchObject({ expectedDatasetVersion: 3 });
-      else if (isPython)
+        expect(writes[1].body).toMatchObject(
+          isPython
+            ? { expectedDefinitionRevision: 4 }
+            : { expectedPluginVersion: "2" },
+        );
+      } else if (isPython) {
         expect(writes[1].body).toMatchObject({ expectedRevision: 4 });
-      else expect(writes[1].body).toMatchObject({ expectedPluginVersion: "2" });
+      } else {
+        expect(writes[1].body).toMatchObject({ expectedPluginVersion: "2" });
+      }
     });
   }
 }
