@@ -266,6 +266,65 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
     await route.fulfill({ json: [] });
   });
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({
+      json: [{ id: "loads-extra", name: "Extra loads", version: 1 }],
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms`,
+    async (route) => {
+      await route.fulfill({
+        json: [
+          {
+            id: "summary-function",
+            name: "Summarize loads",
+            revision: 1,
+            inputSelectors: { records: "$" },
+          },
+        ],
+      });
+    },
+  );
+  await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "calculation-plugin",
+          name: "Calculator",
+          version: "0.4.0",
+          enabled: true,
+          tools: [{ name: "calculate", readOnly: true }],
+        },
+      ],
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/plugins/calculation-plugin/tools`,
+    async (route) => {
+      await route.fulfill({
+        json: [
+          {
+            name: "calculate",
+            version: "0.4.0",
+            repeatSafe: true,
+            inputSchema: {
+              type: "object",
+              properties: { record: { type: "object" } },
+              required: ["record"],
+            },
+            outputSchema: { type: "object" },
+          },
+        ],
+      });
+    },
+  );
   await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
     await route.fulfill({ json: [workflow] });
   });
@@ -356,7 +415,62 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(
     page.getByRole("region", { name: "Node lineage" }),
   ).toContainText("filter-function");
+  await page.getByRole("button", { name: "Close details" }).click();
+  await page.getByRole("button", { name: "Inspect inputs" }).click();
+  await page.getByRole("button", { name: "Open Library" }).click();
+  await expect(
+    page.getByRole("region", { name: "Library items" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect calculate" }).click();
+  await page.getByRole("button", { name: "Open Operations" }).click();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Project views" })
+      .getByRole("button", { name: "Operations" }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect screen" }).click();
   await page.getByRole("button", { name: "Edit Workflow" }).click();
+  await page
+    .getByLabel("Library item or call")
+    .selectOption("Function · Summarize loads");
+  await page.getByLabel("Call shape").selectOption("map");
+  await page.getByRole("button", { name: "Add node" }).click();
+  await expect(
+    page.getByRole("region", { name: "Workflow nodes" }),
+  ).toContainText("call-6");
+  await page.getByRole("button", { name: "Add connection" }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Workflow connections" })
+      .getByLabel("To node")
+      .last(),
+  ).toHaveValue("call-6");
+  await expect(
+    page
+      .getByRole("region", { name: "Workflow connections" })
+      .getByLabel("Input port")
+      .last(),
+  ).toHaveValue("items");
+  await page
+    .getByLabel("Library item or call")
+    .selectOption("MCP · Calculator / calculate");
+  await page.getByLabel("Call shape").selectOption("single");
+  await page.getByRole("button", { name: "Add node" }).click();
+  await page.getByRole("button", { name: "Add connection" }).click();
+  await expect(
+    page
+      .getByRole("region", { name: "Workflow connections" })
+      .getByLabel("To node")
+      .last(),
+  ).toHaveValue("call-7");
+  await expect(
+    page
+      .getByRole("region", { name: "Workflow connections" })
+      .getByLabel("Input port")
+      .last(),
+  ).toHaveValue("record");
   await page.getByLabel("Workflow name").fill("Beam review v2");
   await page.getByLabel("Name", { exact: true }).fill("Quality");
   await page
@@ -392,6 +506,116 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(
     page.getByRole("region", { name: "Edit Workflow Definition" }),
   ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth === window.innerWidth,
+      ),
+    )
+    .toBe(true);
+});
+
+test("a Project Workflow can be created from Library and Operations", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-01T00:00:00.000Z",
+    id: "project-create-workflow",
+    name: "Test Project",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+  };
+  let createRequest: Record<string, unknown> | undefined;
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
+    if (route.request().method() === "POST") {
+      createRequest = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          id: "workflow-new",
+          name: createRequest.name,
+          version: 1,
+          graph: createRequest.graph,
+        },
+        status: 201,
+      });
+      return;
+    }
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({
+      json: [{ id: "loads", name: "Loads", version: 2 }],
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({ json: { files: [] } });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms`,
+    async (route) => {
+      await route.fulfill({
+        json: [
+          {
+            id: "calculate",
+            name: "Calculate loads",
+            revision: 2,
+            inputSelectors: { records: "$" },
+          },
+        ],
+      });
+    },
+  );
+  await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  await page.getByRole("button", { name: "Workflow" }).click();
+  await page
+    .getByRole("button", { name: "Close Project navigation" })
+    .last()
+    .click();
+  await page.getByRole("button", { name: "Create Workflow" }).click();
+  await page.getByLabel("Library item or call").selectOption("Dataset · Loads");
+  await page.getByRole("button", { name: "Add node" }).click();
+  await page
+    .getByLabel("Library item or call")
+    .selectOption("Function · Calculate loads");
+  await page.getByLabel("Call shape").selectOption("map");
+  await page.getByRole("button", { name: "Add node" }).click();
+  await page.getByRole("button", { name: "Add connection" }).click();
+  await page
+    .getByRole("region", { name: "Workflow outputs editor" })
+    .getByLabel("From node")
+    .selectOption("call-2");
+  await page.getByLabel("Workflow name").fill("Load check");
+  await page.getByRole("button", { name: "Create Workflow" }).click();
+
+  await expect(page.getByRole("heading", { name: "Load check" })).toBeVisible();
+  expect(createRequest?.name).toBe("Load check");
+  const graph = createRequest?.graph as {
+    nodes: Array<{ kind: string; shape: string }>;
+    edges: Array<{ sourcePort: string; targetPort: string }>;
+    outputs: Array<{ node: string; port: string }>;
+  };
+  expect(graph.nodes.map((node) => node.kind)).toEqual(["dataset", "python"]);
+  expect(graph.nodes[1]?.shape).toBe("map");
+  expect(graph.edges[0]).toMatchObject({
+    sourcePort: "records",
+    targetPort: "items",
+  });
+  expect(graph.outputs[0]).toMatchObject({ node: "call-2", port: "result" });
   await expect
     .poll(() =>
       page.evaluate(
@@ -723,7 +947,7 @@ test("Operations keeps Batch and Transform actions under one Project destination
     projectViews.getByRole("button", { name: "Operations" }),
   ).toBeVisible();
   await expect(
-    projectViews.getByRole("button", { name: "Transforms" }),
+    projectViews.getByRole("button", { name: "Functions" }),
   ).toHaveCount(0);
   await expect(
     projectViews.getByRole("button", { name: "Batch Definitions" }),
@@ -736,14 +960,14 @@ test("Operations keeps Batch and Transform actions under one Project destination
   await expect(
     page.getByRole("button", { name: "+ New Batch Definition" }),
   ).toBeVisible();
-  await operationTypes.getByRole("button", { name: "Transforms" }).click();
+  await operationTypes.getByRole("button", { name: "Functions" }).click();
   await expect(
-    page.getByRole("button", { name: "New Transform" }),
+    page.getByRole("button", { name: "New Function" }),
   ).toBeVisible();
   await projectViews.getByRole("button", { name: "Library" }).click();
   await projectViews.getByRole("button", { name: "Operations" }).click();
   await expect(
-    operationTypes.getByRole("button", { name: "Transforms" }),
+    operationTypes.getByRole("button", { name: "Functions" }),
   ).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -944,7 +1168,7 @@ test("Transform Definition selection scopes retained Runs while historical Runs 
     .click();
   await page
     .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Transforms" })
+    .getByRole("button", { name: "Functions" })
     .click();
   const retained = page.getByRole("region", { name: "Retained Runs" });
   const runList = retained.locator("ul").first();
@@ -953,7 +1177,7 @@ test("Transform Definition selection scopes retained Runs while historical Runs 
   await page
     .getByRole("button", { name: /Second transform Revision 1/ })
     .click();
-  await expect(page.getByLabel("Transform Run scope")).toHaveValue(
+  await expect(page.getByLabel("Function Run scope")).toHaveValue(
     "definition-1",
   );
   await expect(runList).toContainText("Second transform");
@@ -963,7 +1187,7 @@ test("Transform Definition selection scopes retained Runs while historical Runs 
     "Second transform",
   );
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByLabel("Transform Run scope")).toHaveValue(
+  await expect(page.getByLabel("Function Run scope")).toHaveValue(
     "definition-1",
   );
   expect(
@@ -976,13 +1200,13 @@ test("Transform Definition selection scopes retained Runs while historical Runs 
   await phoneDrawer
     .getByRole("button", { name: /Second transform Revision 1/ })
     .click();
-  const phoneScope = phoneDrawer.getByLabel("Transform Run scope");
+  const phoneScope = phoneDrawer.getByLabel("Function Run scope");
   await expect(phoneScope).toHaveValue("definition-1");
   await phoneDrawer
     .getByRole("button", { name: "Close Project navigation" })
     .click();
   await page.getByRole("button", { name: "Open Project navigation" }).click();
-  await expect(phoneDrawer.getByLabel("Transform Run scope")).toHaveValue(
+  await expect(phoneDrawer.getByLabel("Function Run scope")).toHaveValue(
     "definition-1",
   );
   await phoneScope.selectOption("all");
@@ -1725,7 +1949,7 @@ test("a Dataset Transform runs once over ordered Records", async ({ page }) => {
     .click();
   await page
     .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Transforms" })
+    .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("dataset");
   await page
@@ -1826,7 +2050,7 @@ test("a retained Transform output selection shows its source and selected values
           selection,
           selectedCount: 1,
           invocationCount: 1,
-          outputLocation: "Transform Run output",
+          outputLocation: "Function Run output",
         },
       });
     },
@@ -1855,11 +2079,11 @@ test("a retained Transform output selection shows its source and selected values
     .click();
   await page
     .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Transforms" })
+    .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("output");
   await page
-    .getByRole("combobox", { name: "Transform Run", exact: true })
+    .getByRole("combobox", { name: "Function Run", exact: true })
     .selectOption(upstream.id);
   await page.getByLabel("Output path (JSON Pointer)").fill("/items");
   await page.getByLabel("Sort path (JSON Pointer, optional)").fill("/score");
@@ -1867,11 +2091,11 @@ test("a retained Transform output selection shows its source and selected values
   await page.getByRole("button", { name: "Review selection" }).click();
   await expect(
     page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText("Transform Run transfor → Transform Run output");
+  ).toContainText("Function Run transfor → Function Run output");
   await page.getByRole("button", { name: "Start selected Run" }).click();
   await expect(
     page.getByRole("article", { name: "Run dataflow" }),
-  ).toContainText("Transform Run transfor · 1 values");
+  ).toContainText("Function Run transfor · 1 values");
   expect(writes).toHaveLength(2);
   expect(writes[0]).toMatchObject({
     sourceRunId: upstream.id,
@@ -1883,7 +2107,7 @@ test("a retained Transform output selection shows its source and selected values
   expect(writes[1]).toEqual(writes[0]);
 });
 
-test("a Batch Result Set selection keeps row lineage in the Transform Run", async ({
+test("a Batch Result Set selection keeps row lineage in the Function Run", async ({
   page,
 }) => {
   const project = {
@@ -1997,7 +2221,7 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
           selection,
           selectedCount: 1,
           invocationCount: 1,
-          outputLocation: "Transform Run output",
+          outputLocation: "Function Run output",
         },
       });
     },
@@ -2023,7 +2247,7 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
     .click();
   await page
     .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Transforms" })
+    .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("resultSet");
   await page
@@ -2034,7 +2258,7 @@ test("a Batch Result Set selection keeps row lineage in the Transform Run", asyn
   await page.getByRole("button", { name: "Review selection" }).click();
   await expect(
     page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText("Batch Result Set batch-so → Transform Run output");
+  ).toContainText("Batch Result Set batch-so → Function Run output");
   await page.getByText("Selected source values").click();
   await expect(
     page.getByRole("region", { name: "Selection plan" }),
@@ -2152,7 +2376,7 @@ test("a retained MCP output selection is reviewable and traceable", async ({
           selection,
           selectedCount: 1,
           invocationCount: 1,
-          outputLocation: "Transform Run output",
+          outputLocation: "Function Run output",
         },
       });
     },
@@ -2178,7 +2402,7 @@ test("a retained MCP output selection is reviewable and traceable", async ({
     .click();
   await page
     .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Transforms" })
+    .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("artifact");
   await expect(
@@ -2192,7 +2416,7 @@ test("a retained MCP output selection is reviewable and traceable", async ({
   await page.getByRole("button", { name: "Review selection" }).click();
   await expect(
     page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText("MCP Tool Result artifact · v2 → Transform Run output");
+  ).toContainText("MCP Tool Result artifact · v2 → Function Run output");
   await page.getByRole("button", { name: "Start selected Run" }).click();
   await expect(
     page.getByRole("article", { name: "Run dataflow" }),

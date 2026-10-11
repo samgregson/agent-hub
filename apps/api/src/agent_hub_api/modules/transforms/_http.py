@@ -390,7 +390,7 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
             selection=dict(plan.snapshot()),
             selected_count=plan.selected_count,
             invocation_count=plan.invocation_count,
-            output_location="Transform Run output",
+            output_location="Function Run output",
         )
 
     @router.post(

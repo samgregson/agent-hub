@@ -25,7 +25,7 @@ apps/web/src/
     agent-ui/                  # assistant-ui composition and AG-UI adapter
     artifact-view-host/        # trusted chrome, sandbox host and fallback view
     operation-calls/           # review/start and result inspection for Python and MCP calls
-    workflows/                 # Workflow route forwarding, overview, and run inspection; later editor
+    workflows/                 # Workflow route forwarding, Definition editing, overview, and Run inspection
   shared/
     config/                    # validated browser/server configuration
     http/                      # shared same-origin backend forwarding

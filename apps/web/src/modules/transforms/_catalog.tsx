@@ -225,7 +225,7 @@ export function TransformCatalog({
     endpoint: string;
   } | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [saveName, setSaveName] = useState("Transform output");
+  const [saveName, setSaveName] = useState("Function output");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -301,7 +301,7 @@ export function TransformCatalog({
     void fetch(root, { cache: "no-store" })
       .then(async (definitionResponse) => {
         if (!definitionResponse.ok) {
-          throw new Error("Transforms could not be loaded.");
+          throw new Error("Functions could not be loaded.");
         }
         const available = (await definitionResponse.json()) as Definition[];
         if (!active) return;
@@ -312,7 +312,7 @@ export function TransformCatalog({
           setError(
             cause instanceof Error
               ? cause.message
-              : "Transforms could not be loaded.",
+              : "Functions could not be loaded.",
           );
       });
     return () => {
@@ -478,7 +478,7 @@ export function TransformCatalog({
       );
       if (!response.ok)
         throw new Error(
-          await responseError(response, "Transform could not be executed."),
+          await responseError(response, "Function could not be executed."),
         );
       if (mode === "preview") {
         setPreview((await response.json()) as Preview);
@@ -506,7 +506,7 @@ export function TransformCatalog({
       setError(
         cause instanceof Error
           ? cause.message
-          : "Transform could not be executed.",
+          : "Function could not be executed.",
       );
     } finally {
       setBusy(null);
@@ -598,7 +598,7 @@ export function TransformCatalog({
         scope: selectedDefinition.id,
       }));
       setSelectedRunId(run.id);
-      setNotice(`Transform Run ${shortId(run.id)} ${run.status}.`);
+      setNotice(`Function Run ${shortId(run.id)} ${run.status}.`);
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : "Run could not be started.",
@@ -610,7 +610,7 @@ export function TransformCatalog({
   }
 
   function selectionRequest(): SelectionRequest {
-    if (!selectedDefinition) throw new Error("Select a Transform Definition.");
+    if (!selectedDefinition) throw new Error("Select a Function.");
     let equals: SelectionRequest["equals"] = null;
     if (filterPath.trim()) {
       if (!filterEquals.trim()) throw new Error("Enter a JSON equality value.");
@@ -632,7 +632,7 @@ export function TransformCatalog({
       parameters: jsonObject(parametersJson, "Parameters"),
     };
     if (inputMode === "output") {
-      if (!selectionRunId) throw new Error("Select a completed Transform Run.");
+      if (!selectionRunId) throw new Error("Select a completed Function Run.");
       if (!outputPath.trim()) throw new Error("Enter an output JSON Pointer.");
       return {
         ...rule,
@@ -864,10 +864,10 @@ export function TransformCatalog({
   }
 
   return (
-    <section aria-label="Transforms" className={styles.catalog}>
+    <section aria-label="Functions" className={styles.catalog}>
       <header className={styles.heading}>
         <div>
-          <h1>Transforms</h1>
+          <h1>Functions</h1>
           <p>
             Shape Project data with a reviewed Python definition. Preview before
             creating a retained Run.
@@ -883,7 +883,7 @@ export function TransformCatalog({
           }}
           variant="primary"
         >
-          New Transform
+          New Function
         </Button>
       </header>
       {error ? (
@@ -897,7 +897,7 @@ export function TransformCatalog({
         </p>
       ) : null}
       {definitions === null || runs === null ? (
-        <p role="status">Loading Transforms…</p>
+        <p role="status">Loading Functions…</p>
       ) : null}
 
       <div className={styles.columns}>
@@ -1064,7 +1064,7 @@ export function TransformCatalog({
                 >
                   <option value="record">Single input record</option>
                   <option value="dataset">Dataset Records</option>
-                  <option value="output">Selected Transform Run output</option>
+                  <option value="output">Selected Function Run output</option>
                   <option value="resultSet">
                     Selected Batch Result Set values
                   </option>
@@ -1111,7 +1111,7 @@ export function TransformCatalog({
                 </>
               ) : inputMode === "dataset" ? (
                 <section
-                  aria-label="Dataset Transform Run"
+                  aria-label="Dataset Function Run"
                   className={styles.form}
                 >
                   <p>
@@ -1178,8 +1178,8 @@ export function TransformCatalog({
                         {datasetRunPlan.invocationCount === 1 ? "" : "s"}
                       </strong>
                       <p>
-                        Dataset v{datasetRunPlan.datasetVersion} · Transform
-                        revision {datasetRunPlan.transformRevision} → Transform
+                        Dataset v{datasetRunPlan.datasetVersion} · Function
+                        revision {datasetRunPlan.transformRevision} → Function
                         Run output
                       </p>
                       <details>
@@ -1202,14 +1202,14 @@ export function TransformCatalog({
                 <section aria-label="Value selection" className={styles.form}>
                   <p>
                     Select values in source order, or add a filter, sort, and
-                    limit. The reviewed values become one Transform input.
+                    limit. The reviewed values become one Function input.
                     {inputMode === "output"
                       ? " The output path must select a list of JSON objects."
                       : null}
                   </p>
                   {inputMode === "output" ? (
                     <div className={styles.formGrid}>
-                      <Field label="Transform Run">
+                      <Field label="Function Run">
                         <select
                           onChange={(event) => {
                             setSelectionRunId(event.target.value);
@@ -1411,8 +1411,7 @@ export function TransformCatalog({
                     >
                       <strong>
                         {selectionPlan.plan.selectedCount} values ·{" "}
-                        {selectionPlan.plan.invocationCount} Transform
-                        invocation
+                        {selectionPlan.plan.invocationCount} Function invocation
                       </strong>
                       <p>
                         {selectionPlan.plan.selection.batchRunId
@@ -1420,7 +1419,7 @@ export function TransformCatalog({
                           : selectionPlan.plan.selection.artifactId
                             ? `MCP Tool Result ${shortId(selectionPlan.plan.selection.artifactId)} · v${selectionPlan.plan.selection.artifactVersion}`
                             : selectionPlan.plan.selection.sourceRunId
-                              ? `Transform Run ${shortId(selectionPlan.plan.selection.sourceRunId)}`
+                              ? `Function Run ${shortId(selectionPlan.plan.selection.sourceRunId)}`
                               : `Dataset v${selectionPlan.plan.selection.datasetVersion}`}{" "}
                         → {selectionPlan.plan.outputLocation}
                       </p>
@@ -1472,7 +1471,7 @@ export function TransformCatalog({
             <h2>
               {runScope === null || runScope === "all"
                 ? "Retained Runs"
-                : `Runs for ${definitions?.find((item) => item.id === runScope)?.name ?? "Transform"}`}
+                : `Runs for ${definitions?.find((item) => item.id === runScope)?.name ?? "Function"}`}
             </h2>
             <p>
               Runs and their results remain available after a Definition changes
@@ -1481,7 +1480,7 @@ export function TransformCatalog({
           </div>
           <Field label="Run history">
             <select
-              aria-label="Transform Run scope"
+              aria-label="Function Run scope"
               onChange={(event) => onSelectRunScope(event.target.value)}
               value={runScope ?? "all"}
             >
@@ -1537,7 +1536,7 @@ export function TransformCatalog({
                 </div>
               </div>
               <div
-                aria-label="Input to Transform to output"
+                aria-label="Input to Function to output"
                 className={styles.flow}
               >
                 <section>
@@ -1549,7 +1548,7 @@ export function TransformCatalog({
                         : selectedRun.definitionSnapshot.selection.artifactId
                           ? `MCP Tool Result ${shortId(selectedRun.definitionSnapshot.selection.artifactId)} · v${selectedRun.definitionSnapshot.selection.artifactVersion} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
                           : selectedRun.definitionSnapshot.selection.sourceRunId
-                            ? `Transform Run ${shortId(selectedRun.definitionSnapshot.selection.sourceRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
+                            ? `Function Run ${shortId(selectedRun.definitionSnapshot.selection.sourceRunId)} · ${selectedRun.definitionSnapshot.selection.selectedCount} values`
                             : `Dataset ${shortId(selectedRun.definitionSnapshot.selection.datasetId ?? "")} · v${selectedRun.definitionSnapshot.selection.datasetVersion} · ${selectedRun.definitionSnapshot.selection.selectedCount} Records`}{" "}
                       · 1 invocation
                     </p>
@@ -1558,7 +1557,7 @@ export function TransformCatalog({
                   <small>Input {shortId(selectedRun.inputHash)}</small>
                 </section>
                 <section>
-                  <h4>Transform</h4>
+                  <h4>Function</h4>
                   <strong>{selectedRun.definitionSnapshot.name}</strong>
                   <p>Revision {selectedRun.definitionSnapshot.revision}</p>
                   <small>Source {shortId(selectedRun.sourceHash)}</small>

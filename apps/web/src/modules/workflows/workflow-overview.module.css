@@ -135,6 +135,126 @@
   margin: 22px 0;
 }
 
+.nodeEditorList {
+  display: grid;
+  gap: 8px;
+}
+
+.nodeEditorCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.nodeEditorCard > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.nodeEditorCard strong,
+.nodeEditorCard span {
+  overflow-wrap: anywhere;
+}
+
+.nodeEditorCard span {
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.addNode {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.5fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.addNode label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.lineageActions {
+  display: flex;
+  gap: 8px;
+}
+
+.lineageActions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.draftGraph {
+  margin: 24px 0;
+  padding: 16px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+}
+
+.draftGraph h3 {
+  margin: 0 0 12px;
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.draftGraphNodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.draftGraphNodes article {
+  display: grid;
+  max-width: 100%;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.draftGraphNodes span,
+.draftGraph li {
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+  overflow-wrap: anywhere;
+}
+
+.draftGraph ul {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draftGraph li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.draftGraph code {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
 .editorGroup h3 {
   margin: 0;
   color: var(--text-strong);
@@ -381,6 +501,12 @@
   margin: 18px 0 22px;
 }
 
+.emptyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .error {
   color: var(--danger);
 }
@@ -420,6 +546,20 @@
 
   .editorRow {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .addNode {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nodeEditorCard {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .lineageActions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .editorArrow {

@@ -13,7 +13,10 @@ from agent_hub_api.modules.identity import (
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
     PluginNotAvailable,
+    PluginNotEnabled,
     PluginSelection,
+    PluginToolNotAllowed,
+    PluginTransportError,
 )
 from agent_hub_api.modules.projects import ProjectAccess, ProjectNotFound
 
@@ -33,6 +36,17 @@ class PluginSelectionResponse(BaseModel):
     version: str
     enabled: bool
     tools: list[PluginToolResponse]
+
+
+class PluginToolContractResponse(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    name: str
+    version: str
+    repeat_safe: bool
+    description: str
+    input_schema: dict[str, object]
+    output_schema: dict[str, object]
 
 
 def _selection_response(selection: PluginSelection) -> PluginSelectionResponse:
@@ -81,6 +95,65 @@ def create_plugin_gateway_router(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
             ) from error
         return [_selection_response(selection) for selection in selections]
+
+    @router.get("/{plugin_id}/tools", response_model=list[PluginToolContractResponse])
+    async def tool_contracts(
+        project_id: str, plugin_id: str, context: Context
+    ) -> list[PluginToolContractResponse]:
+        try:
+            selection = next(
+                (
+                    item
+                    for item in await gateway.selections(project_access(context), project_id)
+                    if item.manifest.id == plugin_id
+                ),
+                None,
+            )
+            if selection is None:
+                raise PluginNotAvailable
+            if not selection.enabled:
+                raise PluginNotEnabled
+            access = project_access(context)
+            contracts: list[PluginToolContractResponse] = []
+            for tool in selection.manifest.tools:
+                try:
+                    input_schema = await gateway.input_schema(
+                        access, project_id, plugin_id, tool.name
+                    )
+                    output_schema = await gateway.output_schema(
+                        access,
+                        project_id,
+                        plugin_id,
+                        tool.name,
+                        require_repeat_safe=False,
+                    )
+                except PluginToolNotAllowed:
+                    continue
+                contracts.append(
+                    PluginToolContractResponse(
+                        name=tool.name,
+                        version=selection.manifest.version,
+                        repeat_safe=tool.repeat_safe,
+                        description=tool.description,
+                        input_schema=dict(input_schema),
+                        output_schema=dict(output_schema),
+                    )
+                )
+            return contracts
+        except ProjectNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
+            ) from error
+        except (PluginNotAvailable, PluginNotEnabled, PluginToolNotAllowed) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Plugin tool contract is unavailable",
+            ) from error
+        except PluginTransportError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Plugin tool contract is unavailable",
+            ) from error
 
     @router.put("/{plugin_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def enable_plugin(project_id: str, plugin_id: str, context: Context) -> None:

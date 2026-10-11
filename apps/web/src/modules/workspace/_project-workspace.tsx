@@ -588,6 +588,19 @@ export function ProjectWorkspace() {
         {selectedProject && selectedActivity === "workflows" ? (
           <WorkflowOverview
             onOpenChats={() => handleSelectActivity("chats")}
+            onOpenLibrary={() => handleSelectActivity("artifacts")}
+            onOpenOperations={(node) => {
+              const operationKind =
+                node.kind === "python" ? "transforms" : "calls";
+              dispatch({ operationKind, type: "selectOperationKind" });
+              if (node.kind === "python") {
+                dispatch({
+                  definitionId: node.refId,
+                  type: "selectTransformDefinition",
+                });
+              }
+              handleSelectActivity("operations");
+            }}
             projectId={selectedProject.id}
           />
         ) : selectedProject &&
@@ -841,7 +854,7 @@ function OperationsCatalog({
           onClick={() => onSelectKind("transforms")}
           type="button"
         >
-          Transforms
+          Functions
         </button>
       </nav>
       {operationKind === "calls" ? (

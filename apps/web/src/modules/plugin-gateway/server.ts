@@ -6,9 +6,10 @@ export function forwardPluginRequest(
   request: Request,
   projectId: string,
   pluginId?: string,
+  suffix = "",
 ): Promise<Response> {
   const pluginPath = pluginId
-    ? `/plugins/${encodeURIComponent(pluginId)}`
+    ? `/plugins/${encodeURIComponent(pluginId)}${suffix}`
     : "/plugins";
   return forwardBackendRequest(
     request,

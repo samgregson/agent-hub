@@ -194,9 +194,13 @@ function runLabel(run: WorkflowRun, index: number) {
 }
 
 export function WorkflowOverview({
+  onOpenLibrary,
+  onOpenOperations,
   onOpenChats,
   projectId,
 }: {
+  onOpenLibrary: () => void;
+  onOpenOperations: (node: WorkflowNode) => void;
   onOpenChats: () => void;
   projectId: string;
 }) {
@@ -375,11 +379,14 @@ export function WorkflowOverview({
         ? current
         : {
             ...current,
-            workflows: current.workflows.map((item) =>
-              item.id === revised.id ? revised : item,
-            ),
+            workflows: current.workflows.some((item) => item.id === revised.id)
+              ? current.workflows.map((item) =>
+                  item.id === revised.id ? revised : item,
+                )
+              : [...current.workflows, revised],
           },
     );
+    setSelectedWorkflowId(revised.id);
     setEditingDefinitionId(null);
     setSelectedNodeId(null);
   }
@@ -400,17 +407,39 @@ export function WorkflowOverview({
   }
 
   if (workflows.length === 0) {
+    if (editingDefinitionId === "new") {
+      return (
+        <section aria-label="Workflow overview" className={styles.overview}>
+          <WorkflowDefinitionEditor
+            definition={{
+              id: "",
+              name: "New Workflow",
+              version: 0,
+              graph: { nodes: [], edges: [], outputs: [] },
+            }}
+            onCancel={() => setEditingDefinitionId(null)}
+            onSaved={acceptRevisedDefinition}
+            projectId={projectId}
+          />
+        </section>
+      );
+    }
     return (
       <section aria-label="Workflow overview" className={styles.empty}>
         <h1>No Workflow yet</h1>
         <p>
           A Workflow connects Project inputs and reusable calls into one
-          inspectable task. Create one in Chat, then return here to review its
-          outputs and history.
+          inspectable task. Add Project inputs and reusable calls, then wire
+          their named outputs into a reviewable graph.
         </p>
-        <button onClick={onOpenChats} type="button">
-          Open Chat
-        </button>
+        <div className={styles.emptyActions}>
+          <button onClick={() => setEditingDefinitionId("new")} type="button">
+            Create Workflow
+          </button>
+          <button onClick={onOpenChats} type="button">
+            Create with Chat
+          </button>
+        </div>
       </section>
     );
   }
@@ -640,9 +669,24 @@ export function WorkflowOverview({
         <section aria-label="Node lineage" className={styles.lineage}>
           <div className={styles.sectionHeading}>
             <h2>{selectedNode.id}</h2>
-            <button onClick={() => setSelectedNodeId(null)} type="button">
-              Close details
-            </button>
+            <div className={styles.lineageActions}>
+              {selectedNode.kind === "dataset" ||
+              selectedNode.kind === "file" ? (
+                <button onClick={onOpenLibrary} type="button">
+                  Open Library
+                </button>
+              ) : (
+                <button
+                  onClick={() => onOpenOperations(selectedNode)}
+                  type="button"
+                >
+                  Open Operations
+                </button>
+              )}
+              <button onClick={() => setSelectedNodeId(null)} type="button">
+                Close details
+              </button>
+            </div>
           </div>
           <p>
             {nodeKindLabel(selectedNode)} · {selectedNode.refId} · v

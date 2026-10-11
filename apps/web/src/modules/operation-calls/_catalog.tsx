@@ -437,7 +437,7 @@ export function OperationCallCatalog({ projectId }: { projectId: string }) {
               {plan.review.invocationCount} invocation
               {plan.review.invocationCount === 1 ? "" : "s"} ·{" "}
               {plan.review.outputKind === "transformRun"
-                ? "Transform Run"
+                ? "Function Run"
                 : "Result Set"}
             </span>
             <span>
