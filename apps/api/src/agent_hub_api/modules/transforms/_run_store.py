@@ -40,6 +40,30 @@ class PostgresTransformRunStore:
             )
         return run
 
+    async def create_or_load(self, run: TransformRun) -> tuple[TransformRun, bool]:
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                """INSERT INTO transform_runs
+                (project_id,transform_run_id,transform_definition_id,status,definition_snapshot,
+                inputs,parameters,input_hash,source_hash,runtime,package_hash,output,output_manifest,error,
+                initiator_subject,initiation,limits,created_at,completed_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON CONFLICT (project_id,transform_run_id) DO NOTHING RETURNING *""",
+                _values(run),
+            )
+            row = await cursor.fetchone()
+            created = row is not None
+            if row is None:
+                cursor = await connection.execute(
+                    """SELECT * FROM transform_runs
+                    WHERE project_id=%s AND transform_run_id=%s""",
+                    (run.project_id, run.id),
+                )
+                row = await cursor.fetchone()
+        assert row is not None
+        return _from_row(row), created
+
     async def complete(self, run: TransformRun) -> TransformRun:
         connection = await self._connect()
         async with connection:

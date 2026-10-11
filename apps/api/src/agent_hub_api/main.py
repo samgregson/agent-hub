@@ -144,6 +144,7 @@ def create_app(
         await resolved_agent_execution.reconcile_non_terminal()
         await resolved_batches.recover()
         await resolved_transforms.recover()
+        await resolved_workflow_runs.recover()
         yield
         if deep_agent_runner is not None:
             await deep_agent_runner.close()

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import cast
 
 import pytest
@@ -8,7 +9,9 @@ from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_
 from agent_hub_api.modules.transforms import (
     MemoryTransformRunStore,
     MemoryTransformStore,
+    TransformInitiation,
     TransformModule,
+    TransformRun,
     TransformRuntimeIdentity,
 )
 from agent_hub_api.modules.workflows import (
@@ -135,6 +138,92 @@ async def test_execute_runs_branching_python_map_dag_and_is_idempotent() -> None
 
 
 @pytest.mark.asyncio
+async def test_recovery_reuses_completed_function_call_after_checkpoint_gap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Workflow recovery")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    dataset = await datasets.create_dataset(
+        access,
+        project.id,
+        "Inputs",
+        [DatasetRecordInput({"value": 2}), DatasetRecordInput({"value": 4})],
+    )
+    runner = _Runner()
+    transforms = TransformModule(
+        projects, MemoryTransformStore(), runner, MemoryTransformRunStore()
+    )
+    function = await transforms.define(
+        access,
+        project.id,
+        "Double",
+        "# double\ndef transform(inputs, parameters):\n    return {}\n",
+        {"record": ""},
+        {"type": "object", "required": ["value"], "properties": {"value": {"type": "integer"}}},
+    )
+    definitions = WorkflowDefinitionModule(
+        projects, datasets, transforms, None, MemoryWorkflowStore()
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "dataset", dataset.id, dataset.version),
+            WorkflowNode("map", "python", function.id, function.revision, shape="map"),
+        ),
+        (WorkflowEdge("source", "records", "map", "items"),),
+        (WorkflowOutput("results", "map", "result"),),
+    )
+    definition = await definitions.create(access, project.id, "Double records", graph)
+    store = MemoryWorkflowRunStore()
+    workflows = WorkflowRunModule(definitions, datasets, transforms, None, store)
+    prepared = await workflows.prepare(
+        access, project.id, definition.id, "request-1", expected_version=1
+    )
+    start_function_call = transforms.start_function_call
+    crashed = False
+
+    async def crash_after_function_call(
+        call_access: ProjectAccess,
+        call_project_id: str,
+        definition_id: str,
+        inputs: Mapping[str, object],
+        parameters: Mapping[str, object],
+        *,
+        expected_revision: int,
+        initiation: TransformInitiation | None = None,
+        run_id: str | None = None,
+    ) -> TransformRun:
+        nonlocal crashed
+        child = await start_function_call(
+            call_access,
+            call_project_id,
+            definition_id,
+            inputs,
+            parameters,
+            expected_revision=expected_revision,
+            initiation=initiation,
+            run_id=run_id,
+        )
+        if not crashed:
+            crashed = True
+            raise RuntimeError("simulated interruption after child completion")
+        return child
+
+    monkeypatch.setattr(transforms, "start_function_call", crash_after_function_call)
+    with pytest.raises(RuntimeError, match="after child completion"):
+        await workflows.execute(access, project.id, prepared.id)
+    assert len(runner.calls) == 1
+
+    assert await workflows.recover() == 1
+    completed = await workflows.execute(access, project.id, prepared.id)
+
+    assert completed.status == "succeeded"
+    assert completed.execution["outputs"] == {"results": [{"value": 4}, {"value": 8}]}
+    assert len(runner.calls) == 2
+
+
+@pytest.mark.asyncio
 async def test_mcp_workflow_without_structured_output_fails_after_dispatch() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
@@ -193,6 +282,82 @@ async def test_mcp_workflow_without_structured_output_fails_after_dispatch() -> 
         "nodeId": "remote",
         "code": "missing_structured_output",
     }
+
+
+@pytest.mark.asyncio
+async def test_recovery_does_not_repeat_an_unconfirmed_single_mcp_call() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Workflow recovery")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    dataset = await datasets.create_dataset(
+        access, project.id, "Inputs", [DatasetRecordInput({"value": 1})]
+    )
+
+    class Gateway:
+        calls = 0
+
+        async def tool_version(self, *_: object) -> str:
+            return "v1"
+
+        async def input_schema(self, *_: object) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {"items": {"type": "array"}},
+                "required": ["items"],
+            }
+
+        async def output_schema(
+            self, *_: object, require_repeat_safe: bool = False
+        ) -> dict[str, object]:
+            return {"type": "object"}
+
+        async def call(self, *_: object) -> PluginToolResult:
+            self.calls += 1
+            raise RuntimeError("response lost after remote invocation")
+
+    gateway = Gateway()
+    transforms = TransformModule(projects, MemoryTransformStore())
+    definitions = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowStore(),
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "dataset", dataset.id, dataset.version),
+            WorkflowNode("remote", "mcp", "plugin", "v1", tool_name="count"),
+        ),
+        (WorkflowEdge("source", "records", "remote", "items"),),
+        (WorkflowOutput("result", "remote", "result"),),
+    )
+    definition = await definitions.create(access, project.id, "Count", graph)
+    workflows = WorkflowRunModule(
+        definitions,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowRunStore(),
+    )
+    prepared = await workflows.prepare(
+        access, project.id, definition.id, "request-1", expected_version=1
+    )
+
+    with pytest.raises(RuntimeError, match="response lost"):
+        await workflows.execute(access, project.id, prepared.id)
+    assert gateway.calls == 1
+
+    assert await workflows.recover() == 1
+    recovered = await workflows.execute(access, project.id, prepared.id)
+
+    assert recovered.status == "failed"
+    assert recovered.execution["error"] == {
+        "nodeId": "remote",
+        "code": "mcp_outcome_unknown",
+    }
+    assert gateway.calls == 1
 
 
 @pytest.mark.asyncio

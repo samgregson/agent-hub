@@ -127,9 +127,12 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "edges, and named outputs. Creating or revising a Workflow invokes the approval "
         "card automatically. Use prepare_project_workflow_run when the user wants "
         "to capture exact inputs for a Run, then execute_project_workflow_run to run "
-        "the graph. Both actions require an approval card. Python Functions run through "
+        "a prepared or recoverable interrupted graph. Both actions require an approval card. "
+        "Python Functions run through "
         "the host Python runner, and MCP nodes run through the Project-enabled Plugin "
-        "Gateway. Inspect the saved Run to report node outputs and failures.",
+        "Gateway. Completed nodes are reused on resume; an interrupted single MCP call "
+        "with unknown outcome is never dispatched again automatically. Inspect the saved "
+        "Run to report node outputs and failures.",
     )
 )
 
@@ -1218,7 +1221,7 @@ class PostgresDeepAgentRunner:
 
             @tool
             async def execute_project_workflow_run(run_id: str) -> str:
-                """After approval, execute a prepared Python and MCP Workflow Run."""
+                """After approval, execute or resume a recoverable Workflow Run."""
                 run = await workflow_runs.execute(
                     access,
                     project_id,

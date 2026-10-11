@@ -5,7 +5,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol
-from uuid import uuid4
+from uuid import UUID, uuid4, uuid5
 
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from jsonschema import ValidationError as JsonSchemaValidationError
@@ -64,6 +64,7 @@ class WorkflowRunStore(Protocol):
     async def by_key(self, project_id: str, key: str) -> WorkflowRun | None: ...
     async def list(self, project_id: str, workflow_id: str) -> Sequence[WorkflowRun]: ...
     async def update(self, run: WorkflowRun, expected_status: str) -> WorkflowRun | None: ...
+    async def interrupt_running(self) -> int: ...
 
 
 class MemoryWorkflowRunStore:
@@ -108,6 +109,14 @@ class MemoryWorkflowRunStore:
         self._items[key] = run
         return run
 
+    async def interrupt_running(self) -> int:
+        interrupted = 0
+        for key, run in tuple(self._items.items()):
+            if run.status == "running":
+                self._items[key] = replace(run, status="interrupted")
+                interrupted += 1
+        return interrupted
+
 
 class WorkflowRunModule:
     """Capture a checked Definition and source values before dispatch begins."""
@@ -125,6 +134,10 @@ class WorkflowRunModule:
         self._transforms = transforms
         self._gateway = gateway
         self._store = store
+
+    async def recover(self) -> int:
+        """Mark Runs left active by a stopped API process for guarded resumption."""
+        return await self._store.interrupt_running()
 
     async def prepare(
         self,
@@ -240,21 +253,22 @@ class WorkflowRunModule:
         *,
         initiation: TransformInitiation | None = None,
     ) -> WorkflowRun:
-        """Execute a Python-only DAG through the owning Transform Module."""
+        """Execute or safely resume a Workflow DAG through its owning Modules."""
         run = await self.load(access, project_id, run_id)
         if run.status == "succeeded":
             return run
-        if run.status != "prepared":
+        if run.status not in {"prepared", "interrupted"}:
             raise WorkflowRunConflict("Workflow Run is already executing or terminal.")
         graph_raw = run.snapshot.get("graph")
         if not isinstance(graph_raw, dict):
             raise WorkflowValidationError("Workflow Run graph snapshot is invalid.")
         graph = WorkflowGraph.from_json(json.dumps(graph_raw))
-        execution_start = replace(run, status="running", execution={"nodes": {}})
-        run = await self._replace(execution_start, "prepared")
+        expected_status = run.status
+        execution_nodes = dict(_mapping(run.execution.get("nodes")))
+        execution_start = replace(run, status="running", execution={"nodes": execution_nodes})
+        run = await self._replace(execution_start, expected_status)
         source_snapshots = _mapping(run.snapshot.get("sources"))
         node_outputs: dict[str, dict[str, object]] = {}
-        execution_nodes: dict[str, object] = {}
         for node in _topological_nodes(graph):
             if node.kind == "dataset":
                 source = _mapping(source_snapshots.get(node.id))
@@ -263,6 +277,12 @@ class WorkflowRunModule:
                     return await self._fail(run, execution_nodes, node.id, "source_snapshot")
                 values = [_mapping(record).get("value") for record in records]
                 node_outputs[node.id] = {"records": values}
+                continue
+            previous = _mapping(execution_nodes.get(node.id))
+            if previous.get("status") == "succeeded":
+                if "output" not in previous:
+                    return await self._fail(run, execution_nodes, node.id, "checkpoint_output")
+                node_outputs[node.id] = {"result": previous["output"]}
                 continue
             edges = [edge for edge in graph.edges if edge.target_node == node.id]
             inputs: dict[str, object] = {}
@@ -307,9 +327,34 @@ class WorkflowRunModule:
                 ):
                     return await self._fail(run, execution_nodes, node.id, "map_input")
                 records = _source_records_for_edge(graph, source_snapshots, edges[0])
-                item_results: list[dict[str, object]] = []
+                item_results = _indexed_progress(previous.get("items"))
                 results: list[object] = []
                 for index, item in enumerate(items):
+                    saved_item = item_results.get(index)
+                    if saved_item is not None and saved_item.get("status") == "succeeded":
+                        if "output" not in saved_item:
+                            return await self._fail(
+                                run, execution_nodes, node.id, "checkpoint_output"
+                            )
+                        results.append(saved_item["output"])
+                        continue
+                    item_identity = (
+                        _mapping(records[index]).get("id")
+                        if records is not None and index < len(records)
+                        else f"{edges[0].source_node}:{index}"
+                    )
+                    item_results[index] = {
+                        "index": index,
+                        "itemId": item_identity,
+                        "input": item,
+                        "status": "running",
+                    }
+                    execution_nodes[node.id] = {
+                        "status": "running",
+                        "inputs": inputs,
+                        "items": _ordered_items(item_results),
+                    }
+                    run = await self._save_progress(run, execution_nodes)
                     try:
                         child = await self._transforms.start_function_call(
                             access,
@@ -319,26 +364,25 @@ class WorkflowRunModule:
                             {},
                             expected_revision=int(node.version),
                             initiation=call_context,
+                            run_id=_child_run_id(run.id, node.id, index),
                         )
                     except (
                         TransformExecutionError,
                         TransformNotFound,
                         TransformValidationError,
                     ) as error:
-                        item_results.append(
-                            {
-                                "index": index,
-                                "input": item,
-                                "status": "failed",
-                                "error": error.code
-                                if isinstance(error, TransformExecutionError)
-                                else str(error),
-                            }
-                        )
+                        item_results[index] = {
+                            "index": index,
+                            "input": item,
+                            "status": "failed",
+                            "error": error.code
+                            if isinstance(error, TransformExecutionError)
+                            else str(error),
+                        }
                         execution_nodes[node.id] = {
                             "status": "failed",
                             "inputs": inputs,
-                            "items": item_results,
+                            "items": _ordered_items(item_results),
                         }
                         code = (
                             error.code
@@ -346,44 +390,42 @@ class WorkflowRunModule:
                             else "stale_target"
                         )
                         return await self._fail(run, execution_nodes, node.id, code)
-                    item_identity = (
-                        _mapping(records[index]).get("id")
-                        if records is not None and index < len(records)
-                        else f"{edges[0].source_node}:{index}"
-                    )
-                    item_results.append(
-                        {
-                            "index": index,
-                            "itemId": item_identity,
-                            "input": item,
-                            "status": child.status,
-                            "transformRunId": child.id,
-                            **({"output": child.output} if child.status == "succeeded" else {}),
-                            **({"error": child.error} if child.error else {}),
-                        }
-                    )
+                    item_results[index] = {
+                        "index": index,
+                        "itemId": item_identity,
+                        "input": item,
+                        "status": child.status,
+                        "transformRunId": child.id,
+                        **({"output": child.output} if child.status == "succeeded" else {}),
+                        **({"error": child.error} if child.error else {}),
+                    }
                     if child.status != "succeeded":
                         execution_nodes[node.id] = {
                             "status": "failed",
                             "inputs": inputs,
-                            "items": item_results,
+                            "items": _ordered_items(item_results),
                         }
                         return await self._fail(run, execution_nodes, node.id, "child_call_failed")
                     results.append(child.output)
                     execution_nodes[node.id] = {
                         "status": "running",
                         "inputs": inputs,
-                        "items": item_results,
+                        "items": _ordered_items(item_results),
                     }
                     run = await self._save_progress(run, execution_nodes)
                 node_outputs[node.id] = {"result": results}
                 execution_nodes[node.id] = {
                     "status": "succeeded",
                     "inputs": inputs,
-                    "items": item_results,
+                    "items": _ordered_items(item_results),
                     "output": results,
                 }
             else:
+                execution_nodes[node.id] = {
+                    "status": "running",
+                    "inputs": inputs,
+                }
+                run = await self._save_progress(run, execution_nodes)
                 try:
                     child = await self._transforms.start_function_call(
                         access,
@@ -393,6 +435,7 @@ class WorkflowRunModule:
                         {},
                         expected_revision=int(node.version),
                         initiation=call_context,
+                        run_id=_child_run_id(run.id, node.id),
                     )
                 except (
                     TransformExecutionError,
@@ -478,7 +521,15 @@ class WorkflowRunModule:
             execution_nodes[node.id] = {"status": "failed", "error": "stale_target"}
             return None, run, "stale_target"
 
+        previous = _mapping(execution_nodes.get(node.id))
         if node.shape == "single":
+            if previous.get("status") == "running":
+                execution_nodes[node.id] = {
+                    **previous,
+                    "status": "failed",
+                    "error": "mcp_outcome_unknown",
+                }
+                return None, run, "mcp_outcome_unknown"
             try:
                 Draft202012Validator(input_schema).validate(dict(inputs))
             except JsonSchemaValidationError:
@@ -545,17 +596,26 @@ class WorkflowRunModule:
             }
             return None, run, "map_input"
         records = _source_records_for_edge(graph, source_snapshots, edges[0])
-        item_results: list[dict[str, object]] = []
+        item_results = _indexed_progress(previous.get("items"))
         outputs: list[object] = []
         for index, item in enumerate(items):
+            saved_item = item_results.get(index)
+            if saved_item is not None and saved_item.get("status") == "succeeded":
+                if "output" not in saved_item:
+                    return None, run, "checkpoint_output"
+                outputs.append(saved_item["output"])
+                continue
             if not isinstance(item, Mapping):
-                item_results.append(
-                    {"index": index, "input": item, "status": "failed", "error": "map_input"}
-                )
+                item_results[index] = {
+                    "index": index,
+                    "input": item,
+                    "status": "failed",
+                    "error": "map_input",
+                }
                 execution_nodes[node.id] = {
                     "status": "failed",
                     "inputs": dict(inputs),
-                    "items": item_results,
+                    "items": _ordered_items(item_results),
                 }
                 return None, run, "map_input"
             item_identity = (
@@ -563,19 +623,17 @@ class WorkflowRunModule:
                 if records is not None and index < len(records)
                 else f"{node.id}:{index}"
             )
-            item_results.append(
-                {
-                    "index": index,
-                    "itemId": item_identity,
-                    "input": dict(item),
-                    "status": "running",
-                    "mcpCall": {"pluginId": plugin_id, "toolName": tool_name},
-                }
-            )
+            item_results[index] = {
+                "index": index,
+                "itemId": item_identity,
+                "input": dict(item),
+                "status": "running",
+                "mcpCall": {"pluginId": plugin_id, "toolName": tool_name},
+            }
             execution_nodes[node.id] = {
                 "status": "running",
                 "inputs": dict(inputs),
-                "items": item_results,
+                "items": _ordered_items(item_results),
             }
             run = await self._save_progress(run, execution_nodes)
             try:
@@ -608,29 +666,29 @@ class WorkflowRunModule:
                             code = ""
             if not code:
                 outputs.append(output)
-                item_results[-1] = {
-                    **item_results[-1],
+                item_results[index] = {
+                    **item_results[index],
                     "status": "succeeded",
                     "output": output,
                 }
                 execution_nodes[node.id] = {
                     "status": "running",
                     "inputs": dict(inputs),
-                    "items": item_results,
+                    "items": _ordered_items(item_results),
                 }
                 run = await self._save_progress(run, execution_nodes)
                 continue
-            item_results[-1] = {**item_results[-1], "status": "failed", "error": code}
+            item_results[index] = {**item_results[index], "status": "failed", "error": code}
             execution_nodes[node.id] = {
                 "status": "failed",
                 "inputs": dict(inputs),
-                "items": item_results,
+                "items": _ordered_items(item_results),
             }
             return None, run, code
         execution_nodes[node.id] = {
             "status": "succeeded",
             "inputs": dict(inputs),
-            "items": item_results,
+            "items": _ordered_items(item_results),
             "output": outputs,
         }
         return outputs, run, None
@@ -672,6 +730,28 @@ def _same_workflow(run: WorkflowRun, workflow_id: str) -> WorkflowRun:
 
 def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _indexed_progress(value: object) -> dict[int, dict[str, object]]:
+    if not isinstance(value, list):
+        return {}
+    result: dict[int, dict[str, object]] = {}
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        index = item.get("index")
+        if isinstance(index, int) and index >= 0:
+            result[index] = dict(item)
+    return result
+
+
+def _ordered_items(value: Mapping[int, dict[str, object]]) -> list[dict[str, object]]:
+    return [value[index] for index in sorted(value)]
+
+
+def _child_run_id(workflow_run_id: str, node_id: str, item_index: int | None = None) -> str:
+    identity = node_id if item_index is None else f"{node_id}:{item_index}"
+    return str(uuid5(UUID(workflow_run_id), identity))
 
 
 def _topological_nodes(graph: WorkflowGraph) -> tuple[WorkflowNode, ...]:

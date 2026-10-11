@@ -110,6 +110,15 @@ class PostgresWorkflowRunStore:
                 return None
         return run
 
+    async def interrupt_running(self) -> int:
+        """Reclassify work left active when the API process stopped."""
+        connection = await self._connect()
+        async with connection:
+            cursor = await connection.execute(
+                "UPDATE workflow_runs SET status='interrupted' WHERE status='running'"
+            )
+            return cursor.rowcount
+
 
 def _from_row(row: Mapping[str, object]) -> WorkflowRun:
     raw = row["snapshot"]

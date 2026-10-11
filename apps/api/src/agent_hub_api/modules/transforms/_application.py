@@ -277,6 +277,7 @@ class TransformRunner(Protocol):
 
 class TransformRunStore(Protocol):
     async def create(self, run: TransformRun) -> TransformRun: ...
+    async def create_or_load(self, run: TransformRun) -> tuple[TransformRun, bool]: ...
     async def complete(self, run: TransformRun) -> TransformRun: ...
     async def load(self, project_id: str, run_id: str) -> TransformRun | None: ...
     async def list(
@@ -554,6 +555,7 @@ class TransformModule:
         *,
         expected_revision: int,
         initiation: TransformInitiation | None = None,
+        run_id: str | None = None,
     ) -> TransformRun:
         """Run one reviewed Python Function call through the Transform runner."""
         if expected_revision < 1:
@@ -568,6 +570,7 @@ class TransformModule:
             selection_snapshot=None,
             expected_revision=expected_revision,
             resolved_inputs=inputs,
+            run_id=run_id,
         )
 
     async def plan_dataset_selection(
@@ -774,6 +777,7 @@ class TransformModule:
         selection_snapshot: Mapping[str, object] | None,
         expected_revision: int | None,
         resolved_inputs: Mapping[str, object] | None = None,
+        run_id: str | None = None,
     ) -> TransformRun:
         definition = await self.load(access, project_id, definition_id)
         if expected_revision is not None and definition.revision != expected_revision:
@@ -798,63 +802,76 @@ class TransformModule:
         input_bytes = _canonical({"inputs": inputs, "parameters": parameter_values})
         now = datetime.now(UTC)
         context = initiation or TransformInitiation("directUser", "notRequired")
-        run = await self._run_store.create(
-            TransformRun(
-                id=str(uuid4()),
-                project_id=project_id,
-                definition_id=definition_id,
-                status="running",
-                definition_snapshot={
-                    "name": definition.name,
-                    "source": definition.source,
-                    "input_selectors": dict(definition.input_selectors),
-                    "output_schema": dict(definition.output_schema),
-                    "revision": definition.revision,
-                    "runtime": identity.runtime,
-                    "package_hash": identity.package_hash,
-                    **({"callKind": "pythonFunction"} if resolved_inputs is not None else {}),
-                    **(
-                        {
-                            "review": call_review(
-                                target_kind="python",
-                                target_id=definition.id,
-                                target_version=definition.revision,
-                                target_name=definition.name,
-                                shape="single",
-                                source={"kind": "direct"},
-                                input_ports={name: {} for name in definition.input_selectors},
-                                output_schema=definition.output_schema,
-                                bindings=[{"inputs": _snapshot_value(inputs)}],
-                                max_invocations=1,
-                                output_kind="transformRun",
-                            )
-                        }
-                        if resolved_inputs is not None
-                        else {}
-                    ),
-                    **({"selection": dict(selection_snapshot)} if selection_snapshot else {}),
-                },
-                inputs=inputs,
-                parameters=parameter_values,
-                input_hash=hashlib.sha256(input_bytes).hexdigest(),
-                source_hash=definition.source_hash,
-                runtime=identity.runtime,
-                package_hash=identity.package_hash,
-                output=None,
-                output_manifest={},
-                error=None,
-                initiator_subject=access.subject,
-                initiation={
-                    "kind": context.kind,
-                    "approval": context.approval,
-                    "threadId": context.thread_id,
-                    "agentRunId": context.agent_run_id,
-                },
-                limits=dict(identity.limits),
-                created_at=now,
-                completed_at=None,
-            )
+        candidate = TransformRun(
+            id=run_id or str(uuid4()),
+            project_id=project_id,
+            definition_id=definition_id,
+            status="running",
+            definition_snapshot={
+                "name": definition.name,
+                "source": definition.source,
+                "input_selectors": dict(definition.input_selectors),
+                "output_schema": dict(definition.output_schema),
+                "revision": definition.revision,
+                "runtime": identity.runtime,
+                "package_hash": identity.package_hash,
+                **({"callKind": "pythonFunction"} if resolved_inputs is not None else {}),
+                **(
+                    {
+                        "review": call_review(
+                            target_kind="python",
+                            target_id=definition.id,
+                            target_version=definition.revision,
+                            target_name=definition.name,
+                            shape="single",
+                            source={"kind": "direct"},
+                            input_ports={name: {} for name in definition.input_selectors},
+                            output_schema=definition.output_schema,
+                            bindings=[{"inputs": _snapshot_value(inputs)}],
+                            max_invocations=1,
+                            output_kind="transformRun",
+                        )
+                    }
+                    if resolved_inputs is not None
+                    else {}
+                ),
+                **({"selection": dict(selection_snapshot)} if selection_snapshot else {}),
+            },
+            inputs=inputs,
+            parameters=parameter_values,
+            input_hash=hashlib.sha256(input_bytes).hexdigest(),
+            source_hash=definition.source_hash,
+            runtime=identity.runtime,
+            package_hash=identity.package_hash,
+            output=None,
+            output_manifest={},
+            error=None,
+            initiator_subject=access.subject,
+            initiation={
+                "kind": context.kind,
+                "approval": context.approval,
+                "threadId": context.thread_id,
+                "agentRunId": context.agent_run_id,
+            },
+            limits=dict(identity.limits),
+            created_at=now,
+            completed_at=None,
         )
+        if run_id is None:
+            run = await self._run_store.create(candidate)
+        else:
+            run, created = await self._run_store.create_or_load(candidate)
+            if not created:
+                if (
+                    run.definition_id != definition_id
+                    or run.source_hash != candidate.source_hash
+                    or run.input_hash != candidate.input_hash
+                    or dict(run.parameters) != dict(candidate.parameters)
+                ):
+                    raise TransformExecutionError("run_id_conflict")
+                if run.status != "running":
+                    return run
+                raise TransformExecutionError("run_in_progress")
         try:
             output, runtime = await self._runner.execute(
                 definition.source, inputs, parameter_values
@@ -1083,6 +1100,14 @@ class MemoryTransformRunStore:
     async def create(self, run: TransformRun) -> TransformRun:
         self._runs[(run.project_id, run.id)] = run
         return run
+
+    async def create_or_load(self, run: TransformRun) -> tuple[TransformRun, bool]:
+        key = (run.project_id, run.id)
+        existing = self._runs.get(key)
+        if existing is not None:
+            return existing, False
+        self._runs[key] = run
+        return run, True
 
     async def complete(self, run: TransformRun) -> TransformRun:
         key = (run.project_id, run.id)
