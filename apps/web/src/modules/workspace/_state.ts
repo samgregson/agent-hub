@@ -6,6 +6,7 @@ interface FileProposal {
 }
 
 export const activityViews = [
+  "workflows",
   "chats",
   "artifacts",
   "operations",

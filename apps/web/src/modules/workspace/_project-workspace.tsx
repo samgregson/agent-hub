@@ -47,8 +47,10 @@ import {
   workspaceReducer,
 } from "./_state";
 import { LibraryCatalog } from "./_library-catalog";
+import { WorkflowOverview } from "@/modules/workflows";
 
 const activityLabels = {
+  workflows: "Workflow",
   artifacts: "Library",
   chats: "Chats",
   operations: "Operations",
@@ -103,6 +105,10 @@ export function ProjectWorkspace() {
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const newProjectNameInput = useRef<HTMLInputElement>(null);
   const projectPicker = useRef<HTMLSelectElement>(null);
+  const workflowAvailabilityByProject = useRef(
+    new Map<string, Promise<boolean>>(),
+  );
+  const userSelectedActivityProjects = useRef(new Set<string>());
 
   useEffect(() => {
     let active = true;
@@ -132,6 +138,7 @@ export function ProjectWorkspace() {
   const isExplorerActivity = ["operations", "plugins", "sources"].includes(
     selectedActivity,
   );
+  const isWorkflowActivity = selectedActivity === "workflows";
   const selectedThreads = workspace.selectedProjectId
     ? (threadsByProject[workspace.selectedProjectId] ?? [])
     : [];
@@ -140,10 +147,48 @@ export function ProjectWorkspace() {
   );
   const selectedThreadId = selectedWorkspace?.selectedThreadId;
   const selectedThreadIdRef = useRef(selectedThreadId);
+  const selectedProjectIdRef = useRef(workspace.selectedProjectId);
 
   useEffect(() => {
     selectedThreadIdRef.current = selectedThreadId;
   }, [selectedThreadId]);
+
+  useEffect(() => {
+    selectedProjectIdRef.current = workspace.selectedProjectId;
+  }, [workspace.selectedProjectId]);
+
+  useEffect(() => {
+    const projectId = workspace.selectedProjectId;
+    if (!projectId) return;
+    let availability = workflowAvailabilityByProject.current.get(projectId);
+    if (!availability) {
+      availability = fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/workflows`,
+        { cache: "no-store" },
+      )
+        .then(async (response) => {
+          if (!response.ok) return false;
+          const workflows = (await response.json()) as unknown[];
+          return workflows.length > 0;
+        })
+        .catch(() => false);
+      workflowAvailabilityByProject.current.set(projectId, availability);
+    }
+    let active = true;
+    void availability.then((hasWorkflows) => {
+      if (
+        active &&
+        hasWorkflows &&
+        selectedProjectIdRef.current === projectId &&
+        !userSelectedActivityProjects.current.has(projectId)
+      ) {
+        dispatch({ activity: "workflows", type: "selectActivity" });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [workspace.selectedProjectId]);
 
   useEffect(() => {
     if (!workspace.selectedProjectId) return;
@@ -267,6 +312,8 @@ export function ProjectWorkspace() {
   }
 
   function handleSelectActivity(activity: ActivityView) {
+    const projectId = workspace.selectedProjectId;
+    if (projectId) userSelectedActivityProjects.current.add(projectId);
     dispatch({ activity, type: "selectActivity" });
   }
 
@@ -302,7 +349,7 @@ export function ProjectWorkspace() {
 
   return (
     <main
-      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""}`}
+      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""} ${isWorkflowActivity ? styles.workflowOpen : ""}`}
     >
       <header className={styles.titlebar}>
         <span aria-hidden="true" className={styles.mark}>
@@ -417,7 +464,7 @@ export function ProjectWorkspace() {
             className={styles.railButton}
             disabled={!selectedProject}
             key={view}
-            onClick={() => dispatch({ activity: view, type: "selectActivity" })}
+            onClick={() => handleSelectActivity(view)}
             title={activityLabels[view]}
             type="button"
           >
@@ -538,7 +585,14 @@ export function ProjectWorkspace() {
       ) : null}
 
       <section className={styles.chat}>
-        {selectedProject && selectedThread && selectedActivity === "chats" ? (
+        {selectedProject && selectedActivity === "workflows" ? (
+          <WorkflowOverview
+            onOpenChats={() => handleSelectActivity("chats")}
+            projectId={selectedProject.id}
+          />
+        ) : selectedProject &&
+          selectedThread &&
+          selectedActivity === "chats" ? (
           <AgentChat
             key={selectedThread.id}
             onOpenFileProposal={(proposal) =>

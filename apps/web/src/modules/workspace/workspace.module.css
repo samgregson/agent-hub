@@ -208,6 +208,20 @@
   overflow: auto;
 }
 
+.shell.workflowOpen {
+  grid-template-areas: "title title" "rail chat";
+  grid-template-columns: 112px minmax(0, 1fr);
+}
+
+.shell.workflowOpen .navigator,
+.shell.workflowOpen .artifact {
+  display: none;
+}
+
+.shell.workflowOpen .chat {
+  min-height: 0;
+}
+
 .navigator {
   grid-area: navigator;
   min-width: 0;

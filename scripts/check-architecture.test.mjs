@@ -23,6 +23,9 @@ test("architecture gate rejects API and web Module import cycles", async () => {
         recursive: true,
       },
     );
+    await mkdir(join(fixture, "apps/api/src/agent_hub_api/modules/datasets"), {
+      recursive: true,
+    });
     await mkdir(
       join(fixture, "apps/api/src/agent_hub_api/modules/input_selection"),
       {
@@ -73,6 +76,7 @@ test("architecture gate rejects API and web Module import cycles", async () => {
       'import { first } from "@/modules/first";\n',
     );
 
+    let diagnostics = "";
     assert.throws(
       () =>
         execFileSync(
@@ -84,21 +88,26 @@ test("architecture gate rejects API and web Module import cycles", async () => {
           },
         ),
       (error) => {
-        assert.match(
-          error.stderr,
-          /API Module import cycle:.*batch_execution.*transforms/,
-        );
-        assert.match(error.stderr, /web Module import cycle:.*first.*second/);
-        assert.match(
-          error.stderr,
-          /Input Selection must not import source or execution Modules/,
-        );
-        assert.match(
-          error.stderr,
-          /imports private implementation of Module 'datasets'/,
-        );
+        diagnostics = [
+          String(error.stdout),
+          String(error.stderr),
+          String(error.message),
+        ].join("\n");
         return true;
       },
+    );
+    assert.match(
+      diagnostics,
+      /API Module import cycle:.*batch_execution.*transforms/,
+    );
+    assert.match(diagnostics, /web Module import cycle:.*first.*second/);
+    assert.match(
+      diagnostics,
+      /Input Selection must not import source or execution Modules/,
+    );
+    assert.match(
+      diagnostics,
+      /imports private implementation of Module 'datasets'/,
     );
   } finally {
     await rm(fixture, { recursive: true, force: true });

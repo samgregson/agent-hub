@@ -193,9 +193,7 @@ class WorkflowRunModule:
                         project_id, _project_file_path(node.ref_id)
                     )
                 except ProjectFileError as error:
-                    raise WorkflowValidationError(
-                        "Project File input is unavailable."
-                    ) from error
+                    raise WorkflowValidationError("Project File input is unavailable.") from error
                 if file.version != node.version:
                     raise WorkflowValidationError(
                         "Project File version changed; review the Workflow again."
@@ -498,9 +496,7 @@ class WorkflowRunModule:
                         "input": item,
                         "status": "failed",
                         "error": (
-                            error.code
-                            if isinstance(error, TransformExecutionError)
-                            else str(error)
+                            error.code if isinstance(error, TransformExecutionError) else str(error)
                         ),
                     }
                     execution_nodes[node.id] = {
@@ -509,10 +505,14 @@ class WorkflowRunModule:
                         "items": _ordered_items(item_results),
                     }
                     await checkpoint()
-                    return index, None, (
-                        error.code
-                        if isinstance(error, TransformExecutionError)
-                        else "stale_target"
+                    return (
+                        index,
+                        None,
+                        (
+                            error.code
+                            if isinstance(error, TransformExecutionError)
+                            else "stale_target"
+                        ),
                     )
                 item_results[index] = {
                     "index": index,
@@ -548,9 +548,7 @@ class WorkflowRunModule:
                     raise item_result
             errors: list[str] = []
             for item_result in item_results_by_index:
-                index, output, error_code = cast(
-                    tuple[int, object | None, str | None], item_result
-                )
+                index, output, error_code = cast(tuple[int, object | None, str | None], item_result)
                 if error_code is not None:
                     errors.append(error_code)
                 else:
@@ -681,9 +679,7 @@ class WorkflowRunModule:
             await checkpoint()
             try:
                 async with call_semaphore:
-                    result = await gateway.call(
-                        access, project_id, plugin_id, tool_name, inputs
-                    )
+                    result = await gateway.call(access, project_id, plugin_id, tool_name, inputs)
             except (
                 PluginCallLimitExceeded,
                 PluginNotAvailable,
@@ -749,9 +745,7 @@ class WorkflowRunModule:
                 continue
             pending_items.append((index, item))
 
-        async def execute_item(
-            index: int, item: object
-        ) -> tuple[int, object | None, str | None]:
+        async def execute_item(index: int, item: object) -> tuple[int, object | None, str | None]:
             if not isinstance(item, Mapping):
                 item_results[index] = {
                     "index": index,

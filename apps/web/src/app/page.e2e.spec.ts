@@ -130,6 +130,225 @@ test("project creation is unavailable before the workspace hydrates", async ({
   await context.close();
 });
 
+test("Project Workflow overview shows final outputs and inspectable DAG lineage", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-01T00:00:00.000Z",
+    id: "project-workflow",
+    name: "Design review",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+  };
+  const workflow = {
+    id: "workflow-review",
+    name: "Design review",
+    version: 3,
+    graph: {
+      nodes: [
+        { id: "inputs", kind: "dataset", refId: "loads", version: 2 },
+        {
+          id: "screen",
+          kind: "python",
+          refId: "filter-function",
+          version: 1,
+          shape: "map",
+        },
+        {
+          id: "calculate",
+          kind: "mcp",
+          refId: "calculation-plugin",
+          version: "0.4.0",
+          toolName: "calculate",
+        },
+        {
+          id: "summarize",
+          kind: "python",
+          refId: "summary-function",
+          version: 2,
+        },
+        { id: "report", kind: "python", refId: "report-function", version: 1 },
+      ],
+      edges: [
+        {
+          sourceNode: "inputs",
+          sourcePort: "records",
+          targetNode: "screen",
+          targetPort: "items",
+        },
+        {
+          sourceNode: "screen",
+          sourcePort: "result",
+          targetNode: "calculate",
+          targetPort: "record",
+        },
+        {
+          sourceNode: "screen",
+          sourcePort: "result",
+          targetNode: "summarize",
+          targetPort: "records",
+        },
+        {
+          sourceNode: "calculate",
+          sourcePort: "result",
+          targetNode: "report",
+          targetPort: "check",
+        },
+        {
+          sourceNode: "summarize",
+          sourcePort: "result",
+          targetNode: "report",
+          targetPort: "summary",
+        },
+      ],
+      outputs: [{ name: "Review", node: "report", port: "result" }],
+    },
+  };
+  const run = {
+    id: "workflow-run-2",
+    workflowId: workflow.id,
+    definitionVersion: 3,
+    status: "succeeded",
+    snapshot: {
+      graph: workflow.graph,
+      sources: {
+        inputs: {
+          datasetId: "loads",
+          version: 2,
+          records: [{ id: "LC-1", position: 0, value: { load: 12.5 } }],
+        },
+      },
+      targets: {
+        screen: {
+          definitionId: "filter-function",
+          revision: 1,
+          source: "def transform(record, parameters): return record",
+        },
+      },
+    },
+    execution: {
+      outputs: {
+        Review: { checked: 1, passed: 1 },
+      },
+      nodes: {
+        screen: {
+          status: "succeeded",
+          inputs: { items: [{ id: "LC-1", load: 12.5 }] },
+          output: [{ id: "LC-1", load: 12.5 }],
+        },
+        calculate: {
+          status: "succeeded",
+          inputs: { record: { id: "LC-1", load: 12.5 } },
+          output: { id: "LC-1", pass: true },
+        },
+        summarize: {
+          status: "succeeded",
+          inputs: { records: [{ id: "LC-1", pass: true }] },
+          output: { checked: 1, passed: 1 },
+        },
+        report: {
+          status: "succeeded",
+          inputs: {
+            check: { id: "LC-1", pass: true },
+            summary: { checked: 1, passed: 1 },
+          },
+          output: { checked: 1, passed: 1 },
+        },
+      },
+    },
+    initiatorSubject: "owner",
+    createdAt: "2026-10-11T09:00:00.000Z",
+  };
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
+    await route.fulfill({ json: [workflow] });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/workflows/${workflow.id}/runs`,
+    async (route) => {
+      await route.fulfill({ json: [run] });
+    },
+  );
+  let preparedRequest: Record<string, unknown> | undefined;
+  await page.route(
+    `**/api/projects/${project.id}/workflows/${workflow.id}/runs/prepare`,
+    async (route) => {
+      preparedRequest = route.request().postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      await route.fulfill({
+        json: { ...run, id: "workflow-run-prepared", status: "prepared" },
+        status: 201,
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/workflows/${workflow.id}/runs/workflow-run-prepared/execute`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          ...run,
+          id: "workflow-run-3",
+          createdAt: "2026-10-11T10:00:00.000Z",
+        },
+      });
+    },
+  );
+
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { name: workflow.name }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Workflow outputs" }),
+  ).toContainText('"checked": 1');
+  await expect(
+    page.getByRole("region", { name: "Workflow graph" }),
+  ).toContainText("Map");
+  await page.getByRole("button", { name: "Inspect screen" }).click();
+  await expect(
+    page.getByRole("region", { name: "Node lineage" }),
+  ).toContainText("LC-1");
+  await expect(
+    page.getByRole("region", { name: "Node lineage" }),
+  ).toContainText("Inputs");
+  await expect(
+    page.getByRole("region", { name: "Node lineage" }),
+  ).toContainText("filter-function");
+  await page.getByRole("button", { name: "Run Workflow" }).click();
+  await expect.poll(() => preparedRequest?.expectedVersion).toBe(3);
+  expect(preparedRequest?.idempotencyKey).toEqual(expect.any(String));
+  await expect(
+    page.getByRole("region", { name: "Workflow outputs" }),
+  ).toContainText('"passed": 1');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page.getByRole("region", { name: "Workflow outputs" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Workflow graph" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("list", { name: "Workflow dependencies" }),
+  ).toContainText("calculate");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth === window.innerWidth,
+      ),
+    )
+    .toBe(true);
+});
+
 test("Datasets are created and deleted through Library commands", async ({
   page,
 }) => {
