@@ -10,6 +10,7 @@ from agent_hub_api.modules.workflows import (
     WorkflowNode,
     WorkflowOutput,
     create_postgres_workflow_module,
+    create_postgres_workflow_run_module,
 )
 from agent_hub_api.settings import Settings
 
@@ -35,6 +36,7 @@ async def test_workflow_definition_round_trips_through_postgres() -> None:
     datasets = create_postgres_dataset_module(settings, projects, Schemas())
     transforms = create_postgres_transform_module(settings, projects)
     workflows = create_postgres_workflow_module(settings, projects, datasets, transforms, None)
+    runs = create_postgres_workflow_run_module(settings, workflows, datasets, transforms, None)
     project = await projects.create(access, "Workflow integration")
     try:
         dataset = await datasets.create_dataset(
@@ -46,6 +48,16 @@ async def test_workflow_definition_round_trips_through_postgres() -> None:
             (WorkflowOutput("records", "source", "records"),),
         )
         saved = await workflows.create(access, project.id, "Inspection", graph)
+        prepared = await runs.prepare(
+            access, project.id, saved.id, "integration-request", expected_version=1
+        )
+        assert (await runs.load(access, project.id, prepared.id)) == prepared
+        assert (
+            await runs.prepare(
+                access, project.id, saved.id, "integration-request", expected_version=1
+            )
+        ) == prepared
+        assert [run.id for run in await runs.list(access, project.id, saved.id)] == [prepared.id]
         assert await workflows.load(access, project.id, saved.id) == saved
         assert [item.id for item in await workflows.list(access, project.id)] == [saved.id]
         revised = await workflows.revise(

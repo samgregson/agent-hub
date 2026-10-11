@@ -33,7 +33,12 @@ from agent_hub_api.modules.transforms import (
     TransformInitiation,
     TransformModule,
 )
-from agent_hub_api.modules.workflows import MemoryWorkflowStore, WorkflowDefinitionModule
+from agent_hub_api.modules.workflows import (
+    MemoryWorkflowRunStore,
+    MemoryWorkflowStore,
+    WorkflowDefinitionModule,
+    WorkflowRunModule,
+)
 
 
 def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:
@@ -97,12 +102,16 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
+    transforms = TransformModule(projects, MemoryTransformStore())
     workflows = WorkflowDefinitionModule(
         projects,
         datasets,
-        TransformModule(projects, MemoryTransformStore()),
+        transforms,
         None,
         MemoryWorkflowStore(),
+    )
+    workflow_runs = WorkflowRunModule(
+        workflows, datasets, transforms, None, MemoryWorkflowRunStore()
     )
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
@@ -110,6 +119,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     runner._project_files = cast(Any, object())
     runner._plugin_gateway = None
     runner._workflows = workflows
+    runner._workflow_runs = workflow_runs
     runner._settings = cast(
         Any, SimpleNamespace(agent_recursion_limit=10, enable_foundation_test_tool=False)
     )
@@ -126,6 +136,10 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         "reject",
     ]
     assert captured["interrupt_on"]["revise_project_workflow"]["allowed_decisions"] == [
+        "approve",
+        "reject",
+    ]
+    assert captured["interrupt_on"]["prepare_project_workflow_run"]["allowed_decisions"] == [
         "approve",
         "reject",
     ]
@@ -154,6 +168,20 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         )
     )
     assert loaded["graph"]["outputs"][0]["name"] == "records"
+    prepared = json.loads(
+        await tools["prepare_project_workflow_run"].ainvoke(
+            {
+                "workflow_id": created["id"],
+                "expected_version": 1,
+                "idempotency_key": "agent-request-1",
+            }
+        )
+    )
+    assert prepared["status"] == "prepared"
+    inspected = json.loads(
+        await tools["load_project_workflow_run"].ainvoke({"run_id": prepared["id"]})
+    )
+    assert inspected["snapshot"]["sources"]["source"]["records"][0]["value"] == {"value": 2}
 
 
 @pytest.mark.asyncio

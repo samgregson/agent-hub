@@ -24,6 +24,7 @@ from ._application import (
     WorkflowValidationError,
     WorkflowVersionConflict,
 )
+from ._runs import WorkflowRun, WorkflowRunConflict, WorkflowRunModule
 
 
 class _Model(BaseModel):
@@ -73,6 +74,21 @@ class WorkflowResponse(_Model):
     updated_at: datetime
 
 
+class PrepareRunRequest(_Model):
+    idempotency_key: str = Field(min_length=1, max_length=120)
+    expected_version: int = Field(ge=1)
+
+
+class WorkflowRunResponse(_Model):
+    id: str
+    workflow_id: str
+    definition_version: int
+    status: str
+    snapshot: dict[str, object]
+    initiator_subject: str
+    created_at: datetime
+
+
 def _graph(value: GraphModel) -> WorkflowGraph:
     return WorkflowGraph.from_json(value.model_dump_json(by_alias=False))
 
@@ -88,8 +104,22 @@ def _response(value: WorkflowDefinition) -> WorkflowResponse:
     )
 
 
+def _run_response(value: WorkflowRun) -> WorkflowRunResponse:
+    return WorkflowRunResponse(
+        id=value.id,
+        workflow_id=value.workflow_id,
+        definition_version=value.definition_version,
+        status=value.status,
+        snapshot=dict(value.snapshot),
+        initiator_subject=value.initiator_subject,
+        created_at=value.created_at,
+    )
+
+
 def create_workflow_router(
-    identity: IdentityModule, workflows: WorkflowDefinitionModule
+    identity: IdentityModule,
+    workflows: WorkflowDefinitionModule,
+    runs: WorkflowRunModule | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}/workflows", tags=["workflows"])
 
@@ -168,5 +198,58 @@ def create_workflow_router(
         except WorkflowValidationError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         return _response(item)
+
+    if runs is not None:
+
+        @router.post(
+            "/{workflow_id}/runs/prepare",
+            response_model=WorkflowRunResponse,
+            status_code=status.HTTP_201_CREATED,
+        )
+        async def prepare_run(
+            project_id: str,
+            workflow_id: str,
+            body: PrepareRunRequest,
+            request_context: Context,
+        ) -> WorkflowRunResponse:
+            try:
+                item = await runs.prepare(
+                    ProjectAccess(request_context.subject),
+                    project_id,
+                    workflow_id,
+                    body.idempotency_key,
+                    expected_version=body.expected_version,
+                )
+            except WorkflowNotFound as error:
+                raise HTTPException(status_code=404, detail="Workflow is unavailable.") from error
+            except WorkflowRunConflict as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            except WorkflowValidationError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            return _run_response(item)
+
+        @router.get("/{workflow_id}/runs", response_model=list[WorkflowRunResponse])
+        async def list_runs(
+            project_id: str, workflow_id: str, request_context: Context
+        ) -> list[WorkflowRunResponse]:
+            try:
+                items = await runs.list(
+                    ProjectAccess(request_context.subject), project_id, workflow_id
+                )
+            except WorkflowNotFound as error:
+                raise HTTPException(status_code=404, detail="Workflow is unavailable.") from error
+            return [_run_response(item) for item in items]
+
+        @router.get("/{workflow_id}/runs/{run_id}", response_model=WorkflowRunResponse)
+        async def load_run(
+            project_id: str, workflow_id: str, run_id: str, request_context: Context
+        ) -> WorkflowRunResponse:
+            try:
+                item = await runs.load(ProjectAccess(request_context.subject), project_id, run_id)
+                if item.workflow_id != workflow_id:
+                    raise WorkflowNotFound
+            except WorkflowNotFound as error:
+                raise HTTPException(status_code=404, detail="Run is unavailable.") from error
+            return _run_response(item)
 
     return router

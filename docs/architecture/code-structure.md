@@ -46,7 +46,7 @@ apps/api/src/agent_hub_api/
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
     transforms/                # Project Transform Definitions, previews, and durable Runs
-    workflows/                 # versioned Workflow Definitions and graph validation
+    workflows/                 # versioned Definitions, graph validation and prepared Run snapshots
     persistence/               # shared transaction and database facilities
 
 apps/transform-runner/         # isolated Deno/Pyodide execution service
@@ -111,7 +111,7 @@ The Operation Calls web Module owns the shared review/start presentation for dir
 
 The Call Review API Module defines the common read-only review envelope for those four call shapes. Transform and Batch Execution still own planning, submission, authorization, and execution; the envelope captures their target, source, named ports, exact bindings, invocation bound, output kind, and agent approval rule.
 
-The Workflow Module owns saved Project graph definitions, version checks, and static port/cardinality/cycle validation. It resolves Dataset, Function, and MCP target references through those Modules' Interfaces. Workflow execution and Runs are subsequent slices; call execution remains with Transform and Batch Execution.
+The Workflow Module owns saved Project graph definitions, version checks, and static port/cardinality/cycle validation. It resolves Dataset, Function, and MCP target references through those Modules' Interfaces. A prepared Workflow Run pins the exact graph, Dataset Record IDs and values, Function source and runtime identity, MCP schema and version, initiator, and request key. Preparation is idempotent and does not dispatch calls. Scheduling, child-call lineage, and terminal outputs are subsequent slices; call execution remains with Transform and Batch Execution.
 
 Next.js pages render the Workspace Interface. They do not accumulate fetching, selection state, panel coordination, or assistant-ui behaviour. Views, state transitions, hooks, and tests stay beside the Module that owns them. `shared/ui` contains only presentation primitives with no product vocabulary.
 

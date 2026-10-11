@@ -64,7 +64,11 @@ from agent_hub_api.modules.transforms import (
     TransformModule,
     TransformValidationError,
 )
-from agent_hub_api.modules.workflows import WorkflowDefinitionModule, WorkflowGraph
+from agent_hub_api.modules.workflows import (
+    WorkflowDefinitionModule,
+    WorkflowGraph,
+    WorkflowRunModule,
+)
 from agent_hub_api.settings import Settings
 
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
@@ -121,7 +125,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "load_project_workflow to inspect them, then create_project_workflow or "
         "revise_project_workflow for a user-requested change. The graph JSON has nodes, "
         "edges, and named outputs. Creating or revising a Workflow invokes the approval "
-        "card automatically. A saved Definition does not execute until a Workflow Run is started.",
+        "card automatically. Use prepare_project_workflow_run when the user wants "
+        "to capture exact inputs for a Run. Preparation requires an approval card and "
+        "does not execute the graph; do not claim it has run.",
     )
 )
 
@@ -174,6 +180,7 @@ class PostgresDeepAgentRunner:
         bindings: BindingModule | None = None,
         transform_inputs: TransformInputModule | None = None,
         workflows: WorkflowDefinitionModule | None = None,
+        workflow_runs: WorkflowRunModule | None = None,
     ) -> None:
         self._settings = settings
         self._project_files = project_files
@@ -185,6 +192,7 @@ class PostgresDeepAgentRunner:
         self._bindings = bindings
         self._transform_inputs = transform_inputs
         self._workflows = workflows
+        self._workflow_runs = workflow_runs
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
@@ -260,8 +268,9 @@ class PostgresDeepAgentRunner:
                 )
             )
         workflows = getattr(self, "_workflows", None)
+        workflow_runs = getattr(self, "_workflow_runs", None)
         if workflows is not None and subject is not None:
-            tools.extend(self._workflow_tools(workflows, project_id, subject))
+            tools.extend(self._workflow_tools(workflows, workflow_runs, project_id, subject))
         interrupt_on: dict[str, bool | InterruptOnConfig] = {}
         if self._settings.enable_foundation_test_tool:
             interrupt_on.update(
@@ -400,6 +409,11 @@ class PostgresDeepAgentRunner:
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Revise this Workflow Definition?",
             }
+            if workflow_runs is not None:
+                interrupt_on["prepare_project_workflow_run"] = {
+                    "allowed_decisions": ["approve", "reject"],
+                    "description": "Prepare this Workflow Run snapshot?",
+                }
         graph = create_deep_agent(
             model=self._model,
             tools=tools,
@@ -1103,7 +1117,10 @@ class PostgresDeepAgentRunner:
 
     @staticmethod
     def _workflow_tools(
-        workflows: WorkflowDefinitionModule, project_id: str, subject: str
+        workflows: WorkflowDefinitionModule,
+        workflow_runs: WorkflowRunModule | None,
+        project_id: str,
+        subject: str,
     ) -> list[BaseTool]:
         access = ProjectAccess(subject=subject)
 
@@ -1151,12 +1168,43 @@ class PostgresDeepAgentRunner:
             )
             return json.dumps({"id": item.id, "name": item.name, "version": item.version})
 
-        return [
+        tools: list[BaseTool] = [
             list_project_workflows,
             load_project_workflow,
             create_project_workflow,
             revise_project_workflow,
         ]
+        if workflow_runs is not None:
+
+            @tool
+            async def prepare_project_workflow_run(
+                workflow_id: str, expected_version: int, idempotency_key: str
+            ) -> str:
+                """After approval, capture a Workflow Run without executing its graph."""
+                run = await workflow_runs.prepare(
+                    access,
+                    project_id,
+                    workflow_id,
+                    idempotency_key,
+                    expected_version=expected_version,
+                )
+                return json.dumps(
+                    {
+                        "id": run.id,
+                        "workflowId": run.workflow_id,
+                        "status": run.status,
+                        "definitionVersion": run.definition_version,
+                    }
+                )
+
+            @tool
+            async def load_project_workflow_run(run_id: str) -> str:
+                """Inspect a prepared Workflow Run and its captured sources and targets."""
+                run = await workflow_runs.load(access, project_id, run_id)
+                return json.dumps({"id": run.id, "status": run.status, "snapshot": run.snapshot})
+
+            tools.extend([prepare_project_workflow_run, load_project_workflow_run])
+        return tools
 
     @staticmethod
     def _transform_tools(

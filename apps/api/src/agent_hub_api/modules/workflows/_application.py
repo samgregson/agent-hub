@@ -173,6 +173,15 @@ class WorkflowDefinitionModule:
         await self._authorize(access, project_id)
         return await self._store.list(project_id)
 
+    async def check_current(
+        self, access: ProjectAccess, project_id: str, definition: WorkflowDefinition
+    ) -> None:
+        """Recheck every pinned input and target before a Run captures them."""
+        await self._authorize(access, project_id)
+        if definition.project_id != project_id:
+            raise WorkflowNotFound
+        await self._validate(access, project_id, definition.graph)
+
     async def revise(
         self,
         access: ProjectAccess,
