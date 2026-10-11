@@ -790,6 +790,73 @@ test("navigator catalogs share collection typography at desktop and phone widths
   );
 });
 
+test("Project navigator can be resized with pointer and keyboard without narrow-screen overflow", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-24T00:00:00.000Z",
+    id: "resize-project",
+    name: "A project with a long name that stays inside the header",
+    updatedAt: "2026-09-24T00:00:00.000Z",
+  };
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+
+  await page.setViewportSize({ height: 900, width: 1440 });
+  await page.goto("/");
+  const separator = page.getByRole("separator", {
+    name: "Resize Project navigator",
+  });
+  const navigator = page.locator("aside").filter({ has: separator });
+  const initialWidth = (await navigator.boundingBox())?.width ?? 0;
+  await separator.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(separator).toHaveAttribute("aria-valuenow", "272");
+  const keyboardWidth = (await navigator.boundingBox())?.width ?? 0;
+  expect(keyboardWidth).toBeGreaterThan(initialWidth);
+
+  const bounds = await separator.boundingBox();
+  const navigatorBounds = await navigator.boundingBox();
+  if (!bounds) throw new Error("Navigator resize handle is not visible.");
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 40);
+  await page.mouse.down();
+  await page.mouse.move((navigatorBounds?.x ?? 0) + 440, bounds.y + 40, {
+    steps: 8,
+  });
+  await page.mouse.up();
+  await expect(separator).toHaveAttribute("aria-valuenow", "440");
+  await page.getByRole("button", { name: "Library", exact: true }).click();
+  await expect(navigator).toContainText("Library");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+
+  await page.setViewportSize({ height: 844, width: 390 });
+  await expect(separator).toBeHidden();
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Project navigation" }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
+    .toBe(true);
+});
+
 test("Library identifies Artifacts, Datasets, and Project Files without duplicates", async ({
   page,
 }) => {

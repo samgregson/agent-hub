@@ -1,7 +1,9 @@
 .shell {
   display: grid;
   grid-template-areas: "title title title title" "rail navigator chat artifact";
-  grid-template-columns: 112px 256px minmax(360px, 1.15fr) minmax(300px, 0.85fr);
+  grid-template-columns:
+    112px minmax(208px, min(var(--navigator-width, 256px), 34vw))
+    minmax(240px, 1.15fr) minmax(220px, 0.85fr);
   grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
   background: var(--background);
@@ -218,15 +220,51 @@
   display: none;
 }
 
+.shell.explorerOpen .navigatorResizeHandle,
+.shell.workflowOpen .navigatorResizeHandle {
+  display: none;
+}
+
 .shell.workflowOpen .chat {
   min-height: 0;
 }
 
 .navigator {
   grid-area: navigator;
+  position: relative;
   min-width: 0;
   overflow-x: hidden;
   border-right: 1px solid var(--line-subtle);
+}
+
+.navigatorResizeHandle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.navigatorResizeHandle::after {
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  content: "";
+}
+
+.navigatorResizeHandle:hover::after,
+.navigatorResizeHandle:focus-visible::after {
+  background: var(--accent);
+}
+
+.navigatorResizeHandle:focus-visible {
+  outline: none;
 }
 
 .operationTypes {
@@ -574,6 +612,10 @@
   .navigator,
   .artifact,
   .foundation {
+    display: none;
+  }
+
+  .navigatorResizeHandle {
     display: none;
   }
 

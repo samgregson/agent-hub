@@ -9,6 +9,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import type { CSSProperties } from "react";
 
 import {
   AgentChat,
@@ -98,6 +99,9 @@ export function ProjectWorkspace() {
   const [isCreating, setIsCreating] = useState(false);
   const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
+  const [navigatorWidth, setNavigatorWidth] = useState(256);
+  const isResizingNavigator = useRef(false);
+  const navigatorRef = useRef<HTMLElement>(null);
   const [autoNamingThreadIds, setAutoNamingThreadIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -242,6 +246,24 @@ export function ProjectWorkspace() {
     projectPicker.current?.focus();
   }
 
+  useEffect(() => {
+    function resize(event: MouseEvent) {
+      const navigator = navigatorRef.current;
+      if (!isResizingNavigator.current || !navigator) return;
+      const { left } = navigator.getBoundingClientRect();
+      setNavigatorWidth(Math.max(208, Math.min(480, event.clientX - left)));
+    }
+    function stopResizing() {
+      isResizingNavigator.current = false;
+    }
+    window.addEventListener("mousemove", resize);
+    window.addEventListener("mouseup", stopResizing);
+    return () => {
+      window.removeEventListener("mousemove", resize);
+      window.removeEventListener("mouseup", stopResizing);
+    };
+  }, []);
+
   async function handleCreateThread() {
     if (!workspace.selectedProjectId) return;
     setError(null);
@@ -350,6 +372,7 @@ export function ProjectWorkspace() {
   return (
     <main
       className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""} ${isWorkflowActivity ? styles.workflowOpen : ""}`}
+      style={{ "--navigator-width": `${navigatorWidth}px` } as CSSProperties}
     >
       <header className={styles.titlebar}>
         <span aria-hidden="true" className={styles.mark}>
@@ -473,7 +496,7 @@ export function ProjectWorkspace() {
         ))}
       </nav>
 
-      <aside className={styles.navigator}>
+      <aside className={styles.navigator} ref={navigatorRef}>
         <ProjectNavigator
           libraryRefreshKey={libraryRefreshKey}
           operationKind={selectedWorkspace?.operationKind ?? "batchDefinitions"}
@@ -502,6 +525,33 @@ export function ProjectWorkspace() {
           }
           threads={selectedThreads}
           transformRunScope={selectedWorkspace?.transformRunScope ?? null}
+        />
+        <div
+          aria-label="Resize Project navigator"
+          aria-orientation="vertical"
+          aria-valuemax={480}
+          aria-valuemin={208}
+          aria-valuenow={navigatorWidth}
+          className={styles.navigatorResizeHandle}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+              event.preventDefault();
+              setNavigatorWidth((current) =>
+                Math.max(
+                  208,
+                  Math.min(
+                    480,
+                    current + (event.key === "ArrowRight" ? 16 : -16),
+                  ),
+                ),
+              );
+            }
+          }}
+          onMouseDown={() => {
+            isResizingNavigator.current = true;
+          }}
+          role="separator"
+          tabIndex={0}
         />
       </aside>
 
