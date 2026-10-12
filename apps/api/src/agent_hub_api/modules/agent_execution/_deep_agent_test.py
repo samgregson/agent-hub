@@ -1046,12 +1046,21 @@ async def test_invalid_approved_transform_proposal_returns_actionable_tool_error
             transforms, project.id, access.subject, "thread-1", "run-1"
         )
     }
+    input_schema_json = json.dumps(
+        {
+            "type": "object",
+            "properties": {"record": {"type": "object"}},
+            "required": ["record"],
+            "additionalProperties": False,
+        }
+    )
 
     invalid_selectors = await tools["create_project_transform"].ainvoke(
         {
             "name": "Copy dataset records",
             "source": "export default function transform(record, parameters) { return record; }",
             "input_selectors_json": '[{"path":"$"}]',
+            "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )
@@ -1062,6 +1071,7 @@ async def test_invalid_approved_transform_proposal_returns_actionable_tool_error
             "name": "Copy dataset records",
             "source": "export default function transform(record, parameters) { return record; }",
             "input_selectors_json": '{"record":""}',
+            "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )
@@ -1073,6 +1083,7 @@ async def test_invalid_approved_transform_proposal_returns_actionable_tool_error
             "name": "Copy dataset records",
             "source": "def transform(inputs, parameters):\n    return dict(inputs['record'])\n",
             "input_selectors_json": '{"record":""}',
+            "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )
@@ -1087,6 +1098,7 @@ async def test_invalid_approved_transform_proposal_returns_actionable_tool_error
             "name": "Copy dataset records",
             "source": "export default function transform(record) { return record; }",
             "input_selectors_json": '{"record":""}',
+            "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )

@@ -278,7 +278,10 @@ class WorkflowDefinitionModule:
             if key in incoming:
                 raise WorkflowValidationError("A call input can have only one incoming edge.")
             if not _compatible(source_schema, target_schema):
-                raise WorkflowValidationError("Workflow edge has incompatible port shapes.")
+                raise WorkflowValidationError(
+                    f"Workflow has incompatible schemas for input "
+                    f"{edge.target_node}.{edge.target_port}."
+                )
             source_node = nodes[edge.source_node]
             target_node = nodes[edge.target_node]
             if source_node.kind == "dataset" and target_node.shape == "map":
@@ -370,18 +373,26 @@ class WorkflowDefinitionModule:
                 raise WorkflowValidationError(
                     "Function version changed; review the Workflow again."
                 )
-            names = tuple(definition.input_selectors)
+            properties = _schema_properties(definition.input_schema)
+            names = tuple(properties)
             if node.shape == "map" and len(names) != 1:
                 raise WorkflowValidationError("Mapped Python Function needs one named input.")
-            inputs: Mapping[str, Mapping[str, object]] = (
-                {"items": {"type": "array"}}
-                if node.shape == "map"
-                else {name: {} for name in names}
+            function_inputs: Mapping[str, Mapping[str, object]] = dict(properties)
+            if node.shape == "map":
+                only_property = properties[names[0]]
+                function_inputs = {"items": {"type": "array", "items": dict(only_property)}}
+            required_names = definition.input_schema.get("required", [])
+            if not isinstance(required_names, list) or not all(
+                isinstance(name, str) for name in required_names
+            ):
+                raise WorkflowValidationError("Python Function has invalid required inputs.")
+            function_required = (
+                frozenset({"items"}) if node.shape == "map" else frozenset(required_names)
             )
             output: Mapping[str, object] = dict(definition.output_schema)
             if node.shape == "map":
                 output = {"type": "array", "items": output}
-            return _Ports(inputs, frozenset(inputs), {"result": output})
+            return _Ports(function_inputs, function_required, {"result": output})
         if node.kind == "mcp":
             if self._gateway is None or not node.tool_name or not isinstance(node.version, str):
                 raise WorkflowValidationError("MCP tool node has an invalid reference.")
@@ -421,22 +432,22 @@ class WorkflowDefinitionModule:
                     {"result": {"type": "array", "items": dict(output_schema)}},
                     dict(input_schema),
                 )
-            properties = input_schema.get("properties", {})
-            if not isinstance(properties, Mapping):
+            mcp_properties = input_schema.get("properties", {})
+            if not isinstance(mcp_properties, Mapping):
                 raise WorkflowValidationError("MCP tool has no named input ports.")
-            inputs = {
+            mcp_inputs = {
                 name: schema
-                for name, schema in properties.items()
+                for name, schema in mcp_properties.items()
                 if isinstance(name, str) and isinstance(schema, Mapping)
             }
-            required = input_schema.get("required", [])
-            if not isinstance(required, list) or not all(
-                isinstance(name, str) for name in required
+            mcp_required = input_schema.get("required", [])
+            if not isinstance(mcp_required, list) or not all(
+                isinstance(name, str) for name in mcp_required
             ):
                 raise WorkflowValidationError("MCP tool has invalid required ports.")
-            if not set(required).issubset(inputs):
+            if not set(mcp_required).issubset(mcp_inputs):
                 raise WorkflowValidationError("MCP tool required port is not declared.")
-            return _Ports(inputs, frozenset(required), {"result": dict(output_schema)})
+            return _Ports(mcp_inputs, frozenset(mcp_required), {"result": dict(output_schema)})
         raise WorkflowValidationError("Workflow node kind is unknown.")
 
     async def _validate_mcp_maps(
@@ -518,13 +529,54 @@ def _project_file_path(value: str) -> str:
 
 
 def _compatible(source: Mapping[str, object], target: Mapping[str, object]) -> bool:
-    source_type = source.get("type")
-    target_type = target.get("type")
-    return (
-        not isinstance(source_type, str)
-        or not isinstance(target_type, str)
-        or source_type == target_type
-    )
+    source_types = _schema_types(source.get("type"))
+    target_types = _schema_types(target.get("type"))
+    if target_types and (
+        not source_types
+        or any(
+            source_type not in target_types
+            and not (source_type == "integer" and "number" in target_types)
+            for source_type in source_types
+        )
+    ):
+        return False
+    if "array" in (source_types or set()) and "array" in (target_types or set()):
+        source_items = source.get("items")
+        target_items = target.get("items")
+        if isinstance(target_items, Mapping) and (
+            not isinstance(source_items, Mapping) or not _compatible(source_items, target_items)
+        ):
+            return False
+    if "object" in (source_types or set()) and "object" in (target_types or set()):
+        source_properties = source.get("properties", {})
+        target_properties = target.get("properties", {})
+        if isinstance(source_properties, Mapping) and isinstance(target_properties, Mapping):
+            source_additional = source.get("additionalProperties", True)
+            target_required = target.get("required", [])
+            required_names = set(target_required) if isinstance(target_required, list) else set()
+            for name, target_property in target_properties.items():
+                source_property = source_properties.get(name)
+                if not isinstance(target_property, Mapping):
+                    continue
+                if isinstance(source_property, Mapping):
+                    if not _compatible(source_property, target_property):
+                        return False
+                elif (
+                    source_additional is False
+                    and name in required_names
+                    or isinstance(source_additional, Mapping)
+                    and not _compatible(source_additional, target_property)
+                ):
+                    return False
+    return True
+
+
+def _schema_types(value: object) -> set[str]:
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return set(value)
+    return set()
 
 
 def _has_cycle(dependencies: Mapping[str, set[str]]) -> bool:

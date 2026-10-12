@@ -28,6 +28,11 @@ async function prepareFunctionWorkbench(page: Page) {
           name: "Double load",
           source,
           inputSelectors: { load: "/load" },
+          inputSchema: {
+            type: "object",
+            properties: { load: { type: "number" } },
+            required: ["load"],
+          },
           outputSchema: { type: "object" },
           runtime: "deno:2.9.7;pyodide:314.0.7",
           packageHash: "package-hash",
@@ -157,4 +162,63 @@ test("Function preview workbench remains reachable at phone width", async ({
         document.documentElement.clientWidth,
     ),
   ).toBe(false);
+});
+
+test("new Function submissions include their named input schema", async ({
+  page,
+}) => {
+  await prepareFunctionWorkbench(page);
+  const surface = await openFunctions(page, false);
+  await surface.getByRole("button", { name: "New Function" }).click();
+  await surface.getByLabel("Name").fill("Read a load");
+  await surface.getByLabel("Input schema (JSON Schema)").fill(
+    JSON.stringify({
+      type: "object",
+      properties: { load: { type: "number", minimum: 0 } },
+      required: ["load"],
+      additionalProperties: false,
+    }),
+  );
+
+  let submitted: Record<string, unknown> | null = null;
+  await page.route(
+    `**/api/projects/${project.id}/transforms`,
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fulfill({ json: [] });
+        return;
+      }
+      submitted = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 201,
+        json: {
+          id: "function-new",
+          name: "Read a load",
+          source,
+          inputSelectors: { load: "/load" },
+          inputSchema: submitted.inputSchema,
+          outputSchema: { type: "object" },
+          runtime: "deno:2.9.7;pyodide:314.0.7",
+          packageHash: "package-hash",
+          sourceHash: "source-hash",
+          revision: 1,
+          createdAt: "2026-10-11T00:00:00Z",
+          updatedAt: "2026-10-11T00:00:00Z",
+        },
+      });
+    },
+  );
+  await surface.getByRole("button", { name: "Save Definition" }).click();
+  await expect(
+    surface.getByText("Read a load saved as revision 1.", { exact: true }),
+  ).toBeVisible();
+  expect(submitted).toMatchObject({
+    inputSelectors: { load: "/load" },
+    inputSchema: {
+      type: "object",
+      properties: { load: { type: "number", minimum: 0 } },
+      required: ["load"],
+      additionalProperties: false,
+    },
+  });
 });

@@ -218,6 +218,7 @@ class WorkflowRunModule:
                     "source": target.source,
                     "sourceHash": target.source_hash,
                     "inputNames": list(target.input_selectors),
+                    "inputSchema": target.input_schema,
                     "outputSchema": target.output_schema,
                     "runtime": target.runtime,
                     "packageHash": target.package_hash,

@@ -110,6 +110,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "input_selectors_json argument is a JSON object mapping input names to JSON "
         'pointers: {"record":""} selects the whole record and {"value":"/value"} '
         "selects one field. Each input name becomes a key in inputs. "
+        "input_schema_json is a JSON Schema object describing the named inputs object. "
+        "It must declare one property for every input selector; each property should specify "
+        "the JSON type and any useful constraints, plus required input names. "
         "output_schema_json is a JSON Schema object. To run a Transform on a Dataset, "
         "review it with plan_project_dataset_transform_run, then use the single "
         "start_project_dataset_transform_run action with mode dataset (one invocation "
@@ -148,8 +151,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "name as tool_name. Python Functions are currently stored as Transform Definitions; "
         "these are the same saved object, not separate entities. Use discover_project_transforms "
         "and load_project_transform to get each Function's actual UUID ID, revision, input "
-        "names, and output schema. Never put a Function name in ref_id. Before creating or "
-        "revising a Workflow, call validate_project_workflow with the complete graph_json and "
+        "names, input schema, and output schema. Never put a Function name in ref_id. "
+        "Before creating or revising a Workflow, call validate_project_workflow with the "
+        "complete graph_json and "
         "fix all reported errors. This read-only check does not save a Workflow. Only then "
         "call the approval-gated create or revise tool. "
         "Creating or revising a "
@@ -1279,6 +1283,7 @@ class PostgresDeepAgentRunner:
                     "name": item.name,
                     "source": item.source,
                     "inputSelectors": item.input_selectors,
+                    "inputSchema": item.input_schema,
                     "outputSchema": item.output_schema,
                     "runtime": item.runtime,
                     "revision": item.revision,
@@ -1322,13 +1327,19 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def create_project_transform(
-            name: str, source: str, input_selectors_json: str, output_schema_json: str
+            name: str,
+            source: str,
+            input_selectors_json: str,
+            input_schema_json: str,
+            output_schema_json: str,
         ) -> str:
             """Create a saved Python Function after approval. It can be used by Workflow nodes.
 
             source is Python defining transform(inputs, parameters). input_selectors_json
             is a JSON object such as {"record":""} for the whole input record or
-            {"value":"/value"} for one field. output_schema_json is a JSON Schema object.
+            {"value":"/value"} for one field. input_schema_json is an object JSON Schema
+            with a property for each named input and its accepted JSON type. output_schema_json
+            is a JSON Schema object.
             """
             try:
                 item = await transforms.define(
@@ -1338,6 +1349,7 @@ class PostgresDeepAgentRunner:
                     source,
                     selector_json(input_selectors_json),
                     object_json(output_schema_json),
+                    input_schema=object_json(input_schema_json),
                 )
             except (ValueError, TransformValidationError) as error:
                 return (
@@ -1359,12 +1371,14 @@ class PostgresDeepAgentRunner:
             name: str,
             source: str,
             input_selectors_json: str,
+            input_schema_json: str,
             output_schema_json: str,
         ) -> str:
             """Revise a Project Transform Definition after approval.
 
             source is Python defining transform(inputs, parameters). input_selectors_json
             maps names to JSON pointers; an empty pointer selects the whole record.
+            input_schema_json declares the JSON Schema for the named inputs object.
             """
             try:
                 item = await transforms.revise(
@@ -1375,6 +1389,7 @@ class PostgresDeepAgentRunner:
                     source,
                     selector_json(input_selectors_json),
                     object_json(output_schema_json),
+                    input_schema=object_json(input_schema_json),
                 )
             except (ValueError, TransformValidationError) as error:
                 return (

@@ -11,6 +11,7 @@ from typing import Protocol, cast
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, SchemaError  # type: ignore[import-untyped]
+from jsonschema import ValidationError as JsonSchemaValidationError
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
@@ -45,6 +46,7 @@ class TransformDefinition:
     name: str
     source: str
     input_selectors: Mapping[str, str]
+    input_schema: Mapping[str, object]
     output_schema: Mapping[str, object]
     runtime: str | None
     package_hash: str | None
@@ -69,6 +71,7 @@ class FunctionCallPlan:
     input_names: tuple[str, ...]
     inputs: Mapping[str, object]
     parameters: Mapping[str, object]
+    input_schema: Mapping[str, object]
     output_schema: Mapping[str, object]
     runtime: str
     package_hash: str
@@ -82,6 +85,7 @@ class FunctionCallPlan:
             "inputNames": list(self.input_names),
             "inputs": _snapshot_value(self.inputs),
             "parameters": _snapshot_value(self.parameters),
+            "inputSchema": dict(self.input_schema),
             "outputSchema": dict(self.output_schema),
             "runtime": self.runtime,
             "packageHash": self.package_hash,
@@ -94,7 +98,7 @@ class FunctionCallPlan:
                 target_name=self.name,
                 shape="single",
                 source={"kind": "direct"},
-                input_ports={name: {} for name in self.input_names},
+                input_ports=_input_properties(self.input_schema),
                 output_schema=self.output_schema,
                 bindings=[{"inputs": _snapshot_value(self.inputs)}],
                 max_invocations=1,
@@ -313,10 +317,12 @@ class TransformModule:
         source: str,
         input_selectors: Mapping[str, str],
         output_schema: Mapping[str, object],
+        *,
+        input_schema: Mapping[str, object] | None = None,
     ) -> TransformDefinition:
         await self._authorize(access, project_id)
-        clean_name, clean_source, selectors, schema = _validate_definition(
-            name, source, input_selectors, output_schema
+        clean_name, clean_source, selectors, input_contract, schema = _validate_definition(
+            name, source, input_selectors, output_schema, input_schema
         )
         identity = await self._runner.identity() if self._runner else None
         now = datetime.now(UTC)
@@ -327,6 +333,7 @@ class TransformModule:
                 clean_name,
                 clean_source,
                 selectors,
+                input_contract,
                 schema,
                 identity.runtime if identity else None,
                 identity.package_hash if identity else None,
@@ -359,10 +366,12 @@ class TransformModule:
         source: str,
         input_selectors: Mapping[str, str],
         output_schema: Mapping[str, object],
+        *,
+        input_schema: Mapping[str, object] | None = None,
     ) -> TransformDefinition:
         current = await self.load(access, project_id, definition_id)
-        clean_name, clean_source, selectors, schema = _validate_definition(
-            name, source, input_selectors, output_schema
+        clean_name, clean_source, selectors, input_contract, schema = _validate_definition(
+            name, source, input_selectors, output_schema, input_schema
         )
         identity = await self._runner.identity() if self._runner else None
         revised = replace(
@@ -370,6 +379,7 @@ class TransformModule:
             name=clean_name,
             source=clean_source,
             input_selectors=selectors,
+            input_schema=input_contract,
             output_schema=schema,
             runtime=identity.runtime if identity else None,
             package_hash=identity.package_hash if identity else None,
@@ -423,6 +433,7 @@ class TransformModule:
             "source": definition.source,
             "sourceHash": definition.source_hash,
             "inputSelectors": dict(definition.input_selectors),
+            "inputSchema": dict(definition.input_schema),
             "outputSchema": dict(definition.output_schema),
             "runtime": identity.runtime,
             "packageHash": identity.package_hash,
@@ -477,6 +488,9 @@ class TransformModule:
             inputs = {item_input_name: dict(record)}
         else:
             inputs = {name: _select(record, pointer) for name, pointer in selectors.items()}
+        input_schema = snapshot.get("inputSchema")
+        if isinstance(input_schema, Mapping):
+            _validate_function_values(input_schema, inputs)
         parameter_values = dict(parameters or {})
         if len(_canonical({"inputs": inputs, "parameters": parameter_values})) > 64_000:
             raise TransformValidationError("Transform inputs exceed 64000 bytes.")
@@ -540,6 +554,7 @@ class TransformModule:
             tuple(definition.input_selectors),
             input_values,
             parameter_values,
+            dict(definition.input_schema),
             dict(definition.output_schema),
             identity.runtime,
             identity.package_hash,
@@ -811,6 +826,7 @@ class TransformModule:
                 "name": definition.name,
                 "source": definition.source,
                 "input_selectors": dict(definition.input_selectors),
+                "input_schema": dict(definition.input_schema),
                 "output_schema": dict(definition.output_schema),
                 "revision": definition.revision,
                 "runtime": identity.runtime,
@@ -825,7 +841,7 @@ class TransformModule:
                             target_name=definition.name,
                             shape="single",
                             source={"kind": "direct"},
-                            input_ports={name: {} for name in definition.input_selectors},
+                            input_ports=_input_properties(definition.input_schema),
                             output_schema=definition.output_schema,
                             bindings=[{"inputs": _snapshot_value(inputs)}],
                             max_invocations=1,
@@ -1067,6 +1083,7 @@ def _inputs(
     inputs = {
         name: _select(record, pointer) for name, pointer in definition.input_selectors.items()
     }
+    _validate_function_values(definition.input_schema, inputs)
     parameter_values = dict(parameters)
     try:
         if len(_canonical({"inputs": inputs, "parameters": parameter_values})) > 64_000:
@@ -1081,10 +1098,11 @@ def _function_inputs(
     inputs: Mapping[str, object],
     parameters: Mapping[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
-    if set(inputs) != set(definition.input_selectors):
-        raise TransformValidationError("Function input names must match its declared inputs.")
+    if not set(inputs).issubset(definition.input_selectors):
+        raise TransformValidationError("Function input names must be declared inputs.")
     try:
         values = cast(dict[str, object], _snapshot_value(dict(inputs)))
+        _validate_function_values(definition.input_schema, values)
         parameter_values = cast(dict[str, object], _snapshot_value(dict(parameters)))
         if len(_canonical({"inputs": values, "parameters": parameter_values})) > 64_000:
             raise TransformValidationError("Function inputs exceed 64000 bytes.")
@@ -1150,7 +1168,8 @@ def _validate_definition(
     source: str,
     input_selectors: Mapping[str, str],
     output_schema: Mapping[str, object],
-) -> tuple[str, str, dict[str, str], dict[str, object]]:
+    input_schema: Mapping[str, object] | None = None,
+) -> tuple[str, str, dict[str, str], dict[str, object], dict[str, object]]:
     clean_name = name.strip()
     if not clean_name or len(clean_name) > 160:
         raise TransformValidationError("Transform name must contain 1 to 160 characters.")
@@ -1172,6 +1191,26 @@ def _validate_definition(
         )
     ):
         raise TransformValidationError("Each input selector needs a name and JSON pointer.")
+    contract = dict(input_schema) if input_schema is not None else _default_input_schema(selectors)
+    properties = contract.get("properties")
+    required = contract.get("required", [])
+    try:
+        if len(json.dumps(contract, allow_nan=False).encode()) > 16_000:
+            raise TransformValidationError("Transform input schema exceeds 16000 bytes.")
+        Draft202012Validator.check_schema(contract)
+        if (
+            contract.get("type") != "object"
+            or not isinstance(properties, Mapping)
+            or set(properties) != set(selectors)
+            or not isinstance(required, list)
+            or any(not isinstance(item, str) for item in required)
+            or not set(required).issubset(selectors)
+        ):
+            raise TransformValidationError(
+                "Function input schema must describe exactly its declared input names."
+            )
+    except (SchemaError, TypeError, ValueError) as error:
+        raise TransformValidationError("Transform input schema is invalid.") from error
     schema = dict(output_schema)
     try:
         if len(json.dumps(schema, allow_nan=False).encode()) > 16_000:
@@ -1179,7 +1218,37 @@ def _validate_definition(
         Draft202012Validator.check_schema(schema)
     except (SchemaError, TypeError, ValueError) as error:
         raise TransformValidationError("Transform output schema is invalid.") from error
-    return clean_name, source, selectors, schema
+    return clean_name, source, selectors, contract, schema
+
+
+def _input_properties(schema: Mapping[str, object]) -> Mapping[str, Mapping[str, object]]:
+    properties = schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        return {}
+    return {
+        name: value
+        for name, value in properties.items()
+        if isinstance(name, str) and isinstance(value, Mapping)
+    }
+
+
+def _default_input_schema(selectors: Mapping[str, str]) -> dict[str, object]:
+    return {
+        "type": "object",
+        "properties": {name: {} for name in selectors},
+        "required": list(selectors),
+        "additionalProperties": False,
+    }
+
+
+def _validate_function_values(schema: Mapping[str, object], values: Mapping[str, object]) -> None:
+    try:
+        Draft202012Validator(schema).validate(dict(values))
+    except JsonSchemaValidationError as error:
+        path = ".".join(str(part) for part in error.absolute_path) or "inputs"
+        raise TransformValidationError(
+            f"Function input does not match its declared schema at {path}: {error.message}"
+        ) from error
 
 
 class MemoryTransformStore:
@@ -1227,9 +1296,9 @@ class PostgresTransformStore:
         async with connection:
             await connection.execute(
                 """INSERT INTO transform_definitions
-                (project_id,transform_definition_id,name,source,input_selectors,output_schema,
-                runtime,package_hash,source_hash,revision,created_at,updated_at)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (project_id,transform_definition_id,name,source,input_selectors,input_schema,
+                output_schema,runtime,package_hash,source_hash,revision,created_at,updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 _values(definition),
             )
         return definition
@@ -1261,12 +1330,14 @@ class PostgresTransformStore:
         async with connection:
             cursor = await connection.execute(
                 """UPDATE transform_definitions SET name=%s,source=%s,input_selectors=%s,
-                output_schema=%s,runtime=%s,package_hash=%s,source_hash=%s,revision=%s,updated_at=%s
+                input_schema=%s,output_schema=%s,runtime=%s,package_hash=%s,source_hash=%s,
+                revision=%s,updated_at=%s
                 WHERE project_id=%s AND transform_definition_id=%s AND revision=%s""",
                 (
                     definition.name,
                     definition.source,
                     json.dumps(definition.input_selectors),
+                    json.dumps(definition.input_schema),
                     json.dumps(definition.output_schema),
                     definition.runtime,
                     definition.package_hash,
@@ -1298,6 +1369,7 @@ def _values(definition: TransformDefinition) -> tuple[object, ...]:
         definition.name,
         definition.source,
         json.dumps(definition.input_selectors),
+        json.dumps(definition.input_schema),
         json.dumps(definition.output_schema),
         definition.runtime,
         definition.package_hash,
@@ -1310,17 +1382,29 @@ def _values(definition: TransformDefinition) -> tuple[object, ...]:
 
 def _from_row(row: Mapping[str, object]) -> TransformDefinition:
     selectors = row["input_selectors"]
+    parsed_selectors = (
+        json.loads(selectors)
+        if isinstance(selectors, str)
+        else dict(cast(Mapping[str, str], selectors))
+    )
+    raw_input_schema = row.get("input_schema")
+    input_schema = (
+        json.loads(raw_input_schema)
+        if isinstance(raw_input_schema, str)
+        else dict(cast(Mapping[str, object], raw_input_schema))
+        if isinstance(raw_input_schema, Mapping)
+        else {}
+    )
+    if not isinstance(input_schema.get("properties"), Mapping):
+        input_schema = _default_input_schema(parsed_selectors)
     schema = row["output_schema"]
     return TransformDefinition(
         id=str(row["transform_definition_id"]),
         project_id=str(row["project_id"]),
         name=str(row["name"]),
         source=str(row["source"]),
-        input_selectors=(
-            json.loads(selectors)
-            if isinstance(selectors, str)
-            else dict(cast(Mapping[str, str], selectors))
-        ),
+        input_selectors=parsed_selectors,
+        input_schema=input_schema,
         output_schema=(
             json.loads(schema)
             if isinstance(schema, str)

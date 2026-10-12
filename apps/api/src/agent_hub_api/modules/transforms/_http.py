@@ -33,6 +33,7 @@ class DefinitionRequest(_Model):
     name: str
     source: str
     input_selectors: dict[str, str]
+    input_schema: dict[str, object]
     output_schema: dict[str, object]
 
 
@@ -41,6 +42,7 @@ class DefinitionResponse(_Model):
     name: str
     source: str
     input_selectors: dict[str, str]
+    input_schema: dict[str, object]
     output_schema: dict[str, object]
     runtime: str | None
     package_hash: str | None
@@ -149,6 +151,7 @@ def _response(definition: TransformDefinition) -> DefinitionResponse:
         name=definition.name,
         source=definition.source,
         input_selectors=dict(definition.input_selectors),
+        input_schema=dict(definition.input_schema),
         output_schema=dict(definition.output_schema),
         runtime=definition.runtime,
         package_hash=definition.package_hash,
@@ -233,6 +236,7 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                     body.source,
                     body.input_selectors,
                     body.output_schema,
+                    input_schema=body.input_schema,
                 )
             )
         except (TransformNotFound, TransformValidationError) as error:
@@ -494,6 +498,7 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                     body.source,
                     body.input_selectors,
                     body.output_schema,
+                    input_schema=body.input_schema,
                 )
             )
         except (TransformNotFound, TransformValidationError) as error:

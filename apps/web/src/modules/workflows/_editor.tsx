@@ -70,7 +70,7 @@ export function WorkflowDefinitionEditor({
             id: string;
             name: string;
             revision: number;
-            inputSelectors: Record<string, string>;
+            inputSchema: { properties?: Record<string, unknown> };
           }>,
           Array<{
             id: string;
@@ -104,7 +104,7 @@ export function WorkflowDefinitionEditor({
             label: `Function · ${definition.name}`,
             kind: "python" as const,
             version: definition.revision,
-            inputPorts: Object.keys(definition.inputSelectors),
+            inputPorts: Object.keys(definition.inputSchema.properties ?? {}),
             repeatSafe: false,
           })),
         ];

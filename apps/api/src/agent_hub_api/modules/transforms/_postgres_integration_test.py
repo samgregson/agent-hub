@@ -51,6 +51,12 @@ async def test_transform_run_round_trips_through_postgres() -> None:
             "def transform(inputs, parameters):\n    return {}\n",
             {"load": "/load"},
             {"type": "object"},
+            input_schema={
+                "type": "object",
+                "properties": {"load": {"type": "number"}},
+                "required": ["load"],
+                "additionalProperties": False,
+            },
         )
         run = await transforms.start_run(
             access, project.id, definition.id, {"load": 3}, {"factor": 2}
@@ -118,8 +124,15 @@ async def test_transform_definition_round_trips_through_postgres() -> None:
             "def transform(inputs, parameters):\n    return {'triple': 3}\n",
             {"load": "/load"},
             {"type": "object"},
+            input_schema={
+                "type": "object",
+                "properties": {"load": {"type": "integer"}},
+                "required": ["load"],
+                "additionalProperties": False,
+            },
         )
         assert revised.revision == 2
+        assert revised.input_schema["properties"] == {"load": {"type": "integer"}}
         assert await transforms.load(access, project.id, definition.id) == revised
         await transforms.delete(access, project.id, definition.id)
         assert await transforms.list(access, project.id) == ()

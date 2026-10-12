@@ -202,6 +202,12 @@ async def test_transform_definition_http_round_trip() -> None:
         "name": "Double loads",
         "source": "def transform(inputs, parameters):\n    return {}\n",
         "inputSelectors": {"load": "/load"},
+        "inputSchema": {
+            "type": "object",
+            "properties": {"load": {"type": "number"}},
+            "required": ["load"],
+            "additionalProperties": False,
+        },
         "outputSchema": {"type": "object"},
     }
 

@@ -46,6 +46,17 @@ async def test_project_can_save_and_revise_a_branching_workflow_definition() -> 
         "def transform(inputs, parameters):\n    return {}\n",
         {"item": "/item"},
         {"type": "object"},
+        input_schema={
+            "type": "object",
+            "properties": {
+                "item": {
+                    "type": "object",
+                    "properties": {"value": {"type": "number"}},
+                    "required": ["value"],
+                }
+            },
+            "required": ["item"],
+        },
     )
     join_function = await transforms.define(
         owner,
@@ -142,6 +153,12 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
             "type": "object",
             "properties": {"result": {"type": "string"}, "word_count": {"type": "integer"}},
         },
+        input_schema={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
     )
     invalid_output = WorkflowGraph(
         (
@@ -153,6 +170,37 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
     )
     with pytest.raises(WorkflowValidationError, match="available ports: result"):
         await workflows.validate_graph(owner, project.id, invalid_output)
+
+    invalid_input = WorkflowGraph(
+        (
+            WorkflowNode("source", "file", "/project/demo.txt", saved_file.version),
+            WorkflowNode("summarize", "python", function.id, function.revision),
+        ),
+        (WorkflowEdge("source", "content", "summarize", "text"),),
+        (WorkflowOutput("result", "summarize", "result"),),
+    )
+    incompatible_function = await transforms.define(
+        owner,
+        project.id,
+        "summarize_number",
+        "def transform(inputs, parameters):\n    return {'result': str(inputs['text'])}\n",
+        {"text": ""},
+        {"type": "object", "properties": {"result": {"type": "string"}}},
+        input_schema={
+            "type": "object",
+            "properties": {"text": {"type": "integer"}},
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    )
+    invalid_input = WorkflowGraph(
+        invalid_input.nodes[:1]
+        + (WorkflowNode("summarize", "python", incompatible_function.id, 1),),
+        invalid_input.edges,
+        invalid_input.outputs,
+    )
+    with pytest.raises(WorkflowValidationError, match="incompatible.*text"):
+        await workflows.validate_graph(owner, project.id, invalid_input)
 
 
 @pytest.mark.asyncio

@@ -208,6 +208,12 @@ async def test_python_function_call_uses_named_inputs_without_selection_rules() 
         "def transform(inputs, parameters):\n    return {'ordered': sorted(inputs['values'])}\n",
         {"values": "/selection/values"},
         {"type": "object", "required": ["ordered"]},
+        input_schema={
+            "type": "object",
+            "properties": {"values": {"type": "array", "items": {"type": "number"}}},
+            "required": ["values"],
+            "additionalProperties": False,
+        },
     )
     plan = await transforms.plan_function_call(
         owner, project.id, definition.id, {"values": [3, 1, 2]}, {}
@@ -223,7 +229,7 @@ async def test_python_function_call_uses_named_inputs_without_selection_rules() 
         },
         "shape": "single",
         "source": {"kind": "direct"},
-        "inputPorts": {"values": {}},
+        "inputPorts": {"values": {"type": "array", "items": {"type": "number"}}},
         "outputPorts": {"result": {"type": "object", "required": ["ordered"]}},
         "bindings": [{"inputs": {"values": [3, 1, 2]}}],
         "invocationCount": 1,
@@ -260,6 +266,10 @@ async def test_python_function_call_uses_named_inputs_without_selection_rules() 
     with pytest.raises(TransformValidationError, match="input names"):
         await transforms.plan_function_call(
             owner, project.id, definition.id, {"unknown": [3, 1, 2]}, {}
+        )
+    with pytest.raises(TransformValidationError, match="does not match its declared schema"):
+        await transforms.plan_function_call(
+            owner, project.id, definition.id, {"values": "nope"}, {}
         )
 
 

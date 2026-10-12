@@ -11,6 +11,7 @@ interface Definition {
   name: string;
   source: string;
   inputSelectors: Record<string, string>;
+  inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
   runtime: string | null;
   packageHash: string | null;
@@ -382,10 +383,15 @@ export function TransformCatalog({
       ) {
         throw new Error("Each input selector must be a JSON Pointer string.");
       }
+      const inputSchema = jsonObject(
+        String(form.get("inputSchema")),
+        "Input schema",
+      );
       const body = {
         name: String(form.get("name")),
         source: String(form.get("source")),
         inputSelectors,
+        inputSchema,
         outputSchema: jsonObject(
           String(form.get("outputSchema")),
           "Output schema",
@@ -996,6 +1002,24 @@ export function TransformCatalog({
                     spellCheck={false}
                   />
                 </Field>
+                <Field label="Input schema (JSON Schema)">
+                  <textarea
+                    defaultValue={JSON.stringify(
+                      selectedDefinition?.inputSchema ?? {
+                        type: "object",
+                        properties: { load: { type: "number" } },
+                        required: ["load"],
+                        additionalProperties: false,
+                      },
+                      null,
+                      2,
+                    )}
+                    name="inputSchema"
+                    required
+                    rows={4}
+                    spellCheck={false}
+                  />
+                </Field>
                 <Field label="Output schema (JSON Schema)">
                   <textarea
                     defaultValue={JSON.stringify(
@@ -1044,6 +1068,7 @@ export function TransformCatalog({
                   {JSON.stringify(
                     {
                       inputSelectors: selectedDefinition.inputSelectors,
+                      inputSchema: selectedDefinition.inputSchema,
                       outputSchema: selectedDefinition.outputSchema,
                     },
                     null,
