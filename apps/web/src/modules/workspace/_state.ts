@@ -25,8 +25,7 @@ export interface ProjectWorkspaceState {
   selectedScratchThreadId: string | null;
   selectedSourceId: string | null;
   selectedThreadId: string | null;
-  selectedTransformDefinitionId: string | null;
-  transformRunScope: string | null;
+  selectedFunctionId: string | null;
 }
 
 export interface WorkspaceState {
@@ -37,8 +36,7 @@ export interface WorkspaceState {
 export type WorkspaceAction =
   | { projectId: string | null; type: "selectProject" }
   | { activity: ActivityView; type: "selectActivity" }
-  | { definitionId: string | null; type: "selectTransformDefinition" }
-  | { runScope: string; type: "selectTransformRunScope" }
+  | { functionId: string | null; type: "selectFunction" }
   | { artifactId: string | null; type: "openArtifact" }
   | { path: string | null; type: "openProjectFile" }
   | { proposal: FileProposal; type: "openFileProposal" }
@@ -56,8 +54,7 @@ function initialProjectState(): ProjectWorkspaceState {
     selectedScratchThreadId: null,
     selectedSourceId: null,
     selectedThreadId: null,
-    selectedTransformDefinitionId: null,
-    transformRunScope: null,
+    selectedFunctionId: null,
   };
 }
 
@@ -173,32 +170,14 @@ export function workspaceReducer(
       },
     };
   }
-  if (action.type === "selectTransformDefinition") {
+  if (action.type === "selectFunction") {
     return {
       ...state,
       projects: {
         ...state.projects,
         [state.selectedProjectId]: {
           ...state.projects[state.selectedProjectId],
-          selectedTransformDefinitionId: action.definitionId,
-          transformRunScope: action.definitionId ?? "all",
-        },
-      },
-    };
-  }
-  if (action.type === "selectTransformRunScope") {
-    return {
-      ...state,
-      projects: {
-        ...state.projects,
-        [state.selectedProjectId]: {
-          ...state.projects[state.selectedProjectId],
-          selectedTransformDefinitionId:
-            action.runScope === "all"
-              ? state.projects[state.selectedProjectId]
-                  .selectedTransformDefinitionId
-              : action.runScope,
-          transformRunScope: action.runScope,
+          selectedFunctionId: action.functionId,
         },
       },
     };

@@ -18,7 +18,7 @@ import {
 } from "@/modules/agent-ui";
 import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
 import { DatasetFilePreview } from "@/modules/datasets";
-import { TransformCatalog } from "@/modules/transforms";
+import { FunctionCatalog } from "@/modules/functions";
 import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
 import { Menu, MenuItem } from "@/shared/ui";
@@ -76,14 +76,9 @@ export function ProjectWorkspace() {
     undefined,
     createWorkspaceState,
   );
-  const selectTransformDefinition = useCallback(
-    (definitionId: string | null) =>
-      dispatch({ definitionId, type: "selectTransformDefinition" }),
-    [],
-  );
-  const selectTransformRunScope = useCallback(
-    (runScope: string) =>
-      dispatch({ runScope, type: "selectTransformRunScope" }),
+  const selectFunction = useCallback(
+    (functionId: string | null) =>
+      dispatch({ functionId, type: "selectFunction" }),
     [],
   );
   const [threadsByProject, setThreadsByProject] = useState<
@@ -506,19 +501,15 @@ export function ProjectWorkspace() {
           onOpenProjectFile={(path) =>
             dispatch({ path, type: "openProjectFile" })
           }
-          onSelectTransformDefinition={selectTransformDefinition}
-          onSelectTransformRunScope={selectTransformRunScope}
+          onSelectFunction={selectFunction}
           onSelectThread={(threadId) =>
             dispatch({ threadId, type: "selectThread" })
           }
           project={selectedProject}
           selectedActivity={selectedActivity}
           selectedThreadId={selectedThread?.id}
-          selectedTransformDefinitionId={
-            selectedWorkspace?.selectedTransformDefinitionId ?? null
-          }
+          selectedFunctionId={selectedWorkspace?.selectedFunctionId ?? null}
           threads={selectedThreads}
-          transformRunScope={selectedWorkspace?.transformRunScope ?? null}
         />
         <div
           aria-label="Resize Project navigator"
@@ -602,8 +593,7 @@ export function ProjectWorkspace() {
                   dispatch({ path, type: "openProjectFile" });
                   setIsMobileNavigationOpen(false);
                 }}
-                onSelectTransformDefinition={selectTransformDefinition}
-                onSelectTransformRunScope={selectTransformRunScope}
+                onSelectFunction={selectFunction}
                 onSelectThread={(threadId) => {
                   dispatch({ threadId, type: "selectThread" });
                   setIsMobileNavigationOpen(false);
@@ -611,11 +601,10 @@ export function ProjectWorkspace() {
                 project={selectedProject}
                 selectedActivity={selectedActivity}
                 selectedThreadId={selectedThread?.id}
-                selectedTransformDefinitionId={
-                  selectedWorkspace?.selectedTransformDefinitionId ?? null
+                selectedFunctionId={
+                  selectedWorkspace?.selectedFunctionId ?? null
                 }
                 threads={selectedThreads}
-                transformRunScope={selectedWorkspace?.transformRunScope ?? null}
               />
             </div>
           </aside>
@@ -629,8 +618,8 @@ export function ProjectWorkspace() {
             onOpenLibrary={() => handleSelectActivity("artifacts")}
             onOpenFunction={(node) => {
               dispatch({
-                definitionId: node.refId,
-                type: "selectTransformDefinition",
+                functionId: node.refId,
+                type: "selectFunction",
               });
               handleSelectActivity("functions");
             }}
@@ -745,16 +734,14 @@ interface ProjectNavigatorProps {
   onDeleteThread: (thread: Thread) => void;
   onOpenArtifact: (artifactId: string) => void;
   onOpenProjectFile: (path: string) => void;
-  onSelectTransformDefinition: (definitionId: string | null) => void;
-  onSelectTransformRunScope: (runScope: string) => void;
+  onSelectFunction: (definitionId: string | null) => void;
   onRenameThread: (thread: Thread) => void;
   onSelectThread: (threadId: string) => void;
   project: Project | undefined;
   selectedActivity: ActivityView;
   selectedThreadId: string | undefined;
-  selectedTransformDefinitionId: string | null;
+  selectedFunctionId: string | null;
   threads: Thread[];
-  transformRunScope: string | null;
 }
 
 function ProjectNavigator({
@@ -763,16 +750,14 @@ function ProjectNavigator({
   onDeleteThread,
   onOpenArtifact,
   onOpenProjectFile,
-  onSelectTransformDefinition,
-  onSelectTransformRunScope,
+  onSelectFunction,
   onRenameThread,
   onSelectThread,
   project,
   selectedActivity,
   selectedThreadId,
-  selectedTransformDefinitionId,
+  selectedFunctionId,
   threads,
-  transformRunScope,
 }: ProjectNavigatorProps) {
   return (
     <>
@@ -822,13 +807,11 @@ function ProjectNavigator({
           refreshKey={libraryRefreshKey}
         />
       ) : selectedActivity === "functions" && project ? (
-        <TransformCatalog
+        <FunctionCatalog
           key={project.id}
-          onSelectDefinition={onSelectTransformDefinition}
-          onSelectRunScope={onSelectTransformRunScope}
+          onSelectFunction={onSelectFunction}
           projectId={project.id}
-          selectedDefinitionId={selectedTransformDefinitionId}
-          runScope={transformRunScope}
+          selectedFunctionId={selectedFunctionId}
         />
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />

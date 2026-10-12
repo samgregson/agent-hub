@@ -122,6 +122,12 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
     { record: { load: 4 }, parameters: { factor: 2 } },
   ]);
   expect(durableRuns).toHaveLength(0);
+  await expect(
+    surface.getByRole("region", { name: "Retained Runs" }),
+  ).toHaveCount(0);
+  await expect(
+    surface.getByRole("button", { name: "Start durable Run" }),
+  ).toHaveCount(0);
 
   await surface.getByLabel("Input record (JSON object)").fill('{"load":5}');
   await expect(preview).toHaveCount(0);
@@ -204,7 +210,7 @@ test("new Function submissions include their named input schema", async ({
       });
     },
   );
-  await surface.getByRole("button", { name: "Save Definition" }).click();
+  await surface.getByRole("button", { name: "Save Function" }).click();
   await expect(
     surface.getByText("Read a load saved as revision 1.", { exact: true }),
   ).toBeVisible();

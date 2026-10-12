@@ -158,44 +158,24 @@ test("Functions destination is restored per Project", () => {
   assert.equal(state.projects["project-a"].activity, "functions");
 });
 
-test("Transform navigation selection survives a Project drawer remount", () => {
+test("Function selection survives a Project drawer remount", () => {
   let state = workspaceReducer(createWorkspaceState(), {
     projectId: "project-a",
     type: "selectProject",
   });
   state = workspaceReducer(state, {
-    definitionId: "transform-b",
-    type: "selectTransformDefinition",
+    functionId: "function-b",
+    type: "selectFunction",
   });
-  state = workspaceReducer(state, {
-    runScope: "transform-c",
-    type: "selectTransformRunScope",
-  });
-  assert.equal(
-    state.projects["project-a"].selectedTransformDefinitionId,
-    "transform-c",
-  );
-  state = workspaceReducer(state, {
-    runScope: "all",
-    type: "selectTransformRunScope",
-  });
-  assert.equal(
-    state.projects["project-a"].selectedTransformDefinitionId,
-    "transform-c",
-  );
-  assert.equal(state.projects["project-a"].transformRunScope, "all");
+  assert.equal(state.projects["project-a"].selectedFunctionId, "function-b");
   state = workspaceReducer(state, {
     projectId: "project-b",
     type: "selectProject",
   });
-  assert.equal(state.projects["project-b"].selectedTransformDefinitionId, null);
+  assert.equal(state.projects["project-b"].selectedFunctionId, null);
   state = workspaceReducer(state, {
     projectId: "project-a",
     type: "selectProject",
   });
-  assert.equal(
-    state.projects["project-a"].selectedTransformDefinitionId,
-    "transform-c",
-  );
-  assert.equal(state.projects["project-a"].transformRunScope, "all");
+  assert.equal(state.projects["project-a"].selectedFunctionId, "function-b");
 });
