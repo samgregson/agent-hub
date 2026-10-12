@@ -91,6 +91,9 @@ export function ProjectWorkspace() {
   );
   const [isCreating, setIsCreating] = useState(false);
   const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
+  const [projectCreationError, setProjectCreationError] = useState<
+    string | null
+  >(null);
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [navigatorWidth, setNavigatorWidth] = useState(256);
   const isResizingNavigator = useRef(false);
@@ -219,17 +222,25 @@ export function ProjectWorkspace() {
     const name = typeof submittedName === "string" ? submittedName.trim() : "";
     if (!name) return;
 
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     setIsCreating(true);
     setError(null);
+    setProjectCreationError(null);
     try {
-      const project = await createProject(name);
+      const project = await createProject(name, controller.signal);
       setProjects((current) => [project, ...current]);
       dispatch({ projectId: project.id, type: "selectProject" });
       form.reset();
       setIsNewProjectDialogOpen(false);
     } catch {
-      setError("The Project could not be created.");
+      setProjectCreationError(
+        controller.signal.aborted
+          ? "Project creation timed out. Check your Projects list before trying again."
+          : "The Project could not be created. Try again.",
+      );
     } finally {
+      window.clearTimeout(timeout);
       setIsCreating(false);
     }
   }
@@ -378,6 +389,7 @@ export function ProjectWorkspace() {
               disabled={!isInteractive}
               onChange={(event) => {
                 if (event.target.value === "new-project") {
+                  setProjectCreationError(null);
                   setIsNewProjectDialogOpen(true);
                   return;
                 }
@@ -451,6 +463,11 @@ export function ProjectWorkspace() {
                 required
               />
             </label>
+            {projectCreationError ? (
+              <p className={styles.error} role="alert">
+                {projectCreationError}
+              </p>
+            ) : null}
             <div className={styles.newProjectDialogActions}>
               <button
                 className={styles.newProjectCancel}

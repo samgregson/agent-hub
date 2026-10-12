@@ -118,10 +118,41 @@ test("user can create a Project", async ({ page }) => {
   const name = dialog.getByLabel("Project name");
   await expect(name).toBeFocused();
   await name.fill(project.name);
-  await name.press("Enter");
+  await dialog.getByRole("button", { name: "Create Project" }).click();
 
   await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
   await expect(dialog).toBeHidden();
+});
+
+test("a stalled Project request releases the form and explains the timeout", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.route("**/api/projects", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    await new Promise(() => {});
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Selected Project").selectOption({
+    label: "New Project…",
+  });
+  const dialog = page.getByRole("dialog", { name: "New Project" });
+  await dialog.getByLabel("Project name").fill("Slow project request");
+  await dialog.getByLabel("Project name").press("Enter");
+  await expect(dialog.getByText("Creating…")).toBeVisible();
+
+  await page.clock.fastForward(15_000);
+
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "Project creation timed out. Check your Projects list before trying again.",
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Create Project" }),
+  ).toBeEnabled();
 });
 
 test("project creation is unavailable before the workspace hydrates", async ({

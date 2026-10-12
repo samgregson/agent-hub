@@ -34,11 +34,15 @@ export async function listProjects(): Promise<Project[]> {
   return projectListSchema.parse(await response.json());
 }
 
-export async function createProject(name: string): Promise<Project> {
+export async function createProject(
+  name: string,
+  signal?: AbortSignal,
+): Promise<Project> {
   const response = await projectRequest("/api/projects", {
     body: JSON.stringify({ name }),
     headers: { "content-type": "application/json" },
     method: "POST",
+    signal,
   });
   return projectSchema.parse(await response.json());
 }
