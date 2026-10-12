@@ -9,17 +9,15 @@ export const activityViews = [
   "workflows",
   "chats",
   "artifacts",
-  "operations",
+  "functions",
   "sources",
   "plugins",
 ] as const;
 
 export type ActivityView = (typeof activityViews)[number];
-export type OperationKind = "batchDefinitions" | "transforms" | "calls";
 
 export interface ProjectWorkspaceState {
   activity: ActivityView;
-  operationKind: OperationKind;
   mobileSurface: "artifact" | "chat";
   selectedArtifactId: string | null;
   selectedFilePath: string | null;
@@ -39,7 +37,6 @@ export interface WorkspaceState {
 export type WorkspaceAction =
   | { projectId: string | null; type: "selectProject" }
   | { activity: ActivityView; type: "selectActivity" }
-  | { operationKind: OperationKind; type: "selectOperationKind" }
   | { definitionId: string | null; type: "selectTransformDefinition" }
   | { runScope: string; type: "selectTransformRunScope" }
   | { artifactId: string | null; type: "openArtifact" }
@@ -52,7 +49,6 @@ export type WorkspaceAction =
 function initialProjectState(): ProjectWorkspaceState {
   return {
     activity: "chats",
-    operationKind: "batchDefinitions",
     mobileSurface: "chat",
     selectedArtifactId: null,
     selectedFilePath: null,
@@ -173,18 +169,6 @@ export function workspaceReducer(
           selectedFileProposal: null,
           selectedScratchThreadId: null,
           mobileSurface: action.artifactId === null ? "chat" : "artifact",
-        },
-      },
-    };
-  }
-  if (action.type === "selectOperationKind") {
-    return {
-      ...state,
-      projects: {
-        ...state.projects,
-        [state.selectedProjectId]: {
-          ...state.projects[state.selectedProjectId],
-          operationKind: action.operationKind,
         },
       },
     };

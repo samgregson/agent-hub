@@ -53,10 +53,6 @@ async function openFunctions(page: Page, phone: boolean) {
   }
   await surface
     .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await surface
-    .getByRole("navigation", { name: "Operation types" })
     .getByRole("button", { name: "Functions" })
     .click();
   return surface;

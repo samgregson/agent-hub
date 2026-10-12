@@ -429,11 +429,16 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   ).toBeVisible();
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await page.getByRole("button", { name: "Inspect calculate" }).click();
-  await page.getByRole("button", { name: "Open Operations" }).click();
+  await expect(page.getByRole("button", { name: "Open Function" })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect screen" }).click();
+  await page.getByRole("button", { name: "Open Function" }).click();
   await expect(
     page
       .getByRole("navigation", { name: "Project views" })
-      .getByRole("button", { name: "Operations" }),
+      .getByRole("button", { name: "Functions" }),
   ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await page.getByRole("button", { name: "Inspect screen" }).click();
@@ -521,7 +526,7 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     .toBe(true);
 });
 
-test("a Project Workflow can be created from Library and Operations", async ({
+test("a Project Workflow can be created from Library and Functions", async ({
   page,
 }) => {
   const project = {
@@ -1111,7 +1116,7 @@ test("Library identifies Artifacts, Datasets, and Project Files without duplicat
   ).toHaveCount(0);
 });
 
-test("Operations keeps Batch and Transform actions under one Project destination", async ({
+test("Functions has a dedicated Project destination without Operations subcategories", async ({
   page,
 }) => {
   const project = {
@@ -1166,210 +1171,23 @@ test("Operations keeps Batch and Transform actions under one Project destination
   await page.goto("/");
   const projectViews = page.getByRole("navigation", { name: "Project views" });
   await expect(
-    projectViews.getByRole("button", { name: "Operations" }),
-  ).toBeVisible();
-  await expect(
     projectViews.getByRole("button", { name: "Functions" }),
-  ).toHaveCount(0);
-  await expect(
-    projectViews.getByRole("button", { name: "Batch Definitions" }),
-  ).toHaveCount(0);
-
-  await projectViews.getByRole("button", { name: "Operations" }).click();
-  const operationTypes = page.getByRole("navigation", {
-    name: "Operation types",
-  });
-  await expect(
-    page.getByRole("button", { name: "+ New Batch Definition" }),
   ).toBeVisible();
-  await operationTypes.getByRole("button", { name: "Functions" }).click();
+  await expect(
+    projectViews.getByRole("button", { name: "Operations" }),
+  ).toHaveCount(0);
+  await projectViews.getByRole("button", { name: "Functions" }).click();
   await expect(
     page.getByRole("button", { name: "New Function" }),
   ).toBeVisible();
-  await projectViews.getByRole("button", { name: "Library" }).click();
-  await projectViews.getByRole("button", { name: "Operations" }).click();
   await expect(
-    operationTypes.getByRole("button", { name: "Functions" }),
-  ).toHaveAttribute("aria-pressed", "true");
-});
-
-test("Batch Runs retain their Definition context and can be opened from it", async ({
-  page,
-}) => {
-  const project = {
-    createdAt: "2026-10-10T00:00:00.000Z",
-    id: "project-batch-context",
-    name: "Design review",
-    updatedAt: "2026-10-10T00:00:00.000Z",
-  };
-  const definitions = [
-    {
-      id: "definition-a",
-      name: "Load check",
-      datasetId: "dataset-a",
-      datasetAvailable: true,
-      pluginId: "calculator",
-      toolName: "calculate",
-      transformDefinitionId: null,
-    },
-    {
-      id: "definition-b",
-      name: "Stress check",
-      datasetId: "dataset-a",
-      datasetAvailable: true,
-      pluginId: "calculator",
-      toolName: "calculate",
-      transformDefinitionId: null,
-    },
-  ];
-  const runs = definitions.map((definition, index) => ({
-    archivedAt: null,
-    createdAt: "2026-10-10T00:00:00.000Z",
-    definitionId: definition.id,
-    definitionName: definition.name,
-    id: `run-${index}`,
-    initiatorSubject: "sam",
-    initiation: { kind: "directUser", approval: "notRequired" },
-    status: index === 1 ? "partial" : "succeeded",
-    recordCount: index === 1 ? 2 : 1,
-    succeededCount: 1,
-    failedCount: index === 1 ? 1 : 0,
-    updatedAt: "2026-10-10T00:00:00.000Z",
-  }));
-  await page.route("**/api/projects", (route) =>
-    route.fulfill({ json: [project] }),
-  );
-  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/batch-definitions`, (route) =>
-    route.fulfill({ json: definitions }),
-  );
-  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/batch-runs?**`, (route) => {
-    const definitionId = new URL(route.request().url()).searchParams.get(
-      "definition_id",
-    );
-    return route.fulfill({
-      json: {
-        items: runs.filter(
-          (run) => !definitionId || run.definitionId === definitionId,
-        ),
-        nextOffset: null,
-      },
-    });
-  });
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs/*/results?**`,
-    (route) => {
-      const query = new URL(route.request().url()).searchParams;
-      const filtered =
-        query.get("filter_path") === "/structuredOutput/score" &&
-        query.get("equals") === "0.8" &&
-        query.get("aggregate_path") === "/structuredOutput/score";
-      const secondPage = query.get("offset") === "20";
-      return route.fulfill({
-        json: {
-          items: filtered
-            ? [
-                {
-                  datasetRecordId: secondPage ? "record-2" : "record-1",
-                  error: null,
-                  input: { load: 3 },
-                  structuredOutput: { score: 0.8 },
-                },
-              ]
-            : [
-                {
-                  datasetRecordId: "record-1",
-                  error: null,
-                  input: { load: 3 },
-                  structuredOutput: { score: 0.8 },
-                },
-                {
-                  datasetRecordId: "record-error",
-                  error: "Tool timed out",
-                  input: { load: 4 },
-                  structuredOutput: null,
-                },
-              ],
-          nextOffset: filtered && !secondPage ? 20 : null,
-          summary: {
-            totalCount: 2,
-            succeededCount: filtered ? 2 : 1,
-            failedCount: filtered ? 0 : 1,
-            numericCount: 2,
-            numericSum: 1.6,
-            numericMin: 0.8,
-            numericMax: 0.8,
-            numericAverage: 0.8,
-          },
-        },
-      });
-    },
-  );
-
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  const runsSection = page.getByRole("region", { name: "Recent Batch Runs" });
-  await expect(runsSection).toContainText("Load check");
-  await expect(runsSection).toContainText("Stress check");
-  await page
-    .getByRole("button", { name: "Inspect Batch Definition Stress check" })
-    .click();
-  await expect(page.getByLabel("Batch Run definition")).toHaveValue(
-    "definition-b",
-  );
-  await expect(
-    runsSection.getByRole("button", { name: "View Batch Run run-1" }),
-  ).toBeVisible();
-  await expect(
-    runsSection.getByRole("button", { name: "View Batch Run run-0" }),
+    page.getByRole("navigation", { name: "Operation types" }),
   ).toHaveCount(0);
-  await expect(page.getByLabel("Batch Run results")).toContainText(
-    "Stress check",
-  );
-  const resultView = page.getByLabel("Batch Run results");
-  await expect(resultView).toContainText(
-    "partial · 2 records · 1 succeeded · 1 failed",
-  );
-  await expect(resultView).toContainText("Tool timed out");
-  await resultView
-    .getByLabel("Filter field (JSON Pointer)")
-    .fill("/structuredOutput/score");
-  await resultView.getByLabel("Exact JSON value").fill("0.8");
-  await resultView
-    .getByLabel("Aggregate numeric field (JSON Pointer)")
-    .fill("/structuredOutput/score");
-  await resultView.getByRole("button", { name: "Apply result query" }).click();
-  await expect(resultView).toContainText("2 results · 2 succeeded · 0 failed");
-  await expect(resultView).toContainText("Average: 0.8");
-  await expect(resultView).toContainText("Record record-1");
-  await resultView.getByRole("button", { name: "Load more results" }).click();
-  await expect(resultView).toContainText("Record record-2");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Open Project navigation" }).click();
-  const mobileNavigation = page.getByRole("dialog", {
-    name: "Project navigation",
-  });
-  await mobileNavigation.getByRole("button", { name: "Operations" }).click();
-  const mobileResultView = mobileNavigation.getByLabel("Batch Run results");
-  await expect(mobileResultView.getByLabel("Result Set query")).toBeVisible();
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth >
-        document.documentElement.clientWidth,
-    ),
-  ).toBe(false);
+  await projectViews.getByRole("button", { name: "Library" }).click();
+  await projectViews.getByRole("button", { name: "Functions" }).click();
+  await expect(
+    page.getByRole("button", { name: "New Function" }),
+  ).toBeVisible();
 });
 
 test("Transform Definition selection scopes retained Runs while historical Runs remain reachable", async ({
@@ -1463,10 +1281,6 @@ test("Transform Definition selection scopes retained Runs while historical Runs 
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
     .getByRole("button", { name: "Functions" })
     .click();
   const retained = page.getByRole("region", { name: "Retained Runs" });
@@ -2126,10 +1940,6 @@ test("a Dataset Transform runs once over ordered Records", async ({ page }) => {
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
     .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("dataset");
@@ -2262,10 +2072,6 @@ test("a retained Transform output selection shows its source and selected values
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
     .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("output");
@@ -2436,10 +2242,6 @@ test("a Batch Result Set selection keeps row lineage in the Function Run", async
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
     .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("resultSet");
@@ -2597,10 +2399,6 @@ test("a retained MCP output selection is reviewable and traceable", async ({
   await page.goto("/");
   await page
     .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
     .getByRole("button", { name: "Functions" })
     .click();
   await page.getByLabel("Input source").selectOption("artifact");
@@ -2741,7 +2539,7 @@ test.describe("at phone width", () => {
     await expect(page.getByText("# Preview")).toBeVisible();
   });
 
-  test("Library Dataset and Batch Definition controls retain their dark, touch-ready treatment", async ({
+  test("Functions is reachable from mobile Project navigation", async ({
     page,
   }) => {
     const project = {
@@ -2750,95 +2548,35 @@ test.describe("at phone width", () => {
       name: "Design review",
       updatedAt: "2026-09-16T00:00:00.000Z",
     };
-    const dataset = {
-      id: "dataset-123",
-      name: "Load cases",
-      version: 1,
-      filePath: "/project/.datasets/dataset-123.json",
-      records: [{ id: "record-123", sourceKey: "LC-1" }],
-    };
-    const definition = {
-      datasetAvailable: true,
-      datasetId: dataset.id,
-      id: "definition-123",
-      name: "Cantilever check",
-      pluginId: "reference-calculation",
-      toolName: "calculate_cantilever_tip_load",
-    };
-
-    await page.route("**/api/projects", async (route) => {
-      await route.fulfill({ json: [project] });
-    });
-    await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
-      await route.fulfill({ json: [] });
-    });
-    await page.route(
-      `**/api/projects/${project.id}/artifacts`,
-      async (route) => {
-        await route.fulfill({ json: { artifacts: [] } });
-      },
+    await page.route("**/api/projects", (route) =>
+      route.fulfill({ json: [project] }),
     );
-    await page.route(
-      `**/api/projects/${project.id}/files/index`,
-      async (route) => {
-        await route.fulfill({
-          json: {
-            files: [
-              {
-                path: dataset.filePath,
-                version: 1,
-                updatedAt: project.updatedAt,
-              },
-            ],
-          },
-        });
-      },
+    await page.route(`**/api/projects/${project.id}/threads`, (route) =>
+      route.fulfill({ json: [] }),
     );
-    await page.route(
-      `**/api/projects/${project.id}/datasets`,
-      async (route) => {
-        await route.fulfill({ json: [dataset] });
-      },
+    await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
+      route.fulfill({ json: [] }),
     );
-    await page.route(
-      `**/api/projects/${project.id}/batch-definitions`,
-      async (route) => {
-        await route.fulfill({ json: [definition] });
-      },
+    await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+      route.fulfill({ json: [] }),
     );
 
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
     await page.getByRole("button", { name: "Open Project navigation" }).click();
     const drawer = page.getByRole("dialog", { name: "Project navigation" });
-
-    await drawer.getByRole("button", { name: "Library" }).click();
-    await expect(drawer.getByText("Load cases")).toBeVisible();
+    await drawer.getByRole("button", { name: "Functions" }).click();
     await expect(
-      drawer.getByRole("button", { name: "Load cases actions" }),
+      page.getByRole("button", { name: "New Function" }),
     ).toBeVisible();
-
-    await drawer.getByRole("button", { name: "Operations" }).click();
-    await drawer
-      .getByRole("navigation", { name: "Operation types" })
-      .getByRole("button", { name: "Batch Definitions" })
-      .click();
-    const recordSelector = drawer.getByLabel("Cantilever check Dataset Record");
-    await expect(recordSelector).toBeVisible();
-    await expect(recordSelector).toHaveCSS(
-      "background-color",
-      "rgb(27, 33, 26)",
-    );
-    await expect(recordSelector).toHaveCSS("color", "rgb(251, 253, 246)");
-    const runAllBounds = await drawer
-      .getByRole("button", { name: "Run all records" })
-      .boundingBox();
-    const selectorBounds = await recordSelector.boundingBox();
-    expect(runAllBounds).not.toBeNull();
-    expect(selectorBounds).not.toBeNull();
-    expect(selectorBounds!.y).toBeGreaterThan(
-      runAllBounds!.y + runAllBounds!.height,
-    );
-    expect(selectorBounds!.width).toBeGreaterThan(200);
+    await expect(
+      drawer.getByRole("button", { name: "Operations" }),
+    ).toHaveCount(0);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
   });
 });
 

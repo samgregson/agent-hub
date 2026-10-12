@@ -195,12 +195,12 @@ function runLabel(run: WorkflowRun, index: number) {
 
 export function WorkflowOverview({
   onOpenLibrary,
-  onOpenOperations,
+  onOpenFunction,
   onOpenChats,
   projectId,
 }: {
   onOpenLibrary: () => void;
-  onOpenOperations: (node: WorkflowNode) => void;
+  onOpenFunction: (node: WorkflowNode) => void;
   onOpenChats: () => void;
   projectId: string;
 }) {
@@ -675,14 +675,14 @@ export function WorkflowOverview({
                 <button onClick={onOpenLibrary} type="button">
                   Open Library
                 </button>
-              ) : (
+              ) : selectedNode.kind === "python" ? (
                 <button
-                  onClick={() => onOpenOperations(selectedNode)}
+                  onClick={() => onOpenFunction(selectedNode)}
                   type="button"
                 >
-                  Open Operations
+                  Open Function
                 </button>
-              )}
+              ) : null}
               <button onClick={() => setSelectedNodeId(null)} type="button">
                 Close details
               </button>

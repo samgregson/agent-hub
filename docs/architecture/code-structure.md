@@ -24,7 +24,6 @@ apps/web/src/
     workspace/                 # Project selection, navigation and panel state
     agent-ui/                  # assistant-ui composition and AG-UI adapter
     artifact-view-host/        # trusted chrome, sandbox host and fallback view
-    operation-calls/           # review/start and result inspection for Python and MCP calls
     workflows/                 # Workflow route forwarding, Definition editing, overview, and Run inspection
   shared/
     config/                    # validated browser/server configuration
@@ -106,9 +105,9 @@ These directions should be enforced by TypeScript restricted-import rules, Pytho
 
 The Workspace Module owns selected Project, activity view, selected Thread, selected Artifact or Source, and panel state. Project-scoped state is keyed by Project so switching Projects clears the visible selection and switching back can restore that Project's state.
 
-The Operation Calls web Module owns the shared review/start presentation for direct Python Function and MCP tool calls, including explicit Map calls. It consumes the owning backend Modules' plans and displays their retained Run results; it does not authorize or execute a call itself.
+The Workspace renders the Functions destination and the Workflow surface. Functions currently has legacy direct Run controls alongside authoring and preview; issue #49 will narrow it to authoring/testing. MCP call setup and Map policy belong in Workflow, and the separate Operation Calls catalog has been removed from the web application. Remaining direct Transform/Batch APIs and backend Modules are transitional while Workflow absorbs durable execution and contextual results.
 
-The Call Review API Module defines the common read-only review envelope for those four call shapes. Transform and Batch Execution still own planning, submission, authorization, and execution; the envelope captures their target, source, named ports, exact inputs, invocation bound, output kind, and agent approval rule.
+The Call Review API Module currently defines a shared read-only review envelope for legacy direct Transform/Batch calls and Workflow calls. The legacy direct paths are transitional under issue #49; Workflow will own call planning and invocation policy while Functions stays focused on authoring and testing.
 
 The Workflow Module owns saved Project graph definitions, version checks, and static port/cardinality/cycle validation. It resolves Project File and Dataset inputs, Function targets, and MCP targets through those Modules' Interfaces. A prepared Workflow Run pins the exact graph, Project File text and version, Dataset Record IDs and values, Function source and runtime identity, MCP schema and version, initiator, and request key. DAG execution schedules up to four dependency-ready nodes concurrently and applies one four-call limit across Map items and single calls. Checkpoint writes are serialized while node inputs, outputs, MCP target identities, and child Python Run IDs are retained. MCP Map dispatch validates its first item before fanning out. Startup marks active Runs interrupted; resumption reuses completed node and Map-item checkpoints, with deterministic child Run IDs for Python calls. A single MCP call with an unknown outcome is terminal and is never replayed automatically; repeat-safe MCP Map items may resume. Call execution remains with Transform and Plugin Gateway.
 
