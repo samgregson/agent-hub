@@ -21,11 +21,15 @@ One ordered JSON-object entry in a Dataset, identified by a stable host-issued I
 _Avoid_: Tool call, result record, table row without identity
 
 **Workflow Definition**:
-A durable Project-owned, acyclic dependency graph for a user-named task. It connects input sources and Workflow Steps with explicit data connections and execution policies; branches may converge on later steps. It can be reused for later executions and does not contain their results.
+A durable Project-owned, acyclic dependency graph for a user-named task. It connects Project sources, Workflow Inputs, literal values, and Workflow Steps through explicit bindings and execution policies; branches may converge on later steps. It can be reused for later executions and does not contain their results.
 _Avoid_: Batch Definition, one Run, numbered sequence, visual canvas
 
+**Workflow Input**:
+A value supplied when starting a Workflow Run to satisfy a declared input of the Workflow. It is captured with that Run and is distinct from a Function Preview default.
+_Avoid_: Preview default, Function parameter
+
 **Workflow Run**:
-One host-orchestrated execution of a Workflow Definition against captured inputs and a captured plan. It records decisions, step executions, outputs, and outcome so an earlier execution remains inspectable after inputs or the Definition change.
+One host-orchestrated execution of a Workflow Definition against captured Workflow Inputs, sources, and plan. It records decisions, step executions, outputs, and outcome so an earlier execution remains inspectable after inputs or the Definition change.
 _Avoid_: Agent Run, Batch Run, mutable result
 
 **Function**:
@@ -41,8 +45,12 @@ A Plugin-provided capability with a declared input and output contract. It remai
 _Avoid_: Python Function, user-authored Function
 
 **Workflow Step**:
-A configured node in a Workflow that calls a Python Function or MCP Tool. It owns graph connections, input bindings, and invocation policy; its named outputs can feed later steps or become Workflow outputs.
+A configured node in a Workflow that calls a Python Function or MCP Tool. It owns its graph bindings and invocation policy; its named outputs can feed later steps or become Workflow outputs.
 _Avoid_: Operation, Batch Definition, Function definition
+
+**Workflow Binding**:
+A graph-owned mapping that assigns a whole value or selected fields from a Project source, upstream step output, Workflow Input, or literal value to a target step input. Multiple bindings can assemble a target value; calculations and other actual transformations belong in Functions.
+_Avoid_: Adapter Function, implicit name matching
 
 **Map**:
 A Workflow step invocation policy that calls its target once for each member of a bounded collection. Each item call receives that item plus any configured shared inputs. Calling a Function once with a collection as its declared input is an ordinary call, not Map.
