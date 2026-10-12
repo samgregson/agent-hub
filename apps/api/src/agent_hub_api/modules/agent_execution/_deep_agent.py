@@ -131,11 +131,22 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "a node map, from/to edge keys, or an outputs map. Dataset source nodes expose "
         "ordered records. Project File nodes use kind file, the absolute /project path as "
         "ref_id, the current integer version, and expose captured text on the content output. "
+        "Before composing a graph, call discover_project_file_sources to get real /project "
+        "paths and current versions; never use /scratch paths for Workflow sources. "
         "Python Function nodes use kind python, the saved Function ID as ref_id, its revision "
         "as the integer version, and shape single or map; their input ports are the Function's "
-        "declared input names and their output port is result. MCP nodes use kind mcp, the "
+        "declared input names and their output port result passes the entire value matching "
+        "the Function's output schema. It does not unwrap object properties. Define output "
+        "shapes that match the next Function's expected input; a downstream input receives "
+        "the whole connected value. MCP nodes use kind mcp, the "
         "enabled Plugin ID as ref_id, the Plugin version as version, and the selected tool's "
-        "name as tool_name. Create or discover these targets before composing the graph. "
+        "name as tool_name. Python Functions are currently stored as Transform Definitions; "
+        "these are the same saved object, not separate entities. Use discover_project_transforms "
+        "and load_project_transform to get each Function's actual UUID ID, revision, input "
+        "names, and output schema. Never put a Function name in ref_id. Before creating or "
+        "revising a Workflow, call validate_project_workflow with the complete graph_json and "
+        "fix all reported errors. This read-only check does not save a Workflow. Only then "
+        "call the approval-gated create or revise tool. "
         "Creating or revising a "
         "Workflow invokes the approval "
         "card automatically. Use prepare_project_workflow_run when the user wants "
@@ -358,15 +369,15 @@ class PostgresDeepAgentRunner:
                 {
                     "create_project_transform": {
                         "allowed_decisions": ["approve", "reject"],
-                        "description": "Create the proposed Transform Definition?",
+                        "description": "Create the proposed Python Function?",
                     },
                     "update_project_transform": {
                         "allowed_decisions": ["approve", "reject"],
-                        "description": "Update the proposed Transform Definition?",
+                        "description": "Update the proposed Python Function?",
                     },
                     "delete_project_transform": {
                         "allowed_decisions": ["approve", "reject"],
-                        "description": "Delete the proposed Transform Definition?",
+                        "description": "Delete the proposed Python Function?",
                     },
                     "start_project_transform_run": {
                         "allowed_decisions": ["approve", "reject"],
@@ -1089,8 +1100,24 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
+        async def discover_project_file_sources() -> str:
+            """List ordinary durable Project Files and versions usable as Workflow inputs."""
+            items = await workflows.list_file_sources(access, project_id)
+            return json.dumps([{"path": item.path, "version": item.version} for item in items])
+
+        @tool
+        async def validate_project_workflow(graph_json: str) -> str:
+            """Validate a proposed Workflow graph without saving it or requesting approval."""
+            try:
+                graph = WorkflowGraph.from_json(graph_json)
+                await workflows.validate_graph(access, project_id, graph)
+            except WorkflowValidationError as error:
+                return f"Workflow graph is invalid: {error}"
+            return "Workflow graph is valid. It has not been saved."
+
+        @tool
         async def create_project_workflow(name: str, graph_json: str) -> str:
-            """Create a Workflow after approval; graph_json uses snake_case graph fields."""
+            """Create a validated Workflow after approval, using snake_case graph fields."""
             try:
                 graph = WorkflowGraph.from_json(graph_json)
                 item = await workflows.create(access, project_id, name, graph)
@@ -1105,7 +1132,7 @@ class PostgresDeepAgentRunner:
         async def revise_project_workflow(
             workflow_id: str, name: str, graph_json: str, expected_version: int
         ) -> str:
-            """Revise a Workflow after approval; graph_json uses snake_case graph fields."""
+            """Revise a validated Workflow after approval, using snake_case graph fields."""
             try:
                 graph = WorkflowGraph.from_json(graph_json)
                 item = await workflows.revise(
@@ -1126,6 +1153,8 @@ class PostgresDeepAgentRunner:
         tools: list[BaseTool] = [
             list_project_workflows,
             load_project_workflow,
+            discover_project_file_sources,
+            validate_project_workflow,
             create_project_workflow,
             revise_project_workflow,
         ]
@@ -1222,7 +1251,7 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def discover_project_transforms() -> str:
-            """List the saved Transform Definitions in this Project."""
+            """List saved Python Functions (Transform Definitions) with IDs and revisions."""
             definitions = await transforms.list(access, project_id)
             return json.dumps(
                 [
@@ -1233,7 +1262,7 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def load_project_transform(definition_id: str) -> str:
-            """Load one Transform Definition, including source and declared contracts."""
+            """Load a saved Python Function by UUID, including source and declared contracts."""
             item = await transforms.load(access, project_id, definition_id)
             return json.dumps(
                 {
@@ -1286,7 +1315,7 @@ class PostgresDeepAgentRunner:
         async def create_project_transform(
             name: str, source: str, input_selectors_json: str, output_schema_json: str
         ) -> str:
-            """Create a Project Transform Definition after approval.
+            """Create a saved Python Function after approval. It can be used by Workflow nodes.
 
             source is Python defining transform(inputs, parameters). input_selectors_json
             is a JSON object such as {"record":""} for the whole input record or
@@ -1306,7 +1335,14 @@ class PostgresDeepAgentRunner:
                     f"Transform Definition was not created: {error}. "
                     "Propose a corrected change for approval."
                 )
-            return f"Created Transform Definition {item.name} ({item.id})."
+            return json.dumps(
+                {
+                    "created": "python_function",
+                    "id": item.id,
+                    "name": item.name,
+                    "revision": item.revision,
+                }
+            )
 
         @tool
         async def update_project_transform(

@@ -24,6 +24,10 @@ from agent_hub_api.modules.datasets import (
     DatasetRecordInput,
     MemoryDatasetStore,
 )
+from agent_hub_api.modules.project_files import (
+    ProjectFileAccess,
+    create_memory_project_files,
+)
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transform_inputs import ArtifactSelection, ResultSetSelection
 from agent_hub_api.modules.transforms import (
@@ -92,7 +96,11 @@ def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
     assert "Do not use a node map, from/to edge keys, or an outputs map" in _AGENT_SYSTEM_PROMPT
     assert "saved Function ID as ref_id" in _AGENT_SYSTEM_PROMPT
     assert "Function's declared input names" in _AGENT_SYSTEM_PROMPT
-    assert "Create or discover these targets before composing the graph" in _AGENT_SYSTEM_PROMPT
+    assert "same saved object, not separate entities" in _AGENT_SYSTEM_PROMPT
+    assert "Never put a Function name in ref_id" in _AGENT_SYSTEM_PROMPT
+    assert "call validate_project_workflow" in _AGENT_SYSTEM_PROMPT
+    assert "discover_project_file_sources" in _AGENT_SYSTEM_PROMPT
+    assert "passes the entire value matching" in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -108,6 +116,10 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             return {"type": "object"}
 
     datasets = DatasetModule(projects, MemoryDatasetStore(), Schemas())
+    files = create_memory_project_files(projects)
+    file = await files.create_visible(
+        ProjectFileAccess(subject="sam"), project.id, "/demo.txt", "sample"
+    )
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
@@ -118,6 +130,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         transforms,
         None,
         MemoryWorkflowStore(),
+        project_files=files,
     )
     workflow_runs = WorkflowRunModule(
         workflows, datasets, transforms, None, MemoryWorkflowRunStore()
@@ -125,8 +138,9 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
     runner._model = cast(Any, object())
-    runner._project_files = cast(Any, object())
+    runner._project_files = files
     runner._plugin_gateway = None
+    runner._transforms = transforms
     runner._workflows = workflows
     runner._workflow_runs = workflow_runs
     runner._settings = cast(
@@ -156,7 +170,70 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         "approve",
         "reject",
     ]
+    assert (
+        captured["interrupt_on"]["create_project_transform"]["description"]
+        == "Create the proposed Python Function?"
+    )
     tools = {registered.name: registered for registered in captured["tools"]}
+    file_sources = json.loads(await tools["discover_project_file_sources"].ainvoke({}))
+    assert file_sources == [{"path": "/project/demo.txt", "version": file.version}]
+    graph_json = json.dumps(
+        {
+            "nodes": [{"id": "source", "kind": "dataset", "ref_id": dataset.id, "version": 1}],
+            "edges": [],
+            "outputs": [{"name": "records", "node": "source", "port": "records"}],
+        }
+    )
+    preflight = await tools["validate_project_workflow"].ainvoke({"graph_json": graph_json})
+    assert preflight == "Workflow graph is valid. It has not been saved."
+    function = await transforms.define(
+        owner,
+        project.id,
+        "normalize_text",
+        "def transform(inputs, parameters):\n    return {'result': inputs['text'].strip()}\n",
+        {"text": ""},
+        {"type": "object", "properties": {"result": {"type": "string"}}},
+    )
+    saved_functions = json.loads(await tools["discover_project_transforms"].ainvoke({}))
+    assert saved_functions == [
+        {"id": function.id, "name": "normalize_text", "revision": function.revision}
+    ]
+    function_graph = json.dumps(
+        {
+            "nodes": [
+                {
+                    "id": "source",
+                    "kind": "file",
+                    "ref_id": f"/project{file.path}",
+                    "version": file.version,
+                },
+                {
+                    "id": "normalize",
+                    "kind": "python",
+                    "ref_id": function.id,
+                    "version": function.revision,
+                },
+            ],
+            "edges": [
+                {
+                    "source_node": "source",
+                    "source_port": "content",
+                    "target_node": "normalize",
+                    "target_port": "text",
+                }
+            ],
+            "outputs": [{"name": "normalized", "node": "normalize", "port": "result"}],
+        }
+    )
+    function_preflight = await tools["validate_project_workflow"].ainvoke(
+        {"graph_json": function_graph}
+    )
+    assert function_preflight == "Workflow graph is valid. It has not been saved."
+    bad_function_graph = function_graph.replace(function.id, "normalize_text")
+    function_error = await tools["validate_project_workflow"].ainvoke(
+        {"graph_json": bad_function_graph}
+    )
+    assert "use the ID returned by discover_project_transforms" in function_error
     invalid = await tools["create_project_workflow"].ainvoke(
         {
             "name": "Invalid demo",
@@ -171,13 +248,6 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     )
     assert "Workflow graph is invalid" in invalid
 
-    graph_json = json.dumps(
-        {
-            "nodes": [{"id": "source", "kind": "dataset", "ref_id": dataset.id, "version": 1}],
-            "edges": [],
-            "outputs": [{"name": "records", "node": "source", "port": "records"}],
-        }
-    )
     created = json.loads(
         await tools["create_project_workflow"].ainvoke(
             {
@@ -1002,8 +1072,11 @@ async def test_invalid_approved_transform_proposal_returns_actionable_tool_error
             "output_schema_json": '{"type":"object"}',
         }
     )
-    assert created.startswith("Created Transform Definition")
+    created_function = json.loads(created)
+    assert created_function["created"] == "python_function"
     definition = (await transforms.list(access, project.id))[0]
+    assert created_function["id"] == definition.id
+    assert created_function["revision"] == definition.revision
     invalid_revision = await tools["update_project_transform"].ainvoke(
         {
             "definition_id": definition.id,

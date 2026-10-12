@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput, MemoryDatasetStore
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolNotAllowed
+from agent_hub_api.modules.project_files import ProjectFileAccess, create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import MemoryTransformStore, TransformModule
 from agent_hub_api.modules.workflows import (
@@ -85,6 +86,51 @@ async def test_project_can_save_and_revise_a_branching_workflow_definition() -> 
     assert revised.name == "Comparison"
     with pytest.raises(WorkflowValidationError, match="version changed"):
         await workflows.revise(owner, project.id, saved.id, "Stale", graph, expected_version=1)
+
+
+@pytest.mark.asyncio
+async def test_workflow_preflight_validates_without_saving_and_lists_file_sources() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="owner")
+    project = await projects.create(owner, "Analysis")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    transforms = TransformModule(projects, MemoryTransformStore())
+    files = create_memory_project_files(projects)
+    saved_file = await files.create_visible(
+        # The agent can inspect ordinary durable files before proposing a Workflow.
+        ProjectFileAccess(subject="owner"),
+        project.id,
+        "/demo.txt",
+        "sample",
+    )
+    workflows = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        transforms,
+        None,
+        MemoryWorkflowStore(),
+        project_files=files,
+    )
+    graph = WorkflowGraph(
+        (WorkflowNode("source", "file", "/project/demo.txt", saved_file.version),),
+        (),
+        (WorkflowOutput("content", "source", "content"),),
+    )
+
+    await workflows.validate_graph(owner, project.id, graph)
+    sources = await workflows.list_file_sources(owner, project.id)
+    assert [(source.path, source.version) for source in sources] == [
+        ("/project/demo.txt", saved_file.version)
+    ]
+    assert await workflows.list(owner, project.id) == ()
+
+    invalid = WorkflowGraph(
+        (WorkflowNode("missing", "python", "does-not-exist", 1),),
+        (),
+        (WorkflowOutput("result", "missing", "result"),),
+    )
+    with pytest.raises(WorkflowValidationError, match="does-not-exist"):
+        await workflows.validate_graph(owner, project.id, invalid)
 
 
 @pytest.mark.asyncio

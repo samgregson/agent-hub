@@ -19,7 +19,11 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginNotEnabled,
     PluginToolNotAllowed,
 )
-from agent_hub_api.modules.project_files import ProjectFileError, ProjectFilesModule
+from agent_hub_api.modules.project_files import (
+    ProjectFileAccess,
+    ProjectFileError,
+    ProjectFilesModule,
+)
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.modules.transforms import TransformModule, TransformNotFound
 
@@ -79,6 +83,14 @@ class WorkflowDefinition:
     version: int
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowFileSource:
+    """An ordinary durable Project File that can be pinned by a Workflow node."""
+
+    path: str
+    version: int
 
 
 class WorkflowNotFound(Exception):
@@ -177,6 +189,29 @@ class WorkflowDefinitionModule:
     async def list(self, access: ProjectAccess, project_id: str) -> Sequence[WorkflowDefinition]:
         await self._authorize(access, project_id)
         return await self._store.list(project_id)
+
+    async def validate_graph(
+        self, access: ProjectAccess, project_id: str, graph: WorkflowGraph
+    ) -> None:
+        """Validate a proposed graph without creating or revising a Workflow."""
+        await self._authorize(access, project_id)
+        await self._validate(access, project_id, graph)
+
+    async def list_file_sources(
+        self, access: ProjectAccess, project_id: str
+    ) -> Sequence[WorkflowFileSource]:
+        """List ordinary durable files with versions suitable for Workflow file nodes."""
+        await self._authorize(access, project_id)
+        if self._project_files is None:
+            return ()
+        files = await self._project_files.list_visible(
+            ProjectFileAccess(subject=access.subject), project_id
+        )
+        return tuple(
+            WorkflowFileSource(f"/project{file.path}", file.version)
+            for file in files
+            if not file.path.startswith(("/.datasets/", "/.artifacts/"))
+        )
 
     async def check_current(
         self, access: ProjectAccess, project_id: str, definition: WorkflowDefinition
@@ -316,7 +351,10 @@ class WorkflowDefinitionModule:
             try:
                 definition = await self._transforms.load(access, project_id, node.ref_id)
             except TransformNotFound as error:
-                raise WorkflowValidationError("Python Function is unavailable.") from error
+                raise WorkflowValidationError(
+                    f"Python Function ID {node.ref_id!r} is unavailable; use the ID returned "
+                    "by discover_project_transforms, not the Function name."
+                ) from error
             if definition.revision != node.version:
                 raise WorkflowValidationError(
                     "Function version changed; review the Workflow again."
