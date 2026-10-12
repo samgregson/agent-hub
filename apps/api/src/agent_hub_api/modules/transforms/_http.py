@@ -1,12 +1,9 @@
 from typing import Annotated
-from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
-from agent_hub_api.modules.artifacts import ArtifactDocument, ArtifactUserActionAccess
-from agent_hub_api.modules.datasets import DatasetValidationError
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
@@ -15,12 +12,10 @@ from agent_hub_api.modules.identity import (
 )
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms._application import (
-    OutputSelection,
     TransformDefinition,
     TransformExecutionError,
     TransformModule,
     TransformNotFound,
-    TransformRun,
     TransformValidationError,
 )
 
@@ -57,92 +52,10 @@ class PreviewRequest(_Model):
     parameters: dict[str, object]
 
 
-class FunctionCallRequest(_Model):
-    inputs: dict[str, object]
-    parameters: dict[str, object] = Field(default_factory=dict)
-
-
-class StartFunctionCallRequest(FunctionCallRequest):
-    expected_revision: int = Field(ge=1)
-
-
 class PreviewResponse(_Model):
     output: object
     runtime: str
     source_hash: str
-
-
-class DatasetSelectionPlanResponse(_Model):
-    selection: dict[str, object]
-    selected_count: int
-    invocation_count: int
-    output_location: str
-
-
-class OutputSelectionRequest(_Model):
-    source_run_id: str
-    output_path: str
-    expected_definition_revision: int = Field(ge=1)
-    filter_path: str | None = None
-    equals: str | int | float | bool | None = None
-    sort_path: str | None = None
-    descending: bool = False
-    limit: int | None = Field(default=None, ge=1, le=100)
-    parameters: dict[str, object] = Field(default_factory=dict)
-
-
-def _output_selection(body: OutputSelectionRequest) -> OutputSelection:
-    return OutputSelection(
-        source_run_id=body.source_run_id,
-        output_path=body.output_path,
-        expected_definition_revision=body.expected_definition_revision,
-        filter_path=body.filter_path,
-        equals=body.equals,
-        sort_path=body.sort_path,
-        descending=body.descending,
-        limit=body.limit,
-    )
-
-
-class RunResponse(_Model):
-    id: str
-    definition_id: str
-    status: str
-    definition_snapshot: dict[str, object]
-    inputs: dict[str, object]
-    parameters: dict[str, object]
-    input_hash: str
-    source_hash: str
-    runtime: str | None
-    package_hash: str | None
-    output: object | None
-    output_manifest: dict[str, object]
-    error: str | None
-    initiator_subject: str
-    initiation: dict[str, object]
-    limits: dict[str, object]
-    created_at: str
-    completed_at: str | None
-
-
-class RunPageResponse(_Model):
-    items: list[RunResponse]
-    next_offset: int | None
-
-
-class SaveDatasetRequest(_Model):
-    name: str
-
-
-class SaveArtifactRequest(_Model):
-    title: str
-
-
-class SaveDatasetResponse(_Model):
-    id: str
-    name: str
-    record_count: int
-    source_run_id: str
 
 
 def _response(definition: TransformDefinition) -> DefinitionResponse:
@@ -159,29 +72,6 @@ def _response(definition: TransformDefinition) -> DefinitionResponse:
         revision=definition.revision,
         created_at=definition.created_at.isoformat(),
         updated_at=definition.updated_at.isoformat(),
-    )
-
-
-def _run_response(run: TransformRun) -> RunResponse:
-    return RunResponse(
-        id=run.id,
-        definition_id=run.definition_id,
-        status=run.status,
-        definition_snapshot=dict(run.definition_snapshot),
-        inputs=dict(run.inputs),
-        parameters=dict(run.parameters),
-        input_hash=run.input_hash,
-        source_hash=run.source_hash,
-        runtime=run.runtime,
-        output=run.output,
-        package_hash=run.package_hash,
-        output_manifest=dict(run.output_manifest),
-        error=run.error,
-        initiator_subject=run.initiator_subject,
-        created_at=run.created_at.isoformat(),
-        initiation=dict(run.initiation),
-        limits=dict(run.limits),
-        completed_at=run.completed_at.isoformat() if run.completed_at else None,
     )
 
 
@@ -208,9 +98,7 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
 
     def failure(error: Exception) -> HTTPException:
         if isinstance(error, TransformNotFound):
-            return HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Transform not found"
-            )
+            return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Function not found")
         if isinstance(error, TransformExecutionError):
             status_code = {
                 "timeout": status.HTTP_504_GATEWAY_TIMEOUT,
@@ -252,25 +140,6 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
         except TransformNotFound as error:
             raise failure(error) from error
 
-    @router.get("/runs", response_model=RunPageResponse)
-    async def list_runs(
-        project_id: str,
-        request_context: Context,
-        definition_id: str | None = Query(default=None, alias="definitionId"),
-        limit: int = Query(default=20, ge=1, le=100),
-        offset: int = Query(default=0, ge=0),
-    ) -> RunPageResponse:
-        try:
-            page = await transforms.list_runs(
-                access(request_context), project_id, definition_id, limit, offset
-            )
-            return RunPageResponse(
-                items=[_run_response(run) for run in page.items],
-                next_offset=page.next_offset,
-            )
-        except (TransformNotFound, TransformExecutionError) as error:
-            raise failure(error) from error
-
     @router.get("/{definition_id}", response_model=DefinitionResponse)
     async def load(
         project_id: str, definition_id: str, request_context: Context
@@ -300,183 +169,6 @@ def create_transform_router(identity: IdentityModule, transforms: TransformModul
                 output=result.output,
                 runtime=result.runtime,
                 source_hash=result.source_hash,
-            )
-        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
-            raise failure(error) from error
-
-    @router.post("/{definition_id}/call/plan")
-    async def plan_function_call(
-        project_id: str,
-        definition_id: str,
-        body: FunctionCallRequest,
-        request_context: Context,
-    ) -> dict[str, object]:
-        try:
-            plan = await transforms.plan_function_call(
-                access(request_context),
-                project_id,
-                definition_id,
-                body.inputs,
-                body.parameters,
-            )
-            return dict(plan.snapshot())
-        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
-            raise failure(error) from error
-
-    @router.post(
-        "/{definition_id}/call",
-        response_model=RunResponse,
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def start_function_call(
-        project_id: str,
-        definition_id: str,
-        body: StartFunctionCallRequest,
-        request_context: Context,
-    ) -> RunResponse:
-        try:
-            run = await transforms.start_function_call(
-                access(request_context),
-                project_id,
-                definition_id,
-                body.inputs,
-                body.parameters,
-                expected_revision=body.expected_revision,
-            )
-            return _run_response(run)
-        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
-            raise failure(error) from error
-
-    @router.post(
-        "/{definition_id}/runs",
-        response_model=RunResponse,
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def start_run(
-        project_id: str,
-        definition_id: str,
-        body: PreviewRequest,
-        request_context: Context,
-    ) -> RunResponse:
-        try:
-            run = await transforms.start_run(
-                access(request_context),
-                project_id,
-                definition_id,
-                body.record,
-                body.parameters,
-            )
-            return _run_response(run)
-        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
-            raise failure(error) from error
-
-    @router.post(
-        "/{definition_id}/output-selection-plan",
-        response_model=DatasetSelectionPlanResponse,
-    )
-    async def plan_output_selection(
-        project_id: str,
-        definition_id: str,
-        body: OutputSelectionRequest,
-        request_context: Context,
-    ) -> DatasetSelectionPlanResponse:
-        try:
-            plan = await transforms.plan_output_selection(
-                access(request_context),
-                project_id,
-                definition_id,
-                _output_selection(body),
-                body.parameters,
-            )
-        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
-            raise failure(error) from error
-        return DatasetSelectionPlanResponse(
-            selection=dict(plan.snapshot()),
-            selected_count=plan.selected_count,
-            invocation_count=plan.invocation_count,
-            output_location="Function Run output",
-        )
-
-    @router.post(
-        "/{definition_id}/output-selection-runs",
-        response_model=RunResponse,
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def start_output_selected_run(
-        project_id: str,
-        definition_id: str,
-        body: OutputSelectionRequest,
-        request_context: Context,
-    ) -> RunResponse:
-        try:
-            run = await transforms.start_output_selected_run(
-                access(request_context),
-                project_id,
-                definition_id,
-                _output_selection(body),
-                body.parameters,
-            )
-        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
-            raise failure(error) from error
-        return _run_response(run)
-
-    @router.get("/runs/{run_id}", response_model=RunResponse)
-    async def load_run(project_id: str, run_id: str, request_context: Context) -> RunResponse:
-        try:
-            return _run_response(
-                await transforms.load_run(access(request_context), project_id, run_id)
-            )
-        except (TransformNotFound, TransformExecutionError) as error:
-            raise failure(error) from error
-
-    @router.post(
-        "/runs/{run_id}/save-dataset",
-        response_model=SaveDatasetResponse,
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def save_dataset(
-        project_id: str,
-        run_id: str,
-        body: SaveDatasetRequest,
-        request_context: Context,
-    ) -> SaveDatasetResponse:
-        try:
-            dataset = await transforms.save_run_as_dataset(
-                access(request_context), project_id, run_id, body.name
-            )
-            return SaveDatasetResponse(
-                id=dataset.id,
-                name=dataset.name,
-                record_count=len(dataset.records),
-                source_run_id=run_id,
-            )
-        except (
-            TransformNotFound,
-            TransformValidationError,
-            TransformExecutionError,
-            DatasetValidationError,
-        ) as error:
-            raise failure(error) from error
-
-    @router.post(
-        "/runs/{run_id}/save-artifact",
-        response_model=ArtifactDocument,
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def save_artifact(
-        project_id: str,
-        run_id: str,
-        body: SaveArtifactRequest,
-        request_context: Context,
-    ) -> ArtifactDocument:
-        try:
-            return await transforms.save_run_as_artifact(
-                ArtifactUserActionAccess(
-                    subject=request_context.subject, user_action_id=str(uuid4())
-                ),
-                project_id,
-                run_id,
-                body.title,
             )
         except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
             raise failure(error) from error

@@ -1144,27 +1144,9 @@ test("Functions has a dedicated Project destination without Operations subcatego
     await route.fulfill({ json: [] });
   });
   await page.route(
-    `**/api/projects/${project.id}/batch-definitions`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs?**`,
-    async (route) => {
-      await route.fulfill({ json: { items: [], nextOffset: null } });
-    },
-  );
-  await page.route(
     `**/api/projects/${project.id}/transforms`,
     async (route) => {
       await route.fulfill({ json: [] });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs?**`,
-    async (route) => {
-      await route.fulfill({ json: { items: [], nextOffset: null } });
     },
   );
 
@@ -1656,24 +1638,6 @@ test("the foundation fixture App renders a portable status Artifact", async ({
   await expect(
     page.frameLocator('iframe[title="Artifact App"]').locator("#status"),
   ).toHaveText("available");
-});
-
-test("selection planning and runs reach the Project API through the browser", async ({
-  request,
-}) => {
-  for (const endpoint of [
-    "output-selection-plan",
-    "output-selection-runs",
-    "result-set-selection-plan",
-    "result-set-selection-runs",
-  ]) {
-    const response = await request.post(
-      `/api/projects/missing/transforms/missing/${endpoint}`,
-      { data: {} },
-    );
-    expect(response.status()).toBe(422);
-    expect(response.headers()["content-type"]).toContain("application/json");
-  }
 });
 
 test("approving a tool call resumes through the AG-UI transport contract", async ({
