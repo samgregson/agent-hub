@@ -101,6 +101,8 @@ def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
     assert "call validate_project_workflow" in _AGENT_SYSTEM_PROMPT
     assert "discover_project_file_sources" in _AGENT_SYSTEM_PROMPT
     assert "passes the entire value matching" in _AGENT_SYSTEM_PROMPT
+    assert "Workflow input selectors are not applied" in _AGENT_SYSTEM_PROMPT
+    assert "Workflow output schema properties are inside the result value" in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -185,7 +187,9 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         }
     )
     preflight = await tools["validate_project_workflow"].ainvoke({"graph_json": graph_json})
-    assert preflight == "Workflow graph is valid. It has not been saved."
+    assert "structurally valid" in preflight
+    assert "Python code was not run" in preflight
+    assert "has not been saved" in preflight
     function = await transforms.define(
         owner,
         project.id,
@@ -228,7 +232,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     function_preflight = await tools["validate_project_workflow"].ainvoke(
         {"graph_json": function_graph}
     )
-    assert function_preflight == "Workflow graph is valid. It has not been saved."
+    assert "structurally valid" in function_preflight
     bad_function_graph = function_graph.replace(function.id, "normalize_text")
     function_error = await tools["validate_project_workflow"].ainvoke(
         {"graph_json": bad_function_graph}

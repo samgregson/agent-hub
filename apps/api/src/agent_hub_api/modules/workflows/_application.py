@@ -304,8 +304,19 @@ class WorkflowDefinitionModule:
             if not _NODE_ID.fullmatch(output.name) or output.name in names:
                 raise WorkflowValidationError("Workflow output names must be unique and valid.")
             names.add(output.name)
-            if output.node not in ports or output.port not in ports[output.node].outputs:
-                raise WorkflowValidationError("Workflow output refers to an unknown port.")
+            node_ports = ports.get(output.node)
+            if node_ports is None:
+                raise WorkflowValidationError(
+                    f"Workflow output {output.name!r} refers to unknown node {output.node!r}."
+                )
+            if output.port not in node_ports.outputs:
+                raise WorkflowValidationError(
+                    f"Workflow output {output.name!r} refers to unknown port {output.port!r} "
+                    f"on node {output.node!r}; available ports: "
+                    + ", ".join(sorted(node_ports.outputs))
+                    + ". Properties in an output schema are fields inside the node's result; "
+                    "they are not separate ports."
+                )
 
     async def _describe(self, access: ProjectAccess, project_id: str, node: WorkflowNode) -> _Ports:
         if node.kind == "file":

@@ -132,6 +132,28 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
     with pytest.raises(WorkflowValidationError, match="does-not-exist"):
         await workflows.validate_graph(owner, project.id, invalid)
 
+    function = await transforms.define(
+        owner,
+        project.id,
+        "summarize_text",
+        "def transform(inputs, parameters):\n    return {'result': '', 'word_count': 0}\n",
+        {"text": ""},
+        {
+            "type": "object",
+            "properties": {"result": {"type": "string"}, "word_count": {"type": "integer"}},
+        },
+    )
+    invalid_output = WorkflowGraph(
+        (
+            WorkflowNode("source", "file", "/project/demo.txt", saved_file.version),
+            WorkflowNode("summarize", "python", function.id, function.revision),
+        ),
+        (WorkflowEdge("source", "content", "summarize", "text"),),
+        (WorkflowOutput("word_count", "summarize", "word_count"),),
+    )
+    with pytest.raises(WorkflowValidationError, match="available ports: result"):
+        await workflows.validate_graph(owner, project.id, invalid_output)
+
 
 @pytest.mark.asyncio
 async def test_workflow_rejects_cycles_missing_ports_and_stale_targets() -> None:

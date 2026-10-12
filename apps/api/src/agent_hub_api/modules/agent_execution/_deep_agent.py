@@ -138,7 +138,12 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "declared input names and their output port result passes the entire value matching "
         "the Function's output schema. It does not unwrap object properties. Define output "
         "shapes that match the next Function's expected input; a downstream input receives "
-        "the whole connected value. MCP nodes use kind mcp, the "
+        "the whole connected value, and Workflow input selectors are not applied. Inspect the "
+        "Function source and output schema before wiring it into another Function. For example, "
+        "a Function expecting text.split() cannot accept an upstream result object unless its "
+        "source is adapted to read the object's field or the upstream output schema is changed "
+        "to string. Workflow output schema properties are inside the result value; they are not "
+        "separate output ports. MCP nodes use kind mcp, the "
         "enabled Plugin ID as ref_id, the Plugin version as version, and the selected tool's "
         "name as tool_name. Python Functions are currently stored as Transform Definitions; "
         "these are the same saved object, not separate entities. Use discover_project_transforms "
@@ -1107,13 +1112,17 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def validate_project_workflow(graph_json: str) -> str:
-            """Validate a proposed Workflow graph without saving it or requesting approval."""
+            """Check Workflow references and wiring; this does not run Python code."""
             try:
                 graph = WorkflowGraph.from_json(graph_json)
                 await workflows.validate_graph(access, project_id, graph)
             except WorkflowValidationError as error:
                 return f"Workflow graph is invalid: {error}"
-            return "Workflow graph is valid. It has not been saved."
+            return (
+                "Workflow graph is structurally valid and its references are current. "
+                "Python code was not run; input value compatibility must be checked from "
+                "the Function source and output schema. The Workflow has not been saved."
+            )
 
         @tool
         async def create_project_workflow(name: str, graph_json: str) -> str:
