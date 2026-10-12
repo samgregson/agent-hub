@@ -1,10 +1,8 @@
-import asyncio
-import hashlib
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import asdict
-from typing import Annotated, Any, cast
+from typing import Any, cast
 
 from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
@@ -18,7 +16,7 @@ from langchain.agents.middleware import (
     wrap_model_call,
 )
 from langchain_core.messages import HumanMessage
-from langchain_core.tools import BaseTool, InjectedToolCallId, tool
+from langchain_core.tools import BaseTool, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
@@ -35,12 +33,6 @@ from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
 )
 from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
-from agent_hub_api.modules.batch_execution import (
-    BatchExecutionModule,
-    BatchInitiation,
-    BatchRun,
-    BatchRunStatus,
-)
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
@@ -51,14 +43,7 @@ from agent_hub_api.modules.plugin_gateway import (
 )
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transform_inputs import (
-    ArtifactSelection,
-    ResultSetSelection,
-    TransformDatasetMode,
-    TransformInputModule,
-)
 from agent_hub_api.modules.transforms import (
-    OutputSelection,
     TransformInitiation,
     TransformModule,
     TransformValidationError,
@@ -74,102 +59,49 @@ from agent_hub_api.settings import Settings
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
     (
         "Use /project for durable files shared by every Thread in the selected Project "
-        "and /scratch for Thread-local working files.",
-        "Project file writes require user approval before they are persisted. When the "
-        "requested Project file name and content are clear, the write can begin. Start "
-        "the Project file write without asking for approval in chat first. The approval "
-        "card is shown automatically after the tool call. Do not tell the user that they "
-        "need to separately grant approval or ask whether you may proceed; wait for the "
-        "tool result after their decision.",
-        "Creating or changing a Project Artifact also requires user approval. When the "
-        "requested Artifact title or status is clear, call the Artifact tool without asking "
-        "for approval in chat first; the approval card is shown automatically.",
-        "Datasets are registered, typed Project Files under /project/.datasets. "
-        "You may read them through Project files or Project Dataset tools. "
-        "Use the Project Dataset tools for Dataset mutations; generic file writes cannot "
-        "change registered Dataset files. Batch Definitions remain separate Project records. "
-        "Dataset and Batch Definition mutations use the approval card automatically. "
-        "A queued or running Batch Run has pending results; null output during that state "
-        "does not mean its Transform failed. Report outputs only after terminal status.",
-        "For a Dataset whose Records already match a permitted repeat-safe MCP tool's "
-        "input schema, review plan_project_mcp_map and then start_project_mcp_map. "
-        "This explicitly maps the tool over the Records without creating a Batch "
-        "Definition. Python Transform code cannot call MCP tools; put MCP calls in "
-        "their own operation step.",
-        "For one MCP invocation, review plan_project_mcp_call with the exact JSON "
-        "arguments, then use start_project_mcp_call. The approval card appears "
-        "automatically. Inspect the retained Run result before reporting its output.",
-        "To apply a one-input Python Function independently to every Dataset Record, "
-        "review plan_project_python_map, then use start_project_python_map after "
-        "the automatic approval card. This Map passes each whole Record value to "
-        "the Function's named input; Definition JSON pointers are not applied.",
-        "Transform Definitions and Runs are durable Project records. Use the Project "
-        "Transform tools to inspect or change them; Definition changes, Run starts, and "
-        "output saves use the approval card automatically. Transform source is Python "
-        "executed by Pyodide and must define transform(inputs, parameters). The "
-        "input_selectors_json argument is a JSON object mapping input names to JSON "
-        'pointers: {"record":""} selects the whole record and {"value":"/value"} '
-        "selects one field. Each input name becomes a key in inputs. "
-        "input_schema_json is a JSON Schema object describing the named inputs object. "
-        "It must declare one property for every input selector; each property should specify "
-        "the JSON type and any useful constraints, plus required input names. "
-        "output_schema_json is a JSON Schema object. To run a Transform on a Dataset, "
-        "review it with plan_project_dataset_transform_run, then use the single "
-        "start_project_dataset_transform_run action with mode dataset (one invocation "
-        "over ordered Records, suitable for filtering, sorting, or aggregation) or "
-        "perRecord (one invocation per Record with a Batch Result Set). Do not claim "
-        "Transforms are limited to one Record at a time. For Dataset-wide "
-        'execution, {"values":"/selection/values"} passes the ordered Record values '
-        'to inputs["values"]. For perRecord, {"record":""} passes each full '
-        'Record value to inputs["record"]. Both modes accept parameters.',
-        "Never claim access to the host filesystem. When referring to a virtual file in "
-        "a response, link it as Markdown using its absolute /project or /scratch path.",
-        "Workflow Definitions are saved Project DAGs. Use list_project_workflows and "
-        "load_project_workflow to inspect them, then create_project_workflow or "
-        "revise_project_workflow for a user-requested change. graph_json must be an object "
-        "with nodes, edges, and outputs arrays. Each node is an object with id, kind, "
-        "ref_id, and version (optionally shape and tool_name); node kinds are dataset, file, "
-        "python, and mcp. Each edge is an object with source_node, source_port, target_node, "
-        "and target_port. Each output is an object with name, node, and port. Do not use "
-        "a node map, from/to edge keys, or an outputs map. Dataset source nodes expose "
-        "ordered records. Project File nodes use kind file, the absolute /project path as "
-        "ref_id, the current integer version, and expose captured text on the content output. "
-        "Before composing a graph, call discover_project_file_sources to get real /project "
-        "paths and current versions; never use /scratch paths for Workflow sources. "
-        "Python Function nodes use kind python, the saved Function ID as ref_id, its revision "
-        "as the integer version, and shape single or map; their input ports are the Function's "
-        "declared input names and their output port result passes the entire value matching "
-        "the Function's output schema. It does not unwrap object properties. Define output "
-        "shapes that match the next Function's expected input; a downstream input receives "
-        "the whole connected value, and Workflow input selectors are not applied. Inspect the "
-        "Function source and output schema before wiring it into another Function. For example, "
-        "a Function expecting text.split() cannot accept an upstream result object unless its "
-        "source is adapted to read the object's field or the upstream output schema is changed "
-        "to string. Workflow output schema properties are inside the result value; they are not "
-        "separate output ports. MCP nodes use kind mcp, the "
-        "enabled Plugin ID as ref_id, the Plugin version as version, and the selected tool's "
-        "name as tool_name. Python Functions are currently stored as Transform Definitions; "
-        "these are the same saved object, not separate entities. Use discover_project_transforms "
-        "and load_project_transform to get each Function's actual UUID ID, revision, input "
-        "names, input schema, and output schema. Never put a Function name in ref_id. "
-        "Before creating or revising a Workflow, call validate_project_workflow with the "
-        "complete graph_json and "
-        "fix all reported errors. This read-only check does not save a Workflow. Only then "
-        "call the approval-gated create or revise tool. "
-        "Creating or revising a "
-        "Workflow invokes the approval "
-        "card automatically. Use prepare_project_workflow_run when the user wants "
-        "to capture exact inputs for a Run, then execute_project_workflow_run to run "
-        "a prepared or recoverable interrupted graph. Both actions require an approval card. "
-        "Python Functions run through "
-        "the host Python runner, and MCP nodes run through the Project-enabled Plugin "
-        "Gateway. Completed nodes are reused on resume; an interrupted single MCP call "
-        "with unknown outcome is never dispatched again automatically. Inspect the saved "
-        "Run to report node outputs and failures.",
+        "and /scratch for Thread-local working files. Never claim access to the host filesystem. "
+        "Link virtual files with absolute /project or /scratch paths.",
+        "Project file writes, Dataset changes, Function changes, Workflow changes, and "
+        "Workflow execution require approval. Start the appropriate tool action without asking "
+        "for approval in chat; the approval card is shown automatically. Wait for its result.",
+        "Datasets are registered Project Files under /project/.datasets. Use Dataset tools for "
+        "Dataset changes; generic file writes cannot change registered Dataset files.",
+        "Python Functions are authored as transform(inputs, parameters). Use Function tools to "
+        "discover, inspect, create, revise, delete, or preview them. A preview is transient and "
+        "runs against one record; it does not create a durable Run. Function inputs are named "
+        "by input_selectors_json, a JSON object mapping each name to a JSON Pointer in that "
+        'record; {"record":""} selects the whole record. input_schema_json and '
+        "output_schema_json are JSON Schema objects. Use preview_project_function to check a "
+        "Function before connecting it to a Workflow.",
+        "Workflow is the only durable execution path for Python Functions and MCP tools. "
+        "Workflow graphs define data sources, wiring, and whether a Function processes one "
+        "value or a collection. Use Workflow tools to create, inspect, revise, prepare, execute, "
+        "resume, and inspect Workflow Runs. Report outputs from saved Workflow Runs.",
+        "Workflow Definitions are saved Project DAGs. graph_json must be an object with nodes, "
+        "edges, and outputs arrays. Each node has id, kind, ref_id, and version (optionally "
+        "shape and tool_name); node kinds are dataset, file, python, and mcp. Each edge has "
+        "source_node, source_port, target_node, and target_port. Each output has name, node, "
+        "and port. Do not use a node map, from/to edge keys, or an outputs map. Dataset sources "
+        "expose ordered records. Project File nodes use kind file, the absolute /project path "
+        "as ref_id, the current integer version, and expose captured text on content. Call "
+        "discover_project_file_sources before composing a graph; never use /scratch paths as "
+        "Workflow sources.",
+        "Python Function nodes use kind python, the saved Function UUID as ref_id, its revision "
+        "as version, and shape single or map. Their input ports are declared input names. The "
+        "result output passes the entire value matching the Function output schema; it does not "
+        "unwrap object properties. Never put a Function name in ref_id. Inspect Function source "
+        "and schemas before wiring adjacent nodes. Workflow output schema properties are inside "
+        "the result value, not separate "
+        "output ports. MCP nodes use kind mcp, the enabled Plugin ID as ref_id, Plugin version as "
+        "version, and selected tool name as tool_name.",
+        "Before creating or revising a Workflow, call validate_project_workflow with the complete "
+        "graph_json and fix every reported error. Validation does not save or execute the graph. "
+        "Then use the approval-gated create or revise tool. Prepare a Workflow Run to capture "
+        "its exact inputs, then execute the prepared Run. Completed nodes are reused on resume; "
+        "an interrupted single MCP call with unknown outcome is never dispatched again "
+        "automatically. Inspect the saved Run for node outputs and failures.",
     )
 )
-
-_AGENT_BATCH_WAIT_SECONDS = 30.0
 
 
 @tool
@@ -213,9 +145,7 @@ class PostgresDeepAgentRunner:
         plugin_gateway: PluginGatewayModule | None = None,
         artifacts: ArtifactModule | None = None,
         datasets: DatasetModule | None = None,
-        batches: BatchExecutionModule | None = None,
         transforms: TransformModule | None = None,
-        transform_inputs: TransformInputModule | None = None,
         workflows: WorkflowDefinitionModule | None = None,
         workflow_runs: WorkflowRunModule | None = None,
     ) -> None:
@@ -224,9 +154,7 @@ class PostgresDeepAgentRunner:
         self._plugin_gateway = plugin_gateway
         self._artifacts = artifacts
         self._datasets = datasets
-        self._batches = batches
         self._transforms = transforms
-        self._transform_inputs = transform_inputs
         self._workflows = workflows
         self._workflow_runs = workflow_runs
         self._stack: AsyncExitStack | None = None
@@ -287,19 +215,9 @@ class PostgresDeepAgentRunner:
         datasets = getattr(self, "_datasets", None)
         if datasets is not None and subject is not None:
             tools.extend(self._dataset_tools(datasets, project_id, subject))
-        batches = getattr(self, "_batches", None)
-        if batches is not None and subject is not None and thread_id and run_id:
-            tools.extend(self._batch_tools(batches, project_id, subject, thread_id, run_id))
         transforms = getattr(self, "_transforms", None)
         if transforms is not None and subject is not None:
-            tools.extend(self._transform_tools(transforms, project_id, subject, thread_id, run_id))
-        transform_inputs = getattr(self, "_transform_inputs", None)
-        if transform_inputs is not None and subject is not None:
-            tools.extend(
-                self._transform_input_tools(
-                    transform_inputs, project_id, subject, thread_id, run_id
-                )
-            )
+            tools.extend(self._function_tools(transforms, project_id, subject))
         workflows = getattr(self, "_workflows", None)
         workflow_runs = getattr(self, "_workflow_runs", None)
         if workflows is not None and subject is not None:
@@ -342,88 +260,25 @@ class PostgresDeepAgentRunner:
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Update the proposed Project Dataset?",
                     },
-                    "create_project_batch_definition": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Create the proposed Batch Definition?",
-                    },
-                    "delete_project_batch_definition": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Delete the proposed Batch Definition?",
-                    },
-                    "update_project_batch_definition": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Update the proposed Batch Definition?",
-                    },
                 }
             )
-        if batches is not None and subject is not None and thread_id and run_id:
-            interrupt_on["start_project_batch_run"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Start the proposed Batch Run?",
-            }
-            interrupt_on["start_project_mcp_map"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Map this MCP tool over the reviewed Dataset Records?",
-            }
-            interrupt_on["start_project_mcp_call"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Run this MCP tool with the reviewed arguments?",
-            }
-            interrupt_on["start_project_python_map"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Map this Python Function over the reviewed Dataset Records?",
-            }
         if transforms is not None and subject is not None:
             interrupt_on.update(
                 {
-                    "create_project_transform": {
+                    "create_project_function": {
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Create the proposed Python Function?",
                     },
-                    "update_project_transform": {
+                    "update_project_function": {
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Update the proposed Python Function?",
                     },
-                    "delete_project_transform": {
+                    "delete_project_function": {
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Delete the proposed Python Function?",
                     },
-                    "start_project_transform_run": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Start the proposed Transform Run?",
-                    },
-                    "start_project_function_call": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Run this Python Function with the reviewed named inputs?",
-                    },
-                    "save_project_transform_run_as_dataset": {
-                        "allowed_decisions": ["approve", "reject"],
-                        "description": "Save this Transform Run output as a Dataset?",
-                    },
                 }
             )
-            if thread_id is not None and run_id is not None:
-                interrupt_on["save_project_transform_run_as_artifact"] = {
-                    "allowed_decisions": ["approve", "reject"],
-                    "description": "Save this Transform Run output as an Artifact?",
-                }
-            interrupt_on["start_project_transform_output_selection_run"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Run the reviewed Transform output selection?",
-            }
-        if transform_inputs is not None and subject is not None:
-            interrupt_on["start_project_dataset_transform_run"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Run the reviewed Transform on this Dataset?",
-            }
-            interrupt_on["start_project_transform_result_set_selection_run"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Run the reviewed Result Set selection through this Transform?",
-            }
-            interrupt_on["start_project_transform_artifact_selection_run"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Run the reviewed MCP output selection through this Transform?",
-            }
         if workflows is not None and subject is not None:
             interrupt_on["create_project_workflow"] = {
                 "allowed_decisions": ["approve", "reject"],
@@ -573,31 +428,18 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def discover_project_datasets() -> str:
-            """List compact Dataset and Batch Definition summaries on demand."""
-            available = {dataset.id for dataset in await datasets.list_datasets(access, project_id)}
-            definitions = await datasets.list_definitions(access, project_id)
+            """List compact Dataset summaries on demand."""
+            items = await datasets.list_datasets(access, project_id)
             return json.dumps(
-                {
-                    "datasets": [
-                        {
-                            "id": dataset.id,
-                            "name": dataset.name,
-                            "recordCount": len(dataset.records),
-                            "version": dataset.version,
-                        }
-                        for dataset in await datasets.list_datasets(access, project_id)
-                    ],
-                    "batchDefinitions": [
-                        {
-                            "id": definition.id,
-                            "name": definition.name,
-                            "datasetId": definition.dataset_id,
-                            "datasetAvailable": definition.dataset_id in available,
-                            "tool": f"{definition.plugin_id}.{definition.tool_name}",
-                        }
-                        for definition in definitions
-                    ],
-                }
+                [
+                    {
+                        "id": dataset.id,
+                        "name": dataset.name,
+                        "recordCount": len(dataset.records),
+                        "version": dataset.version,
+                    }
+                    for dataset in items
+                ]
             )
 
         @tool
@@ -618,22 +460,6 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
-        async def load_project_batch_definition(definition_id: str) -> str:
-            """Load one Batch Definition when its Dataset mapping or target tool is needed."""
-            definition = await datasets.load_definition(access, project_id, definition_id)
-            return json.dumps(
-                {
-                    "id": definition.id,
-                    "name": definition.name,
-                    "datasetId": definition.dataset_id,
-                    "pluginId": definition.plugin_id,
-                    "toolName": definition.tool_name,
-                    "transformDefinitionId": definition.transform_definition_id,
-                    "argumentMappings": definition.argument_mappings,
-                }
-            )
-
-        @tool
         async def create_project_dataset(name: str, records_json: str) -> str:
             """Create a Dataset from a JSON array of Records after user approval."""
             dataset = await datasets.create_dataset(
@@ -646,7 +472,7 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def delete_project_dataset(dataset_id: str) -> str:
-            """Delete one Dataset after user approval; dependent Definitions become unavailable."""
+            """Delete one Dataset after user approval."""
             await datasets.delete_dataset(access, project_id, dataset_id)
             return f"Deleted Dataset {dataset_id}."
 
@@ -665,417 +491,12 @@ class PostgresDeepAgentRunner:
             )
             return f"Updated Dataset {dataset.name} ({dataset.id}, v{dataset.version})."
 
-        @tool
-        async def create_project_batch_definition(
-            dataset_id: str,
-            name: str,
-            plugin_id: str,
-            tool_name: str,
-            argument_mappings_json: str,
-        ) -> str:
-            """Create a schema-validated Batch Definition after user approval."""
-            try:
-                mappings = json.loads(argument_mappings_json)
-            except json.JSONDecodeError as error:
-                raise ValueError("Argument mappings must be a JSON object.") from error
-            if not isinstance(mappings, dict) or not all(
-                isinstance(key, str) and isinstance(value, str) for key, value in mappings.items()
-            ):
-                raise ValueError("Argument mappings must map argument names to JSON Pointers.")
-            definition = await datasets.create_definition(
-                access,
-                project_id,
-                dataset_id,
-                name,
-                plugin_id,
-                tool_name,
-                mappings,
-            )
-            return f"Created Batch Definition {definition.name} ({definition.id})."
-
-        @tool
-        async def delete_project_batch_definition(definition_id: str) -> str:
-            """Delete one Batch Definition after user approval."""
-            await datasets.delete_definition(access, project_id, definition_id)
-            return f"Deleted Batch Definition {definition_id}."
-
-        @tool
-        async def update_project_batch_definition(
-            definition_id: str,
-            dataset_id: str,
-            name: str,
-            plugin_id: str,
-            tool_name: str,
-            argument_mappings_json: str,
-        ) -> str:
-            """Update a schema-validated Batch Definition after user approval."""
-            definition = await datasets.update_definition(
-                access,
-                project_id,
-                definition_id,
-                dataset_id,
-                name,
-                plugin_id,
-                tool_name,
-                _argument_mappings(argument_mappings_json),
-            )
-            return f"Updated Batch Definition {definition.name} ({definition.id})."
-
         return [
             discover_project_datasets,
             load_project_dataset,
-            load_project_batch_definition,
             create_project_dataset,
             delete_project_dataset,
             update_project_dataset,
-            create_project_batch_definition,
-            delete_project_batch_definition,
-            update_project_batch_definition,
-        ]
-
-    @staticmethod
-    def _batch_tools(
-        batches: BatchExecutionModule,
-        project_id: str,
-        subject: str,
-        thread_id: str,
-        agent_run_id: str,
-    ) -> list[BaseTool]:
-        access = ProjectAccess(subject=subject)
-
-        @tool
-        async def plan_project_python_map(
-            definition_id: str, dataset_id: str, parameters_json: str = "{}"
-        ) -> str:
-            """Review one Python Function call per ordered Dataset Record.
-
-            The Function must declare exactly one named item input. The plan shows
-            every captured Record, target revision, invocation count, and output kind.
-            """
-            parameters = json.loads(parameters_json)
-            if not isinstance(parameters, dict):
-                raise ValueError("parameters_json must be a JSON object")
-            plan = await batches.plan_python_dataset_map(
-                access, project_id, definition_id, dataset_id, parameters
-            )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_python_map(
-            definition_id: str,
-            dataset_id: str,
-            expected_dataset_version: int,
-            expected_definition_revision: int,
-            tool_call_id: Annotated[str, InjectedToolCallId],
-            parameters_json: str = "{}",
-        ) -> str:
-            """Start the reviewed Python Function Map after user approval."""
-            parameters = json.loads(parameters_json)
-            if not isinstance(parameters, dict):
-                raise ValueError("parameters_json must be a JSON object")
-            key = hashlib.sha256(
-                f"agent-python-map:{thread_id}:{tool_call_id}".encode()
-            ).hexdigest()
-            run = await batches.submit_python_dataset_map(
-                access,
-                project_id,
-                definition_id,
-                dataset_id,
-                expected_dataset_version,
-                expected_definition_revision,
-                key,
-                initiation=BatchInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                    tool_call_id=tool_call_id,
-                ),
-                parameters=parameters,
-            )
-            task = await batches.enqueue(access, project_id, run.id)
-            try:
-                completed = await asyncio.wait_for(
-                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
-                )
-            except TimeoutError:
-                return (
-                    f"Python Map {run.id} is still running. Outputs are pending; "
-                    "inspect the Result Set later."
-                )
-            succeeded = sum(record.structured_output is not None for record in completed.records)
-            failed = sum(record.error is not None for record in completed.records)
-            return (
-                f"Python Map {run.id} {completed.status}: {succeeded} of "
-                f"{len(completed.records)} Records produced outputs; {failed} failed."
-            )
-
-        @tool
-        async def plan_project_mcp_call(plugin_id: str, tool_name: str, arguments_json: str) -> str:
-            """Review one permitted MCP call and its exact JSON arguments."""
-            arguments = json.loads(arguments_json)
-            if not isinstance(arguments, dict):
-                raise ValueError("arguments_json must be a JSON object")
-            plan = await batches.plan_mcp_call(access, project_id, plugin_id, tool_name, arguments)
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_mcp_call(
-            plugin_id: str,
-            tool_name: str,
-            arguments_json: str,
-            expected_plugin_version: str,
-            tool_call_id: Annotated[str, InjectedToolCallId],
-        ) -> str:
-            """Start the reviewed durable MCP call after user approval."""
-            arguments = json.loads(arguments_json)
-            if not isinstance(arguments, dict):
-                raise ValueError("arguments_json must be a JSON object")
-            key = hashlib.sha256(f"agent-mcp-call:{thread_id}:{tool_call_id}".encode()).hexdigest()
-            run = await batches.submit_mcp_call(
-                access,
-                project_id,
-                plugin_id,
-                tool_name,
-                arguments,
-                expected_plugin_version,
-                key,
-                initiation=BatchInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                    tool_call_id=tool_call_id,
-                ),
-            )
-            task = await batches.enqueue(access, project_id, run.id)
-            try:
-                completed = await asyncio.wait_for(
-                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
-                )
-            except TimeoutError:
-                return f"MCP Call {run.id} is still running; inspect its result later."
-            result = completed.records[0]
-            outcome = (
-                json.dumps(result.structured_output)
-                if result.structured_output is not None
-                else result.error
-            )
-            return f"MCP Call {run.id} {completed.status}: {outcome}"
-
-        @tool
-        async def plan_project_mcp_map(dataset_id: str, plugin_id: str, tool_name: str) -> str:
-            """Review a direct MCP Map over tool-ready Dataset Records.
-
-            Every Record must satisfy the permitted repeat-safe tool's input schema.
-            Returns exact ordered inputs, Dataset version, target, and invocation count.
-            """
-            plan = await batches.plan_mcp_dataset(
-                access, project_id, plugin_id, tool_name, dataset_id
-            )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_mcp_map(
-            dataset_id: str,
-            plugin_id: str,
-            tool_name: str,
-            expected_dataset_version: int,
-            expected_plugin_version: str,
-            tool_call_id: Annotated[str, InjectedToolCallId],
-        ) -> str:
-            """Start the reviewed MCP Map after approval using its Dataset and Plugin versions."""
-            key = hashlib.sha256(f"agent-mcp-map:{thread_id}:{tool_call_id}".encode()).hexdigest()
-            run = await batches.submit_mcp_dataset(
-                access,
-                project_id,
-                plugin_id,
-                tool_name,
-                dataset_id,
-                expected_dataset_version,
-                expected_plugin_version,
-                key,
-                initiation=BatchInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                    tool_call_id=tool_call_id,
-                ),
-            )
-            task = await batches.enqueue(access, project_id, run.id)
-            try:
-                completed = await asyncio.wait_for(
-                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
-                )
-            except TimeoutError:
-                return (
-                    f"Batch Run {run.id} is still running. Outputs are pending; "
-                    "check its status before interpreting Result Records."
-                )
-            succeeded = sum(record.structured_output is not None for record in completed.records)
-            failed = sum(record.error is not None for record in completed.records)
-            return (
-                f"Batch Run {run.id} {completed.status}: {succeeded} of "
-                f"{len(completed.records)} records produced outputs; {failed} failed."
-            )
-
-        @tool
-        async def start_project_batch_run(
-            definition_id: str,
-            tool_call_id: Annotated[str, InjectedToolCallId],
-            record_id: str | None = None,
-        ) -> str:
-            """Start one or all Records after approval; wait briefly for final results.
-
-            If the Run remains active, report that outputs are pending. Inspect results
-            only after the Run reaches succeeded, failed, or partial status.
-            """
-            key = hashlib.sha256(f"agent-batch:{thread_id}:{tool_call_id}".encode()).hexdigest()
-            initiation = BatchInitiation(
-                kind="agentRun",
-                approval="approved",
-                thread_id=thread_id,
-                agent_run_id=agent_run_id,
-                tool_call_id=tool_call_id,
-            )
-            if record_id is None:
-                run = await batches.submit_all(
-                    access, project_id, definition_id, key, initiation=initiation
-                )
-            else:
-                run = await batches.submit_one(
-                    access,
-                    project_id,
-                    definition_id,
-                    record_id,
-                    key,
-                    initiation=initiation,
-                )
-            task = await batches.enqueue(access, project_id, run.id)
-            try:
-                completed = await asyncio.wait_for(
-                    asyncio.shield(task), timeout=_AGENT_BATCH_WAIT_SECONDS
-                )
-            except TimeoutError:
-                return (
-                    f"Batch Run {run.id} is still running. Outputs are pending; "
-                    "check its status before interpreting Result Records."
-                )
-            succeeded = sum(record.structured_output is not None for record in completed.records)
-            failed = sum(record.error is not None for record in completed.records)
-            return (
-                f"Batch Run {run.id} {completed.status}: {succeeded} of "
-                f"{len(completed.records)} records produced outputs; {failed} failed."
-            )
-
-        @tool
-        async def list_project_batch_runs(
-            definition_id: str | None = None,
-            limit: int = 10,
-            offset: int = 0,
-        ) -> str:
-            """List compact durable Batch Run summaries for the selected Project."""
-            if not 1 <= limit <= 20:
-                raise ValueError("Choose a Batch Run page size from 1 to 20.")
-            page = await batches.list(
-                access,
-                project_id,
-                definition_id=definition_id,
-                limit=limit,
-                offset=offset,
-            )
-            return json.dumps(
-                {
-                    "items": [
-                        {
-                            "id": run.id,
-                            "definitionId": run.definition_id,
-                            "status": run.status,
-                            "recordCount": len(run.records),
-                            "succeededCount": sum(
-                                record.structured_output is not None for record in run.records
-                            ),
-                            "failedCount": sum(record.error is not None for record in run.records),
-                            "archived": run.archived_at is not None,
-                        }
-                        for run in page.items
-                    ],
-                    "nextOffset": page.next_offset,
-                }
-            )
-
-        @tool
-        async def inspect_project_batch_results(
-            run_id: str,
-            limit: int = 20,
-            offset: int = 0,
-            filter_path: str | None = None,
-            equals: str | int | float | bool | None = None,
-            minimum: float | None = None,
-            maximum: float | None = None,
-            sort_path: str | None = None,
-            descending: bool = False,
-            aggregate_path: str | None = None,
-        ) -> str:
-            """Read a completed Result Set page with optional scalar query and summary.
-
-            Queued or running records have pending outputs, not failed outputs.
-            """
-            if not 1 <= limit <= 20:
-                raise ValueError("Choose a Result Set page size from 1 to 20.")
-            run = await batches.load(access, project_id, run_id)
-            if run.status in {BatchRunStatus.queued, BatchRunStatus.running}:
-                return json.dumps({"runId": run_id, "status": run.status, "resultsReady": False})
-            page = await batches.inspect_results(
-                access,
-                project_id,
-                run_id,
-                limit=limit,
-                offset=offset,
-                filter_path=filter_path,
-                equals=equals,
-                minimum=minimum,
-                maximum=maximum,
-                sort_path=sort_path,
-                descending=descending,
-                aggregate_path=aggregate_path,
-            )
-            return json.dumps(
-                {
-                    "items": [
-                        {
-                            "datasetRecordId": record.dataset_record_id,
-                            "input": record.input,
-                            "structuredOutput": record.structured_output,
-                            "error": record.error,
-                        }
-                        for record in page.items
-                    ],
-                    "nextOffset": page.next_offset,
-                    "summary": {
-                        "totalCount": page.summary.total_count,
-                        "succeededCount": page.summary.succeeded_count,
-                        "failedCount": page.summary.failed_count,
-                        "numericCount": page.summary.numeric_count,
-                        "numericSum": page.summary.numeric_sum,
-                        "numericMin": page.summary.numeric_min,
-                        "numericMax": page.summary.numeric_max,
-                        "numericAverage": page.summary.numeric_average,
-                    },
-                }
-            )
-
-        return [
-            start_project_batch_run,
-            list_project_batch_runs,
-            inspect_project_batch_results,
-            plan_project_python_map,
-            start_project_python_map,
-            plan_project_mcp_call,
-            start_project_mcp_call,
-            plan_project_mcp_map,
-            start_project_mcp_map,
         ]
 
     @staticmethod
@@ -1228,12 +649,10 @@ class PostgresDeepAgentRunner:
         return tools
 
     @staticmethod
-    def _transform_tools(
-        transforms: TransformModule,
+    def _function_tools(
+        functions: TransformModule,
         project_id: str,
         subject: str,
-        thread_id: str | None = None,
-        agent_run_id: str | None = None,
     ) -> list[BaseTool]:
         access = ProjectAccess(subject=subject)
 
@@ -1255,17 +674,10 @@ class PostgresDeepAgentRunner:
                 raise ValueError("input_selectors_json must be a JSON object of names to pointers")
             return cast(dict[str, str], value)
 
-        def output_selection(raw: str) -> OutputSelection:
-            value = object_json(raw)
-            try:
-                return OutputSelection(**value)
-            except TypeError as error:
-                raise ValueError("Transform output selection fields are invalid.") from error
-
         @tool
-        async def discover_project_transforms() -> str:
-            """List saved Python Functions (Transform Definitions) with IDs and revisions."""
-            definitions = await transforms.list(access, project_id)
+        async def discover_project_functions() -> str:
+            """List saved Python Functions with IDs and revisions."""
+            definitions = await functions.list(access, project_id)
             return json.dumps(
                 [
                     {"id": item.id, "name": item.name, "revision": item.revision}
@@ -1274,9 +686,9 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
-        async def load_project_transform(definition_id: str) -> str:
+        async def load_project_function(function_id: str) -> str:
             """Load a saved Python Function by UUID, including source and declared contracts."""
-            item = await transforms.load(access, project_id, definition_id)
+            item = await functions.load(access, project_id, function_id)
             return json.dumps(
                 {
                     "id": item.id,
@@ -1291,42 +703,7 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
-        async def list_project_transform_runs(definition_id: str | None = None) -> str:
-            """List recent durable Transform Runs and their outcomes."""
-            page = await transforms.list_runs(access, project_id, definition_id)
-            return json.dumps(
-                [
-                    {
-                        "id": run.id,
-                        "definitionId": run.definition_id,
-                        "status": run.status,
-                        "createdAt": run.created_at.isoformat(),
-                    }
-                    for run in page.items
-                ]
-            )
-
-        @tool
-        async def load_project_transform_run(run_id: str) -> str:
-            """Inspect a Transform Run's captured inputs, output, and provenance."""
-            run = await transforms.load_run(access, project_id, run_id)
-            return json.dumps(
-                {
-                    "id": run.id,
-                    "status": run.status,
-                    "inputs": run.inputs,
-                    "parameters": run.parameters,
-                    "output": run.output,
-                    "error": run.error,
-                    "runtime": run.runtime,
-                    "packageHash": run.package_hash,
-                    "sourceHash": run.source_hash,
-                    "selection": run.definition_snapshot.get("selection"),
-                }
-            )
-
-        @tool
-        async def create_project_transform(
+        async def create_project_function(
             name: str,
             source: str,
             input_selectors_json: str,
@@ -1336,13 +713,12 @@ class PostgresDeepAgentRunner:
             """Create a saved Python Function after approval. It can be used by Workflow nodes.
 
             source is Python defining transform(inputs, parameters). input_selectors_json
-            is a JSON object such as {"record":""} for the whole input record or
-            {"value":"/value"} for one field. input_schema_json is an object JSON Schema
-            with a property for each named input and its accepted JSON type. output_schema_json
-            is a JSON Schema object.
+            maps each declared input to a JSON Pointer in a single input record; an empty
+            pointer selects the whole record. input_schema_json and output_schema_json are
+            JSON Schema objects.
             """
             try:
-                item = await transforms.define(
+                item = await functions.define(
                     access,
                     project_id,
                     name,
@@ -1353,8 +729,7 @@ class PostgresDeepAgentRunner:
                 )
             except (ValueError, TransformValidationError) as error:
                 return (
-                    f"Transform Definition was not created: {error}. "
-                    "Propose a corrected change for approval."
+                    f"Function was not created: {error}. Propose a corrected change for approval."
                 )
             return json.dumps(
                 {
@@ -1366,25 +741,20 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
-        async def update_project_transform(
-            definition_id: str,
+        async def update_project_function(
+            function_id: str,
             name: str,
             source: str,
             input_selectors_json: str,
             input_schema_json: str,
             output_schema_json: str,
         ) -> str:
-            """Revise a Project Transform Definition after approval.
-
-            source is Python defining transform(inputs, parameters). input_selectors_json
-            maps names to JSON pointers; an empty pointer selects the whole record.
-            input_schema_json declares the JSON Schema for the named inputs object.
-            """
+            """Revise a saved Python Function after approval."""
             try:
-                item = await transforms.revise(
+                item = await functions.revise(
                     access,
                     project_id,
-                    definition_id,
+                    function_id,
                     name,
                     source,
                     selector_json(input_selectors_json),
@@ -1393,330 +763,48 @@ class PostgresDeepAgentRunner:
                 )
             except (ValueError, TransformValidationError) as error:
                 return (
-                    f"Transform Definition was not updated: {error}. "
-                    "Propose a corrected change for approval."
+                    f"Function was not updated: {error}. Propose a corrected change for approval."
                 )
-            return f"Updated Transform Definition {item.name} ({item.id})."
+            return f"Updated Function {item.name} ({item.id})."
 
         @tool
-        async def delete_project_transform(definition_id: str) -> str:
-            """Delete a Transform Definition after user approval; retained Runs remain."""
-            await transforms.delete(access, project_id, definition_id)
-            return f"Deleted Transform Definition {definition_id}."
+        async def delete_project_function(function_id: str) -> str:
+            """Delete a saved Python Function after user approval."""
+            await functions.delete(access, project_id, function_id)
+            return f"Deleted Function {function_id}."
 
         @tool
-        async def start_project_transform_run(
-            definition_id: str, record_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Start a durable Transform Run after user approval."""
-            run = await transforms.start_run(
-                access,
-                project_id,
-                definition_id,
-                object_json(record_json),
-                object_json(parameters_json),
-                initiation=TransformInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                ),
-            )
-            return f"Transform Run {run.id} {run.status}."
-
-        @tool
-        async def plan_project_function_call(
-            definition_id: str, inputs_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Review one Python Function call with named JSON inputs and parameters.
-
-            The input names must match the Transform Definition's declared names.
-            This call does not apply its JSON Pointer selectors.
-            """
-            plan = await transforms.plan_function_call(
-                access,
-                project_id,
-                definition_id,
-                object_json(inputs_json),
-                object_json(parameters_json),
-            )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_function_call(
-            definition_id: str,
-            inputs_json: str,
-            expected_revision: int,
+        async def preview_project_function(
+            function_id: str,
+            record_json: str,
             parameters_json: str = "{}",
         ) -> str:
-            """Start one durable Python Function Run after reviewing inputs and approval."""
-            run = await transforms.start_function_call(
-                access,
-                project_id,
-                definition_id,
-                object_json(inputs_json),
-                object_json(parameters_json),
-                expected_revision=expected_revision,
-                initiation=TransformInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                ),
-            )
-            return f"Transform Run {run.id} {run.status}."
-
-        @tool
-        async def plan_project_transform_output_selection(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Review a bounded selection from a completed Transform Run output."""
-            plan = await transforms.plan_output_selection(
-                access,
-                project_id,
-                definition_id,
-                output_selection(selection_json),
-                object_json(parameters_json),
-            )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_transform_output_selection_run(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Run a reviewed Transform output selection after user approval."""
-            run = await transforms.start_output_selected_run(
-                access,
-                project_id,
-                definition_id,
-                output_selection(selection_json),
-                object_json(parameters_json),
-                initiation=TransformInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                ),
-            )
-            return f"Transform Run {run.id} {run.status}."
-
-        @tool
-        async def save_project_transform_run_as_dataset(run_id: str, name: str) -> str:
-            """Save a successful Transform Run output as a Dataset after user approval."""
-            dataset = await transforms.save_run_as_dataset(access, project_id, run_id, name)
-            return f"Saved Dataset {dataset.name} ({dataset.id}) from Transform Run {run_id}."
-
-        tools = [
-            discover_project_transforms,
-            load_project_transform,
-            list_project_transform_runs,
-            load_project_transform_run,
-            create_project_transform,
-            update_project_transform,
-            delete_project_transform,
-            start_project_transform_run,
-            plan_project_function_call,
-            start_project_function_call,
-            plan_project_transform_output_selection,
-            start_project_transform_output_selection_run,
-            save_project_transform_run_as_dataset,
-        ]
-        if thread_id is not None and agent_run_id is not None:
-
-            @tool
-            async def save_project_transform_run_as_artifact(run_id: str, title: str) -> str:
-                """Save a successful Transform Run output as an Artifact after approval."""
-                document = await transforms.save_run_as_artifact(
-                    ArtifactMutationAccess(
-                        subject=subject, thread_id=thread_id, run_id=agent_run_id
-                    ),
+            """Run one transient preview against a single record; this does not save a Run."""
+            try:
+                preview = await functions.preview(
+                    access,
                     project_id,
-                    run_id,
-                    title,
+                    function_id,
+                    object_json(record_json),
+                    object_json(parameters_json),
                 )
-                return (
-                    f"Saved Artifact {document.artifact.title} "
-                    f"({document.artifact.id.root}) from Transform Run {run_id}."
-                )
-
-            tools.append(save_project_transform_run_as_artifact)
-        return tools
-
-    @staticmethod
-    def _transform_input_tools(
-        inputs: TransformInputModule,
-        project_id: str,
-        subject: str,
-        thread_id: str | None = None,
-        agent_run_id: str | None = None,
-    ) -> list[BaseTool]:
-        access = ProjectAccess(subject=subject)
-
-        def parse_selection(raw: str) -> ResultSetSelection:
-            value = json.loads(raw)
-            if not isinstance(value, dict):
-                raise ValueError("Expected a JSON object")
-            try:
-                return ResultSetSelection(**value)
-            except TypeError as error:
-                raise ValueError("Result Set selection fields are invalid.") from error
-
-        def parse_artifact_selection(raw: str) -> ArtifactSelection:
-            value = json.loads(raw)
-            if not isinstance(value, dict):
-                raise ValueError("Expected a JSON object")
-            try:
-                return ArtifactSelection(**value)
-            except TypeError as error:
-                raise ValueError("MCP output selection fields are invalid.") from error
-
-        def parse_parameters(raw: str) -> dict[str, Any]:
-            value = json.loads(raw)
-            if not isinstance(value, dict):
-                raise ValueError("Expected a JSON object")
-            return value
-
-        @tool
-        async def plan_project_dataset_transform_run(
-            definition_id: str,
-            dataset_id: str,
-            mode: str,
-            parameters_json: str = "{}",
-        ) -> str:
-            """Review a Transform on all ordered Dataset Records before a durable Run.
-
-            mode is dataset for one invocation over the collection, or perRecord for
-            independent invocations and a Batch Result Set. Returns versions, Record
-            IDs, invocation count, and output kind for the approval proposal.
-            """
-            plan = await inputs.plan_dataset_run(
-                access,
-                project_id,
-                definition_id,
-                dataset_id,
-                TransformDatasetMode(mode),
-                parse_parameters(parameters_json),
+            except (ValueError, TransformValidationError) as error:
+                return f"Function preview failed: {error}"
+            return json.dumps(
+                {
+                    "output": preview.output,
+                    "runtime": preview.runtime,
+                    "sourceHash": preview.source_hash,
+                }
             )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_dataset_transform_run(
-            definition_id: str,
-            dataset_id: str,
-            mode: str,
-            expected_dataset_version: int,
-            expected_transform_revision: int,
-            tool_call_id: Annotated[str, InjectedToolCallId],
-            parameters_json: str = "{}",
-        ) -> str:
-            """Start the reviewed Dataset Transform in dataset or perRecord mode after approval."""
-            key = hashlib.sha256(
-                f"agent-dataset-transform:{thread_id}:{tool_call_id}".encode()
-            ).hexdigest()
-            run = await inputs.start_dataset_run(
-                access,
-                project_id,
-                definition_id,
-                dataset_id,
-                TransformDatasetMode(mode),
-                expected_dataset_version,
-                expected_transform_revision,
-                parse_parameters(parameters_json),
-                TransformInitiation("agentRun", "approved", thread_id, agent_run_id),
-                key,
-            )
-            if isinstance(run, BatchRun):
-                return (
-                    f"Batch Run {run.id} {run.status}; Result Records are pending "
-                    "until the Run reaches a terminal status."
-                )
-            return f"Transform Run {run.id} {run.status}."
-
-        @tool
-        async def plan_project_transform_result_set_selection(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Review selected values from a completed Batch Result Set for one Transform.
-
-            selection_json uses source_run_id, output_path (JSON Pointer, empty for
-            the whole structured output), expected_definition_revision, and optional
-            filter_path, equals, sort_path, descending, and limit.
-            """
-            plan = await inputs.plan_result_set_selection(
-                access,
-                project_id,
-                definition_id,
-                parse_selection(selection_json),
-                parse_parameters(parameters_json),
-            )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_transform_result_set_selection_run(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Start a reviewed Result Set selection Transform Run after approval."""
-            run = await inputs.start_result_set_run(
-                access,
-                project_id,
-                definition_id,
-                parse_selection(selection_json),
-                parse_parameters(parameters_json),
-                initiation=TransformInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                ),
-            )
-            return f"Transform Run {run.id} {run.status}."
-
-        @tool
-        async def plan_project_transform_artifact_selection(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Review retained MCP Tool Result Snapshot values for one Transform.
-
-            selection_json uses artifact_id, expected_artifact_version, output_path
-            (JSON Pointer into structured output), expected_definition_revision,
-            and optional filter_path, equals, sort_path, descending, and limit.
-            """
-            plan = await inputs.plan_artifact_selection(
-                access,
-                project_id,
-                definition_id,
-                parse_artifact_selection(selection_json),
-                parse_parameters(parameters_json),
-            )
-            return json.dumps(plan.snapshot())
-
-        @tool
-        async def start_project_transform_artifact_selection_run(
-            definition_id: str, selection_json: str, parameters_json: str = "{}"
-        ) -> str:
-            """Start a reviewed MCP output selection Transform Run after approval."""
-            run = await inputs.start_artifact_run(
-                access,
-                project_id,
-                definition_id,
-                parse_artifact_selection(selection_json),
-                parse_parameters(parameters_json),
-                initiation=TransformInitiation(
-                    kind="agentRun",
-                    approval="approved",
-                    thread_id=thread_id,
-                    agent_run_id=agent_run_id,
-                ),
-            )
-            return f"Transform Run {run.id} {run.status}."
 
         return [
-            plan_project_dataset_transform_run,
-            start_project_dataset_transform_run,
-            plan_project_transform_result_set_selection,
-            start_project_transform_result_set_selection_run,
-            plan_project_transform_artifact_selection,
-            start_project_transform_artifact_selection_run,
+            discover_project_functions,
+            load_project_function,
+            create_project_function,
+            update_project_function,
+            delete_project_function,
+            preview_project_function,
         ]
 
     async def close(self) -> None:

@@ -123,9 +123,7 @@ def create_app(
             resolved_plugin_gateway,
             resolved_artifacts,
             resolved_datasets,
-            resolved_batches,
             resolved_transforms,
-            resolved_transform_inputs,
             resolved_workflows,
             resolved_workflow_runs,
         )

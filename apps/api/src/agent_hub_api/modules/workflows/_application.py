@@ -367,7 +367,7 @@ class WorkflowDefinitionModule:
             except TransformNotFound as error:
                 raise WorkflowValidationError(
                     f"Python Function ID {node.ref_id!r} is unavailable; use the ID returned "
-                    "by discover_project_transforms, not the Function name."
+                    "by discover_project_functions, not the Function name."
                 ) from error
             if definition.revision != node.version:
                 raise WorkflowValidationError(
