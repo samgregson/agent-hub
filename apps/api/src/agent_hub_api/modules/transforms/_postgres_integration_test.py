@@ -32,15 +32,9 @@ async def test_transform_run_round_trips_through_postgres() -> None:
         ) -> tuple[object, str]:
             return {"value": 6}, "deno:2.9.7;pyodide:314.0.7"
 
-    class ToolSchemas:
-        async def input_schema(
-            self, access: ProjectAccess, project_id: str, plugin_id: str, tool_name: str
-        ) -> dict[str, object]:
-            return {}
-
     access = ProjectAccess(subject="transform-postgres-integration")
     projects = create_postgres_project_module(settings)
-    datasets = create_postgres_dataset_module(settings, projects, ToolSchemas())
+    datasets = create_postgres_dataset_module(settings, projects)
     transforms = create_postgres_transform_module(settings, projects, Runner(), datasets)
     project = await projects.create(access, "Transform run integration")
     try:

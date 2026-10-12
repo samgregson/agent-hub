@@ -84,7 +84,7 @@ async def test_workflow_captures_project_file_content_before_execution() -> None
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow files")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     project_files = create_memory_project_files(projects)
     file = await project_files.write(project.id, "/calculations/check.py", "template-v1")
     runner = _Runner()
@@ -150,7 +150,7 @@ async def test_execute_runs_branching_python_map_dag_and_is_idempotent() -> None
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access,
         project.id,
@@ -235,7 +235,7 @@ async def test_recovery_reexecutes_function_when_workflow_checkpoint_was_not_sav
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow recovery")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access,
         project.id,
@@ -303,7 +303,7 @@ async def test_mcp_workflow_without_structured_output_fails_after_dispatch() -> 
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access, project.id, "Inputs", [DatasetRecordInput({"value": 1})]
     )
@@ -364,7 +364,7 @@ async def test_recovery_does_not_repeat_an_unconfirmed_single_mcp_call() -> None
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow recovery")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access, project.id, "Inputs", [DatasetRecordInput({"value": 1})]
     )
@@ -440,7 +440,7 @@ async def test_execute_dispatches_single_mcp_call_and_retains_output() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
@@ -527,7 +527,7 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access,
         project.id,
@@ -644,7 +644,7 @@ async def test_mcp_map_merges_captured_project_file_input_into_each_dataset_reco
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow file map")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access,
         project.id,
@@ -743,7 +743,7 @@ async def test_workflow_uses_captured_python_target_after_definition_changes() -
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         access, project.id, "Inputs", [DatasetRecordInput({"value": 1})]
     )

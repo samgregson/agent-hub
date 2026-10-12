@@ -98,13 +98,13 @@ Additionally:
 
 These directions should be enforced by TypeScript restricted-import rules, Python import checks, and contract tests as the corresponding Modules appear.
 
-`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. The remaining Input Selection, Batch Execution, Batch Definition, and durable Transform Run code is legacy implementation slated for removal in issue #49. The target ownership model has Dataset for records, Function for Python source and transient previews, Workflow for bindings and durable execution, and Plugin Gateway for MCP calls. Do not add new features to the legacy execution paths.
+`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. The remaining Input Selection and durable Transform Run code is legacy implementation slated for removal in issue #49. Batch Execution, Batch Definition APIs, and their persistence have been retired in favor of Workflow. The target ownership model has Dataset for records, Function for Python source and transient previews, Workflow for bindings and durable execution, and Plugin Gateway for MCP calls. Do not add features to the legacy direct Run paths.
 
 ## Frontend ownership
 
 The Workspace Module owns selected Project, activity view, selected Thread, selected Artifact or Source, and panel state. Project-scoped state is keyed by Project so switching Projects clears the visible selection and switching back can restore that Project's state.
 
-The Workspace renders the Functions destination and the Workflow surface. Functions owns authoring and transient preview; MCP call setup and Map policy belong in Workflow. The separate Operation Calls catalog and direct Function Run routes have been removed. Remaining backend Batch and Transform Run implementations are transitional under issue #49.
+The Workspace renders the Functions destination and the Workflow surface. Functions owns authoring and transient preview; MCP call setup and Map policy belong in Workflow. The separate Operation Calls catalog and direct Function Run routes have been removed. Remaining backend Transform Run implementation is transitional under issue #49.
 
 The Call Review API Module defines a shared read-only review envelope used by Workflow preparation. Workflow owns graph call planning and invocation policy while Functions stays focused on authoring and testing.
 

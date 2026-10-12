@@ -101,7 +101,7 @@ async def test_dataset_selection_is_reviewed_and_captured_before_one_transform_r
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Selected values")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _NoToolSchema())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     data = await datasets.create_dataset(
         owner,
         project.id,
@@ -171,11 +171,6 @@ async def test_dataset_selection_is_reviewed_and_captured_before_one_transform_r
     with pytest.raises(TransformValidationError, match="version"):
         await transforms.start_selected_run(owner, project.id, definition.id, choice, {})
     assert len(await datasets.list_datasets(owner, project.id)) == 1
-
-
-class _NoToolSchema:
-    async def input_schema(self, *_: object) -> dict[str, object]:
-        return {"type": "object"}
 
 
 class _PinnedRunner:
@@ -626,19 +621,13 @@ async def test_successful_run_output_is_saved_as_dataset_only_on_explicit_comman
     owner = ProjectAccess(subject="sam")
     project = await projects.create(owner, "Bridge")
 
-    class ToolSchemas:
-        async def input_schema(
-            self, access: ProjectAccess, project_id: str, plugin_id: str, tool_name: str
-        ) -> dict[str, object]:
-            return {}
-
     class Runner(_PinnedRunner):
         async def execute(
             self, source: str, inputs: dict[str, object], parameters: dict[str, object]
         ) -> tuple[object, str]:
             return [{"value": 2}, {"value": 4}], "deno:2.9.7;pyodide:314.0.7"
 
-    datasets = DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     transforms = TransformModule(
         projects, MemoryTransformStore(), Runner(), MemoryTransformRunStore(), datasets
     )

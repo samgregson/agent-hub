@@ -92,7 +92,7 @@ function ToolCall({
     approval.resolution === undefined;
 
   useEffect(() => {
-    const target = approvalTarget(args, toolName);
+    const target = approvalTarget(args);
     if (!waitingForDecision || !target.path || !projectId) return;
     const path = target.path;
     const controller = new AbortController();
@@ -153,7 +153,7 @@ function ToolCall({
 
   if (approval) {
     const label = approvalLabel(toolName);
-    const target = approvalTarget(args, toolName);
+    const target = approvalTarget(args);
     const outcome = waitingForDecision
       ? "Needs approval"
       : approval.resolution === "cancelled"

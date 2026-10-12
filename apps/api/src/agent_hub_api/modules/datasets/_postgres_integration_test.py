@@ -34,7 +34,7 @@ async def test_dataset_is_a_versioned_project_file_with_dataset_owned_writes() -
 
     access = ProjectAccess(subject="dataset-file-integration")
     projects = create_postgres_project_module(settings)
-    datasets = create_postgres_dataset_module(settings, projects, ToolSchemas())
+    datasets = create_postgres_dataset_module(settings, projects)
     files = create_postgres_project_files(settings, projects)
     project = await projects.create(access, "Dataset file integration")
     try:

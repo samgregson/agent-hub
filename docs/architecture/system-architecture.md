@@ -82,7 +82,7 @@ The Artifact catalog projection may repeat queryable envelope fields, but it is 
 
 ### Workspace Module — web
 
-Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The navigation is Workflow, Chats, Library, Functions, Sources, and Plugins. Workflow is the primary task surface: users inspect and run the project DAG, follow data lineage, and open step inputs or outputs when needed. Its graph owns bindings and Map policy. Functions is intended for Python authoring and testing; enabled MCP tools remain distinct call targets available to Workflow steps. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers. The Operations catalog and Batch Definition UI have been removed; the Functions view still has legacy durable-run controls to retire as Workflow absorbs execution and contextual results under issue #49. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
+Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The navigation is Workflow, Chats, Library, Functions, Sources, and Plugins. Workflow is the primary task surface: users inspect and run the project DAG, follow data lineage, and open step inputs or outputs when needed. Its graph owns bindings and Map policy. Functions is intended for Python authoring and testing; enabled MCP tools remain distinct call targets available to Workflow steps. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers. The Operations catalog and Batch Definition UI have been removed. The remaining direct Transform Run backend is transitional under issue #49. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
 
 Its Interface is application state plus navigation commands. It does not know how the agent runs or how a Plugin validates an Artifact.
 
@@ -146,7 +146,7 @@ apply(context, artifact_id | new, semantic_operation, expected_version?) -> save
 
 ### Dataset Module — API
 
-Owns registered Dataset files, stable Record IDs and order, validation, and edits. A Workflow captures the selected Dataset version and exact ordered Record values before execution. Workflow execution never edits its input Dataset. Legacy Batch Definition routes and persistence are being removed under issue #49; they are not part of the target domain model.
+Owns registered Dataset files, stable Record IDs and order, validation, and edits. A Workflow captures the selected Dataset version and exact ordered Record values before execution. Workflow execution never edits its input Dataset. Batch Definition routes and Batch Execution have been removed; migration 0028 drops their legacy tables.
 
 ### Function Module — API
 
@@ -202,13 +202,12 @@ The application does not claim a cross-library transaction spanning a Run and ev
 5. The current VFS document, index projection, provenance, concurrency token, and compact Project change record commit atomically.
 6. The open Artifact view refreshes after the in-Thread result or on focus/reopen. Other Threads receive only a compact later-run change notice.
 
-### Dataset batch execution
+### Workflow execution
 
-1. A user directly starts a saved Batch Definition, or an agent proposes the same action and pauses for approval.
-2. Batch Execution captures Dataset-record IDs and values, the Batch Definition, its MCP tool/schema or Transform source/runtime/package identity, initiator provenance, and an idempotency key in a new Batch Run. Workflow Runs that connect a Project File to an MCP Map capture its exact path, version, and content alongside the Dataset Records; the Workflow validates merged inputs and rejects key collisions. A missing or stale file blocks preparation, and ordinary Project File edits never trigger automatic execution.
-3. The executor invokes the first real MCP tool or isolated Transform and validates its structured output before bounded fan-out. Transform-backed definitions use the same Result Set and retain the captured source even if the Transform Definition changes later.
-4. It persists Result Records and compact progress independently of the initiating browser or Agent Run.
-5. The workspace and later agent tools inspect native summaries or paginated/filterable results; an explicit save may create a curated Artifact.
+1. A user or approved agent prepares a Workflow Run from a saved Workflow Definition.
+2. Workflow captures source versions and exact input values, the Function source/runtime identity, and MCP target metadata before dispatch.
+3. It executes ready steps under shared concurrency bounds. Map applies to a bounded collection; repeat-safe MCP policy is checked by Plugin Gateway.
+4. The Workflow Run checkpoints step inputs, outputs, failures, and lineage. Its named outputs are the primary results; intermediate values remain available for inspection.
 
 ### Calculation-to-diagram later
 
@@ -239,22 +238,22 @@ The agent discovers a calculation Artifact summary, loads it on demand, and pass
 - Validate tool arguments, structured results, schema bindings, resource URIs, MIME types, origins, and sizes.
 - Intersect app-declared CSP and capabilities with catalog policy.
 - Require policy/approval for consequential actions; the model cannot grant authority. Agent and user actions share capabilities, while approval changes authorization for consequential agent actions.
-- Permit batch dispatch only for catalogued repeat-safe tools and validate ordinary MCP input/output schemas at the Batch Execution Module Interface.
+- Permit MCP Map dispatch only for catalogued repeat-safe tools and validate ordinary MCP input/output schemas at the Workflow and Plugin Gateway Interfaces.
 - Redact payloads by default and record identities, correlation IDs, policy decisions, timing, outcome, and provenance.
 - Do not add arbitrary code execution or host filesystem access to the foundation.
 
 ## Observability
 
-Use structured logs, metrics, and OpenTelemetry-compatible traces with the same correlation fields: request, user subject hash, Project, Thread, Agent Run, Batch Run, Plugin, tool call, Artifact, and approval IDs where applicable. Record state transitions and durations, not secret values or full Artifact/tool payloads by default.
+Use structured logs, metrics, and OpenTelemetry-compatible traces with the same correlation fields: request, user subject hash, Project, Thread, Agent Run, Workflow Run, Plugin, tool call, Artifact, and approval IDs where applicable. Record state transitions and durations, not secret values or full Artifact/tool payloads by default.
 
 Minimum operational signals are Run counts/duration/outcome, active and interrupted Runs, stream disconnects, checkpoint and reconciliation failures, MCP latency/errors/timeouts, approval latency, Artifact validation/conflicts, iframe/resource failures, and database latency/errors. Health checks distinguish process liveness from readiness of PostgreSQL and required configuration; remote Plugin failure does not make the core API unready.
 
 ## Verification strategy
 
 - Schema/contract tests generate Python and TypeScript consumers from the same language-neutral sources.
-- Module tests use deterministic model, checkpointer, persistence, batch-executor, and MCP adapters through the same Interfaces as production.
+- Module tests use deterministic model, checkpointer, persistence, Workflow execution, and MCP adapters through the same Interfaces as production.
 - AG-UI compatibility tests pin streaming, tool, error, cancellation, state, and interrupt/resume mappings.
-- PostgreSQL integration tests cover project scoping, checkpoint recovery, VFS sharing, Artifact atomicity, stale writes, Batch Run snapshots, and Result Set queries.
+- PostgreSQL integration tests cover project scoping, checkpoint recovery, VFS sharing, Artifact atomicity, and stale writes.
 - Plugin conformance tests run the fixture in MCP-only, standard MCP Apps, and Agent Hub-enhanced modes.
 - Browser tests cover workspace navigation, reload, approval, iframe isolation/fallback, and cross-Thread Artifact discovery.
 - Security tests cover forged identity/project scope, SSRF redirects/DNS results, hostile resource metadata, bridge capability denial, malformed results, and secret redaction.
@@ -265,7 +264,7 @@ Minimum operational signals are Run counts/duration/outcome, active and interrup
 - Team/multi-user Project collaboration and Agent Hub sign-in.
 - Arbitrary user-supplied MCP servers.
 - Artifact revision browsing, merging, and live cross-Thread synchronization.
-- Batch cancellation, automatic retry, bulk-to-bulk Map composition, and automatic agent wake-up after Batch completion.
+- Workflow cancellation, automatic retry, bulk-to-bulk Map composition, and unattended resumption.
 - User-level VFS layers, object storage, and large binary Artifacts.
 - Multiple simultaneous Artifact panes and finalized small-screen interaction.
 - A workflow/event engine for unattended cross-Plugin pipelines.

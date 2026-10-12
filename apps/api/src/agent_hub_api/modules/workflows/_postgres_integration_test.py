@@ -27,13 +27,9 @@ async def test_workflow_definition_round_trips_through_postgres() -> None:
         pytest.skip("Local PostgreSQL is unavailable")
     await connection.close()
 
-    class Schemas:
-        async def input_schema(self, *_: object) -> dict[str, object]:
-            return {"type": "object"}
-
     access = ProjectAccess(subject="workflow-postgres-integration")
     projects = create_postgres_project_module(settings)
-    datasets = create_postgres_dataset_module(settings, projects, Schemas())
+    datasets = create_postgres_dataset_module(settings, projects)
     transforms = create_postgres_transform_module(settings, projects)
     workflows = create_postgres_workflow_module(settings, projects, datasets, transforms, None)
     runs = create_postgres_workflow_run_module(settings, workflows, datasets, transforms, None)

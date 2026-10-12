@@ -37,7 +37,7 @@ async def test_prepared_run_captures_dataset_values_and_definition_before_edits(
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
@@ -87,7 +87,7 @@ async def test_prepared_run_idempotency_key_cannot_switch_workflows() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(owner, project.id, "Inputs", [])
     definitions = WorkflowDefinitionModule(
         projects,
@@ -120,7 +120,7 @@ async def test_prepared_run_pins_python_source_and_rejects_changed_revision() ->
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(owner, project.id, "Inputs", [])
     transforms = TransformModule(projects, MemoryTransformStore())
     function = await transforms.define(
@@ -166,7 +166,7 @@ async def test_prepared_run_route_round_trips_without_dispatching_calls() -> Non
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(owner, project.id, "Inputs", [])
     transforms = TransformModule(projects, MemoryTransformStore())
     definitions = WorkflowDefinitionModule(

@@ -19,10 +19,6 @@ from agent_hub_api.modules.artifacts import (
     create_artifact_router,
     create_postgres_artifact_module,
 )
-from agent_hub_api.modules.batch_execution import (
-    create_batch_execution_router,
-    create_postgres_batch_execution_module,
-)
 from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.observability import RequestLoggingMiddleware
@@ -76,21 +72,12 @@ def create_app(
         resolved_projects,
         resolved_plugin_gateway,
     )
-    resolved_datasets = create_postgres_dataset_module(
-        resolved_settings, resolved_projects, resolved_plugin_gateway
-    )
+    resolved_datasets = create_postgres_dataset_module(resolved_settings, resolved_projects)
     resolved_transforms = create_postgres_transform_module(
         resolved_settings,
         resolved_projects,
         datasets=resolved_datasets,
         artifacts=resolved_artifacts,
-    )
-    resolved_batches = create_postgres_batch_execution_module(
-        resolved_settings,
-        resolved_projects,
-        resolved_datasets,
-        resolved_plugin_gateway,
-        transforms=resolved_transforms,
     )
     resolved_workflows = create_postgres_workflow_module(
         resolved_settings,
@@ -129,7 +116,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await resolved_agent_execution.reconcile_non_terminal()
-        await resolved_batches.recover()
         await resolved_transforms.recover()
         await resolved_workflow_runs.recover()
         yield
@@ -160,11 +146,7 @@ def create_app(
         create_artifact_router(resolved_identity, resolved_artifacts), prefix="/api"
     )
     application.include_router(
-        create_dataset_router(resolved_identity, resolved_datasets, resolved_batches), prefix="/api"
-    )
-    application.include_router(
-        create_batch_execution_router(resolved_identity, resolved_batches),
-        prefix="/api",
+        create_dataset_router(resolved_identity, resolved_datasets), prefix="/api"
     )
     application.include_router(
         create_function_router(resolved_identity, resolved_transforms), prefix="/api"

@@ -34,7 +34,7 @@ async def test_project_can_save_and_revise_a_branching_workflow_definition() -> 
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
@@ -104,7 +104,7 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     transforms = TransformModule(projects, MemoryTransformStore())
     files = create_memory_project_files(projects)
     saved_file = await files.create_visible(
@@ -208,7 +208,7 @@ async def test_workflow_rejects_cycles_missing_ports_and_stale_targets() -> None
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     transforms = TransformModule(projects, MemoryTransformStore())
     function = await transforms.define(
         owner,
@@ -258,7 +258,7 @@ async def test_project_workflow_route_saves_reads_and_rejects_stale_edits() -> N
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
@@ -306,7 +306,7 @@ async def test_workflow_wires_permitted_mcp_ports_and_rejects_incompatible_input
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )

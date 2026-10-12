@@ -1,10 +1,7 @@
-from collections.abc import Mapping
-
 import pytest
 
 from agent_hub_api.modules.datasets import (
     DatasetModule,
-    DatasetNotFound,
     DatasetRecordInput,
     DatasetValidationError,
     MemoryDatasetStore,
@@ -12,23 +9,11 @@ from agent_hub_api.modules.datasets import (
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 
 
-class ToolSchemas:
-    async def input_schema(self, *_: object) -> Mapping[str, object]:
-        return {
-            "type": "object",
-            "required": ["length_m", "tip_load_kn"],
-            "properties": {
-                "length_m": {"type": "number"},
-                "tip_load_kn": {"type": "number"},
-            },
-        }
-
-
 async def create_module() -> tuple[ProjectAccess, str, DatasetModule]:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="sam")
     project = await projects.create(access, "Bridge")
-    return access, project.id, DatasetModule(projects, MemoryDatasetStore(), ToolSchemas())
+    return access, project.id, DatasetModule(projects, MemoryDatasetStore())
 
 
 @pytest.mark.asyncio
@@ -80,60 +65,3 @@ async def test_dataset_rejects_non_json_objects_and_foreign_record_ids() -> None
             "Good",
             [DatasetRecordInput({"number": 2}, id="not-a-host-id")],
         )
-
-
-@pytest.mark.asyncio
-async def test_batch_definition_validates_each_dataset_record_against_tool_schema() -> None:
-    access, project_id, datasets = await create_module()
-    dataset = await datasets.create_dataset(
-        access,
-        project_id,
-        "Load cases",
-        [DatasetRecordInput({"length": 1.5, "load": 12.5})],
-    )
-    definition = await datasets.create_definition(
-        access,
-        project_id,
-        dataset.id,
-        "Tip load calculation",
-        "reference-calculation",
-        "calculate_cantilever_tip_load",
-        {"length_m": "/length", "tip_load_kn": "/load"},
-    )
-
-    assert definition.argument_mappings == {"length_m": "/length", "tip_load_kn": "/load"}
-    with pytest.raises(DatasetValidationError, match="input schema"):
-        await datasets.create_definition(
-            access,
-            project_id,
-            dataset.id,
-            "Bad mapping",
-            "reference-calculation",
-            "calculate_cantilever_tip_load",
-            {"length_m": "/load"},
-        )
-
-
-@pytest.mark.asyncio
-async def test_deleting_a_dataset_keeps_its_definition_visible_but_unavailable() -> None:
-    access, project_id, datasets = await create_module()
-    dataset = await datasets.create_dataset(
-        access,
-        project_id,
-        "Load cases",
-        [DatasetRecordInput({"length": 1.5, "load": 12.5})],
-    )
-    definition = await datasets.create_definition(
-        access,
-        project_id,
-        dataset.id,
-        "Tip load calculation",
-        "reference-calculation",
-        "calculate_cantilever_tip_load",
-        {"length_m": "/length", "tip_load_kn": "/load"},
-    )
-    await datasets.delete_dataset(access, project_id, dataset.id)
-
-    assert await datasets.list_definitions(access, project_id) == (definition,)
-    with pytest.raises(DatasetNotFound):
-        await datasets.load_dataset(access, project_id, dataset.id)

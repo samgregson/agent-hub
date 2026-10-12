@@ -107,7 +107,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         async def input_schema(self, *_: object) -> dict[str, object]:
             return {"type": "object"}
 
-    datasets = DatasetModule(projects, MemoryDatasetStore(), Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     files = create_memory_project_files(projects)
     file = await files.create_visible(
         ProjectFileAccess(subject="sam"), project.id, "/demo.txt", "sample"

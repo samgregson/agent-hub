@@ -812,12 +812,6 @@ test("Datasets are created and deleted through Library commands", async ({
       await route.fulfill({ json: { files: [] } });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/batch-definitions`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({ json: created, status: 201 });
