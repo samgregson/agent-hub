@@ -20,54 +20,33 @@ _Avoid_: Generic JSON file, Artifact, result set
 One ordered JSON-object entry in a Dataset, identified by a stable host-issued ID and optionally carrying a user-provided source key.
 _Avoid_: Tool call, result record, table row without identity
 
-**Result Set**:
-A durable, queryable collection of machine-scale outcomes produced by one Batch Run. It is available to agents and users for inspection and may inform an Artifact, but is not itself automatically a curated Artifact. It is retained when its completed Batch Run is archived.
-_Avoid_: Artifact, chat transcript, plugin-owned database
-
-**Batch Run**:
-One bounded host-orchestrated execution over captured Dataset Records. Its target may be a Batch Definition or a Transform Definition invoked independently for each Record. It owns progress, initiator provenance, idempotency, and an immutable input and target snapshot independently of a browser or Agent Run. Agent-proposed execution requires approval; a directly authorized user action does not. Its completed Result Set is retained even when the Run is explicitly archived from normal workspace views.
-_Avoid_: Agent Run, Plugin job, Artifact, disposable job
-
-**Batch Definition**:
-A durable Project-owned setup that targets either one catalogue-approved MCP tool or one Transform Definition for each Dataset Record. It may be reused to start Batch Runs, but a direct per-Record Transform Run does not require one. Each Run captures the target it actually used.
-_Avoid_: Workflow, pipeline, Plugin protocol, run result
-
-**Binding**:
-A durable host-owned Project rule that maps an explicitly selected structured value to a declared argument of a target operation. Its mapping and execution policy are inspectable; it is not Plugin-owned code or an iframe-to-iframe connection.
-The first delivered kind binds one ordinary Project File's bounded UTF-8 content and expected file version to one declared MCP Batch Definition argument, broadcasting that scalar to the selected Dataset Records. The Binding has its own version for reviewed edits; a stale source blocks a new Run until explicitly rebound. Other source types, propagation policies, and Workflow graph scheduling remain future slices.
-_Avoid_: Plugin protocol extension, arbitrary parser, direct app communication
-
 **Workflow Definition**:
-A durable Project-owned, acyclic dependency graph for a user-named task. It connects input sources, operations, and Bindings with explicit execution and decision policies; branches may converge on later operations. It can be reused for later executions and does not contain their results.
+A durable Project-owned, acyclic dependency graph for a user-named task. It connects input sources and Workflow Steps with explicit data connections and execution policies; branches may converge on later steps. It can be reused for later executions and does not contain their results.
 _Avoid_: Batch Definition, one Run, numbered sequence, visual canvas
 
 **Workflow Run**:
-One host-orchestrated execution of a Workflow Definition against captured inputs and a captured plan. It records the decisions, child Runs, outputs, and outcome so an earlier execution remains inspectable after inputs or the Definition change.
+One host-orchestrated execution of a Workflow Definition against captured inputs and a captured plan. It records decisions, step executions, outputs, and outcome so an earlier execution remains inspectable after inputs or the Definition change.
 _Avoid_: Agent Run, Batch Run, mutable result
 
-**Function Definition**:
-A reusable Project-owned Python operation with named, schema-described inputs and outputs and a reviewable purpose. A Workflow references a versioned Function Definition rather than copying its source into each node.
-_Avoid_: Transform-only operation, workflow node, arbitrary untracked script
+**Function**:
+A reusable Project-owned Python function with reviewable purpose and named, schema-described inputs and outputs. Its authoring surface supports editing and testing code. The Function does not own data connections or invocation cardinality; a Workflow step configures those when it calls the Function.
+_Avoid_: Transform Definition, operation, workflow node, arbitrary untracked script
 
-**Function Call**:
-One configured use of a Function Definition or permitted MCP tool in a Workflow graph, connecting named inputs and outputs to other nodes. A Map call explicitly applies an item-input Function or MCP tool to each member of a collection; a collection-input Function receives the collection once.
-_Avoid_: Function Definition, implicit batch mode
+**MCP Tool**:
+A Plugin-provided capability with a declared input and output contract. It remains distinct from a Python Function and can be selected as a Workflow step target; Agent Hub mediates authorization, approval, execution bounds, and provenance.
+_Avoid_: Python Function, user-authored Function
 
-**Transform Definition**:
-A durable project-owned declaration of a user-authored data transformation, including its source, declared inputs, declared output, and runtime identity. It is distinct from a direct Binding and does not grant its source authority to access Project storage, secrets, or the network.
-_Avoid_: Binding expression, Plugin-owned state, notebook session
+**Workflow Step**:
+A configured node in a Workflow that calls a Python Function or MCP Tool. It owns graph connections, input bindings, and invocation policy; its named outputs can feed later steps or become Workflow outputs.
+_Avoid_: Operation, Batch Definition, Function definition
 
-**Input Selection**:
-A bounded, ordered choice of values from Project records or retained operation outputs. Its source, derivation, and membership can be inspected and captured for a Run; it need not be an entire Dataset.
-_Avoid_: Dataset, untraceable copied JSON, execution mode
+**Map**:
+A Workflow step invocation policy that calls its target once for each member of a bounded collection. Each item call receives that item plus any configured shared inputs. Calling a Function once with a collection as its declared input is an ordinary call, not Map.
+_Avoid_: Batch Definition, Function mode
 
-**Transform Run**:
-One bounded host-orchestrated invocation of a Transform Definition against an immutable selected input snapshot. The selected input may be one value or a collection. The Run records its runtime, inputs, outputs, provenance, and outcome. Repeated invocation over members of a selection is Batch execution.
-_Avoid_: Browser preview, Project File, Artifact
-
-**Transform execution mode**:
-The choice to invoke one Transform Definition once for all captured Dataset Records or independently for each Record. It changes invocation cardinality and the shape of retained results, not the identity of the Transform Definition.
-_Avoid_: Separate kind of Transform, preview setting
+**Workflow Output**:
+A named value produced by a Workflow Run and linked to the captured input and upstream step outputs that produced it. Outputs are the primary run result; intermediate step values remain available for inspection.
+_Avoid_: Unlinked result, Artifact
 
 **Project File**:
 A durable file in the Project Virtual Filesystem. Ordinary files are working material; registered typed files such as Datasets have their own identity and write rules. Files can be linked and previewed without becoming Artifacts; Artifact elevation remains explicit and reviewable.
