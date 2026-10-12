@@ -59,7 +59,9 @@ export function WorkflowDefinitionEditor({
     ])
       .then(async (responses) => {
         if (responses.some((response) => !response.ok)) {
-          throw new Error("Library and Operation items could not be loaded.");
+          throw new Error(
+            "Library items and Workflow call targets could not be loaded.",
+          );
         }
         const [datasets, files, functions, plugins] = (await Promise.all(
           responses.map((response) => response.json()),
@@ -168,7 +170,7 @@ export function WorkflowDefinitionEditor({
             error:
               cause instanceof Error
                 ? cause.message
-                : "Library and Operation items could not be loaded.",
+                : "Library items and Workflow call targets could not be loaded.",
             items: [],
             warning: null,
           });
@@ -393,9 +395,11 @@ export function WorkflowDefinitionEditor({
             {catalog.error}
           </p>
         ) : catalog.items === null ? (
-          <p role="status">Loading Library and Operations…</p>
+          <p role="status">Loading Library items and Workflow call targets…</p>
         ) : catalog.items.length === 0 ? (
-          <p>No eligible Library items or call definitions are available.</p>
+          <p>
+            No eligible Library items or Workflow call targets are available.
+          </p>
         ) : (
           <div className={styles.addNode}>
             <label>

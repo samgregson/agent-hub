@@ -21,15 +21,15 @@ from agent_hub_api.modules.datasets import (
     DatasetRecordInput,
     MemoryDatasetStore,
 )
+from agent_hub_api.modules.functions import (
+    FunctionModule,
+    MemoryFunctionStore,
+)
 from agent_hub_api.modules.project_files import (
     ProjectFileAccess,
     create_memory_project_files,
 )
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
-from agent_hub_api.modules.transforms import (
-    MemoryTransformStore,
-    TransformModule,
-)
 from agent_hub_api.modules.workflows import (
     MemoryWorkflowRunStore,
     MemoryWorkflowStore,
@@ -76,7 +76,8 @@ def test_agent_instructions_treat_datasets_as_registered_project_files() -> None
 def test_agent_instructions_describe_function_preview_and_workflow_execution() -> None:
     assert "Python Functions are authored as" in _AGENT_SYSTEM_PROMPT
     assert "transform(inputs, parameters)" in _AGENT_SYSTEM_PROMPT
-    assert '{"record":""}' in _AGENT_SYSTEM_PROMPT
+    assert "input_schema_json" in _AGENT_SYSTEM_PROMPT
+    assert "input_selectors" not in _AGENT_SYSTEM_PROMPT
     assert "preview" in _AGENT_SYSTEM_PROMPT
     assert "durable execution" in _AGENT_SYSTEM_PROMPT
 
@@ -115,24 +116,24 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
-    transforms = TransformModule(projects, MemoryTransformStore())
+    functions = FunctionModule(projects, MemoryFunctionStore())
     workflows = WorkflowDefinitionModule(
         projects,
         datasets,
-        transforms,
+        functions,
         None,
         MemoryWorkflowStore(),
         project_files=files,
     )
     workflow_runs = WorkflowRunModule(
-        workflows, datasets, transforms, None, MemoryWorkflowRunStore()
+        workflows, datasets, functions, None, MemoryWorkflowRunStore()
     )
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
     runner._model = cast(Any, object())
     runner._project_files = files
     runner._plugin_gateway = None
-    runner._transforms = transforms
+    runner._functions = functions
     runner._workflows = workflows
     runner._workflow_runs = workflow_runs
     runner._settings = cast(
@@ -180,12 +181,12 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     assert "structurally valid" in preflight
     assert "Python code was not run" in preflight
     assert "has not been saved" in preflight
-    function = await transforms.define(
+    function = await functions.define(
         owner,
         project.id,
         "normalize_text",
         "def transform(inputs, parameters):\n    return {'result': inputs['text'].strip()}\n",
-        {"text": ""},
+        {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
         {"type": "object", "properties": {"result": {"type": "string"}}},
     )
     saved_functions = json.loads(await tools["discover_project_functions"].ainvoke({}))
@@ -387,7 +388,7 @@ async def test_agent_exposes_authoring_and_workflow_tools_without_standalone_run
     runner._project_files = cast(Any, object())
     runner._plugin_gateway = None
     runner._datasets = cast(Any, object())
-    runner._transforms = cast(Any, object())
+    runner._functions = cast(Any, object())
     runner._workflows = cast(Any, object())
     runner._workflow_runs = cast(Any, object())
     runner._settings = cast(
@@ -440,11 +441,11 @@ async def test_agent_exposes_authoring_and_workflow_tools_without_standalone_run
 async def test_invalid_approved_function_proposal_returns_actionable_tool_error() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="sam")
-    project = await projects.create(access, "Transform proposal")
-    transforms = TransformModule(projects, MemoryTransformStore())
+    project = await projects.create(access, "Function proposal")
+    functions = FunctionModule(projects, MemoryFunctionStore())
     tools = {
         item.name: item
-        for item in PostgresDeepAgentRunner._function_tools(transforms, project.id, access.subject)
+        for item in PostgresDeepAgentRunner._function_tools(functions, project.id, access.subject)
     }
     input_schema_json = json.dumps(
         {
@@ -455,41 +456,38 @@ async def test_invalid_approved_function_proposal_returns_actionable_tool_error(
         }
     )
 
-    invalid_selectors = await tools["create_project_function"].ainvoke(
+    invalid_source = await tools["create_project_function"].ainvoke(
         {
             "name": "Copy dataset records",
             "source": "export default function transform(record, parameters) { return record; }",
-            "input_selectors_json": '[{"path":"$"}]',
             "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )
-    assert "input_selectors_json must be a JSON object" in invalid_selectors
+    assert "Function source is not valid Python" in invalid_source
 
     invalid_source = await tools["create_project_function"].ainvoke(
         {
             "name": "Copy dataset records",
             "source": "export default function transform(record, parameters) { return record; }",
-            "input_selectors_json": '{"record":""}',
             "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )
-    assert "Transform source is not valid Python" in invalid_source
-    assert await transforms.list(access, project.id) == ()
+    assert "Function source is not valid Python" in invalid_source
+    assert await functions.list(access, project.id) == ()
 
     created = await tools["create_project_function"].ainvoke(
         {
             "name": "Copy dataset records",
             "source": "def transform(inputs, parameters):\n    return dict(inputs['record'])\n",
-            "input_selectors_json": '{"record":""}',
             "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )
     created_function = json.loads(created)
     assert created_function["created"] == "python_function"
-    definition = (await transforms.list(access, project.id))[0]
+    definition = (await functions.list(access, project.id))[0]
     assert created_function["id"] == definition.id
     assert created_function["revision"] == definition.revision
     invalid_revision = await tools["update_project_function"].ainvoke(
@@ -497,13 +495,41 @@ async def test_invalid_approved_function_proposal_returns_actionable_tool_error(
             "function_id": definition.id,
             "name": "Copy dataset records",
             "source": "export default function transform(record) { return record; }",
-            "input_selectors_json": '{"record":""}',
             "input_schema_json": input_schema_json,
             "output_schema_json": '{"type":"object"}',
         }
     )
-    assert "Transform source is not valid Python" in invalid_revision
-    assert (await transforms.load(access, project.id, definition.id)).revision == 1
+    assert "Function source is not valid Python" in invalid_revision
+    assert (await functions.load(access, project.id, definition.id)).revision == 1
+
+
+@pytest.mark.asyncio
+async def test_unavailable_function_preview_returns_actionable_tool_error() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Function preview")
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    definition = await functions.define(
+        access,
+        project.id,
+        "Copy",
+        "def transform(inputs, parameters):\n    return inputs\n",
+        {"type": "object", "properties": {"value": {}}, "required": ["value"]},
+        {"type": "object"},
+    )
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._function_tools(
+            functions, project.id, access.subject
+        )
+    }
+
+    result = await tools["preview_project_function"].ainvoke(
+        {"function_id": definition.id, "inputs_json": '{"value":1}'}
+    )
+
+    assert "Function preview failed" in result
+    assert "runner_unavailable" in result
 
 
 @pytest.mark.asyncio

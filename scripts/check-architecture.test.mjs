@@ -12,13 +12,13 @@ test("architecture gate rejects API and web Module import cycles", async () => {
   try {
     await mkdir(join(fixture, "scripts"));
     await mkdir(
-      join(fixture, "apps/api/src/agent_hub_api/modules/batch_execution"),
+      join(fixture, "apps/api/src/agent_hub_api/modules/workflows"),
       {
         recursive: true,
       },
     );
     await mkdir(
-      join(fixture, "apps/api/src/agent_hub_api/modules/transforms"),
+      join(fixture, "apps/api/src/agent_hub_api/modules/functions"),
       {
         recursive: true,
       },
@@ -26,12 +26,6 @@ test("architecture gate rejects API and web Module import cycles", async () => {
     await mkdir(join(fixture, "apps/api/src/agent_hub_api/modules/datasets"), {
       recursive: true,
     });
-    await mkdir(
-      join(fixture, "apps/api/src/agent_hub_api/modules/input_selection"),
-      {
-        recursive: true,
-      },
-    );
     await mkdir(join(fixture, "apps/web/src/modules/first"), {
       recursive: true,
     });
@@ -49,21 +43,21 @@ test("architecture gate rejects API and web Module import cycles", async () => {
     await writeFile(
       join(
         fixture,
-        "apps/api/src/agent_hub_api/modules/batch_execution/_application.py",
+        "apps/api/src/agent_hub_api/modules/workflows/_application.py",
       ),
-      "from agent_hub_api.modules.transforms import TransformModule\n",
+      "from agent_hub_api.modules.functions import FunctionModule\n",
     );
     await writeFile(
       join(
         fixture,
-        "apps/api/src/agent_hub_api/modules/transforms/_application.py",
+        "apps/api/src/agent_hub_api/modules/functions/_application.py",
       ),
-      "from agent_hub_api.modules.batch_execution import BatchExecutionModule\n",
+      "from agent_hub_api.modules.workflows import WorkflowModule\n",
     );
     await writeFile(
       join(
         fixture,
-        "apps/api/src/agent_hub_api/modules/input_selection/_selection.py",
+        "apps/api/src/agent_hub_api/modules/functions/_private_import.py",
       ),
       "from agent_hub_api.modules.datasets._application import Dataset\n",
     );
@@ -98,13 +92,9 @@ test("architecture gate rejects API and web Module import cycles", async () => {
     );
     assert.match(
       diagnostics,
-      /API Module import cycle:.*batch_execution.*transforms/,
+      /API Module import cycle:.*(?:functions.*workflows|workflows.*functions)/,
     );
     assert.match(diagnostics, /web Module import cycle:.*first.*second/);
-    assert.match(
-      diagnostics,
-      /Input Selection must not import source or execution Modules/,
-    );
     assert.match(
       diagnostics,
       /imports private implementation of Module 'datasets'/,

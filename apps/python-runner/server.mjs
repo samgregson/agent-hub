@@ -1,4 +1,4 @@
-import { RUNNER_LIMITS, runTransform } from "./runner.mjs";
+import { RUNNER_LIMITS, runFunction } from "./runner.mjs";
 
 const decoder = new TextDecoder();
 let active = false;
@@ -68,7 +68,7 @@ export async function handle(request) {
     } catch {
       return json({ code: "invalid_request" }, 422);
     }
-    const result = await runTransform(payload);
+    const result = await runFunction(payload);
     if (result.ok) return json(result);
     const status = {
       invalid_request: 422,

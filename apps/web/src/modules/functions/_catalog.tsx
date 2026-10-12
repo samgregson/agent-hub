@@ -10,7 +10,6 @@ interface Definition {
   id: string;
   name: string;
   source: string;
-  inputSelectors: Record<string, string>;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
   runtime: string | null;
@@ -23,7 +22,7 @@ interface Preview {
   sourceHash: string;
   source: string;
   revision: number;
-  record: Record<string, unknown>;
+  inputs: Record<string, unknown>;
   parameters: Record<string, unknown>;
 }
 
@@ -63,7 +62,7 @@ export function FunctionCatalog({
   const root = `/api/projects/${encodeURIComponent(projectId)}/functions`;
   const [definitions, setDefinitions] = useState<Definition[] | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [recordJson, setRecordJson] = useState('{"load": 3}');
+  const [inputsJson, setInputsJson] = useState('{"load": 3}');
   const [parametersJson, setParametersJson] = useState("{}");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -109,19 +108,9 @@ export function FunctionCatalog({
     setBusy("definition");
     setError(null);
     try {
-      const inputSelectors = jsonObject(
-        String(form.get("inputSelectors")),
-        "Input selectors",
-      );
-      if (
-        Object.values(inputSelectors).some((value) => typeof value !== "string")
-      ) {
-        throw new Error("Each input selector must be a JSON Pointer string.");
-      }
       const body = {
         name: String(form.get("name")),
         source: String(form.get("source")),
-        inputSelectors,
         inputSchema: jsonObject(
           String(form.get("inputSchema")),
           "Input schema",
@@ -206,14 +195,14 @@ export function FunctionCatalog({
     setNotice(null);
     setPreview(null);
     try {
-      const record = jsonObject(recordJson, "Input record");
+      const inputs = jsonObject(inputsJson, "Function inputs");
       const parameters = jsonObject(parametersJson, "Parameters");
       const response = await fetch(
         `${root}/${encodeURIComponent(selectedDefinition.id)}/preview`,
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ record, parameters }),
+          body: JSON.stringify({ inputs, parameters }),
         },
       );
       if (!response.ok) {
@@ -223,13 +212,13 @@ export function FunctionCatalog({
       }
       const result = (await response.json()) as Omit<
         Preview,
-        "source" | "revision" | "record" | "parameters"
+        "source" | "revision" | "inputs" | "parameters"
       >;
       setPreview({
         ...result,
         source: selectedDefinition.source,
         revision: selectedDefinition.revision,
-        record,
+        inputs,
         parameters,
       });
     } catch (cause) {
@@ -340,19 +329,6 @@ export function FunctionCatalog({
                 />
               </Field>
               <div className={styles.formGrid}>
-                <Field label="Input selectors (JSON object)">
-                  <textarea
-                    defaultValue={JSON.stringify(
-                      selectedDefinition?.inputSelectors ?? { load: "/load" },
-                      null,
-                      2,
-                    )}
-                    name="inputSelectors"
-                    required
-                    rows={4}
-                    spellCheck={false}
-                  />
-                </Field>
                 <Field label="Input schema (JSON Schema)">
                   <textarea
                     defaultValue={JSON.stringify(
@@ -419,7 +395,6 @@ export function FunctionCatalog({
                 <pre>
                   {JSON.stringify(
                     {
-                      inputSelectors: selectedDefinition.inputSelectors,
                       inputSchema: selectedDefinition.inputSchema,
                       outputSchema: selectedDefinition.outputSchema,
                     },
@@ -429,16 +404,16 @@ export function FunctionCatalog({
                 </pre>
               </details>
               <div className={styles.formGrid}>
-                <Field label="Input record (JSON object)">
+                <Field label="Function inputs (JSON object)">
                   <textarea
                     disabled={busy !== null}
                     onChange={(event) => {
-                      setRecordJson(event.target.value);
+                      setInputsJson(event.target.value);
                       setPreview(null);
                     }}
                     rows={5}
                     spellCheck={false}
-                    value={recordJson}
+                    value={inputsJson}
                   />
                 </Field>
                 <Field label="Parameters (JSON object)">
@@ -474,7 +449,7 @@ export function FunctionCatalog({
                   <details>
                     <summary>Captured source and inputs</summary>
                     <pre>{preview.source}</pre>
-                    <pre>{JSON.stringify(preview.record, null, 2)}</pre>
+                    <pre>{JSON.stringify(preview.inputs, null, 2)}</pre>
                     <pre>{JSON.stringify(preview.parameters, null, 2)}</pre>
                   </details>
                   <pre>{JSON.stringify(preview.output, null, 2)}</pre>

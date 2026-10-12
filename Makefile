@@ -46,7 +46,7 @@ test-fixture:
 	uv run --project plugins/test-fixture --frozen pytest -q plugins/test-fixture/src/agent_hub_foundation_fixture/_server_test.py
 
 test-runner:
-	docker build --target test -f apps/transform-runner/Dockerfile .
+	docker build --target test -f apps/python-runner/Dockerfile .
 
 migrate:
 	uv run --package agent-hub-api alembic -c apps/api/alembic.ini upgrade head

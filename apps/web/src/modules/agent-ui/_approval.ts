@@ -32,9 +32,7 @@ export function isApprovalOnlyTool(toolName: string): boolean {
   return approvalOnlyTools.has(toolName);
 }
 
-export function approvalTarget(
-  args: unknown,
-): {
+export function approvalTarget(args: unknown): {
   artifactId?: string;
   path?: string;
   summary: string;

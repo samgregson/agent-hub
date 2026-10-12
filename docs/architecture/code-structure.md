@@ -24,6 +24,7 @@ apps/web/src/
     workspace/                 # Project selection, navigation and panel state
     agent-ui/                  # assistant-ui composition and AG-UI adapter
     artifact-view-host/        # trusted chrome, sandbox host and fallback view
+    functions/                 # Python Function authoring and transient preview
     workflows/                 # Workflow route forwarding, Definition editing, overview, and Run inspection
   shared/
     config/                    # validated browser/server configuration
@@ -39,14 +40,13 @@ apps/api/src/agent_hub_api/
     agent_transport/           # Project-authorized AG-UI orchestration and transport
     project_files/             # project-scoped Deep Agents filesystem
     call_review/               # common review shape for Python and MCP call plans
-    input_selection/           # bounded source-neutral value selection rules
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
-    transforms/                # Function authoring, contracts, previews; rename to functions under #49
+    functions/                 # Python Function authoring, contracts, previews and Workflow execution
     workflows/                 # versioned Definitions, graph validation, Run snapshots and orchestration
     persistence/               # shared transaction and database facilities
 
-apps/transform-runner/         # isolated Deno/Pyodide execution service
+apps/python-runner/         # isolated Deno/Pyodide execution service
 ```
 
 Only directories needed by the current slice are created. Calculation, diagram, unit, and structural-engineering Modules remain Plugin work after the foundation.
@@ -98,13 +98,13 @@ Additionally:
 
 These directions should be enforced by TypeScript restricted-import rules, Python import checks, and contract tests as the corresponding Modules appear.
 
-`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. The remaining Input Selection and durable Transform Run code is legacy implementation slated for removal in issue #49. Batch Execution, Batch Definition APIs, and their persistence have been retired in favor of Workflow. The target ownership model has Dataset for records, Function for Python source and transient previews, Workflow for bindings and durable execution, and Plugin Gateway for MCP calls. Do not add features to the legacy direct Run paths.
+`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Batch Execution, Batch Definition APIs, Input Selection, Transform Runs, and selector-based Function inputs have been removed. The ownership model has Dataset for records, Function for Python source and transient previews, Workflow for bindings and durable execution, and Plugin Gateway for MCP calls.
 
 ## Frontend ownership
 
 The Workspace Module owns selected Project, activity view, selected Thread, selected Artifact or Source, and panel state. Project-scoped state is keyed by Project so switching Projects clears the visible selection and switching back can restore that Project's state.
 
-The Workspace renders the Functions destination and the Workflow surface. Functions owns authoring and transient preview; MCP call setup and Map policy belong in Workflow. The separate Operation Calls catalog and direct Function Run routes have been removed. Remaining backend Transform Run implementation is transitional under issue #49.
+The Workspace renders the Functions destination and the Workflow surface. Functions owns authoring and transient preview; MCP call setup and Map policy belong in Workflow. The separate Operation Calls catalog and direct Function Run routes have been removed.
 
 The Call Review API Module defines a shared read-only review envelope used by Workflow preparation. Workflow owns graph call planning and invocation policy while Functions stays focused on authoring and testing.
 

@@ -284,7 +284,6 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
           id: "summary-function",
           name: "Summarize loads",
           revision: 1,
-          inputSelectors: { records: "$" },
           inputSchema: {
             type: "object",
             properties: { records: {} },
@@ -574,7 +573,6 @@ test("a Project Workflow can be created from Library and Functions", async ({
           id: "calculate",
           name: "Calculate loads",
           revision: 2,
-          inputSelectors: { records: "$" },
           inputSchema: {
             type: "object",
             properties: { records: {} },
@@ -1101,12 +1099,12 @@ test("Library identifies Artifacts, Datasets, and Project Files without duplicat
   ).toHaveCount(0);
 });
 
-test("Functions has a dedicated Project destination without Operations subcategories", async ({
+test("Functions is a dedicated Project destination and survives navigation", async ({
   page,
 }) => {
   const project = {
     createdAt: "2026-09-18T00:00:00.000Z",
-    id: "project-operations",
+    id: "project-functions",
     name: "Design review",
     updatedAt: "2026-09-18T00:00:00.000Z",
   };
@@ -1144,9 +1142,6 @@ test("Functions has a dedicated Project destination without Operations subcatego
   await expect(
     page.getByRole("button", { name: "New Function" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("navigation", { name: "Operation types" }),
-  ).toHaveCount(0);
   await projectViews.getByRole("button", { name: "Library" }).click();
   await projectViews.getByRole("button", { name: "Functions" }).click();
   await expect(

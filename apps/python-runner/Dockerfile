@@ -2,12 +2,12 @@ FROM denoland/deno:2.9.7@sha256:fa335acdf6b72106eda2cb6a8cb5f4187e7630e357467489
 
 ENV DENO_DIR=/deno-dir
 WORKDIR /app
-COPY apps/transform-runner/deno.lock apps/transform-runner/worker.mjs ./
+COPY apps/python-runner/deno.lock apps/python-runner/worker.mjs ./
 RUN deno cache --frozen-lockfile worker.mjs
-COPY apps/transform-runner/runner.mjs apps/transform-runner/server.mjs ./
+COPY apps/python-runner/runner.mjs apps/python-runner/server.mjs ./
 
 FROM runtime AS test
-COPY apps/transform-runner/runner.test.mjs ./
+COPY apps/python-runner/runner.test.mjs ./
 RUN deno test --no-check -A runner.test.mjs
 
 FROM runtime AS production

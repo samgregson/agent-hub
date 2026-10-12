@@ -9,7 +9,7 @@ export const RUNNER_LIMITS = Object.freeze({
   maxConcurrent: 1,
 });
 
-export async function runTransform(request, limits = {}) {
+export async function runFunction(request, limits = {}) {
   const timeoutMs = limits.timeoutMs ?? RUNNER_LIMITS.timeoutMs;
   const maxInputBytes = limits.maxInputBytes ?? RUNNER_LIMITS.maxInputBytes;
   const maxOutputBytes = limits.maxOutputBytes ?? RUNNER_LIMITS.maxOutputBytes;

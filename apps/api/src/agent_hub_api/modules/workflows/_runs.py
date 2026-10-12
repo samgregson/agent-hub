@@ -13,6 +13,12 @@ from jsonschema import ValidationError as JsonSchemaValidationError
 
 from agent_hub_api.modules.call_review import MAX_MAP_INVOCATIONS
 from agent_hub_api.modules.datasets import DatasetModule, DatasetNotFound
+from agent_hub_api.modules.functions import (
+    FunctionExecutionError,
+    FunctionModule,
+    FunctionNotFound,
+    FunctionValidationError,
+)
 from agent_hub_api.modules.plugin_gateway import (
     PluginCallLimitExceeded,
     PluginGatewayModule,
@@ -24,12 +30,6 @@ from agent_hub_api.modules.plugin_gateway import (
 )
 from agent_hub_api.modules.project_files import ProjectFileError, ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transforms import (
-    TransformExecutionError,
-    TransformModule,
-    TransformNotFound,
-    TransformValidationError,
-)
 
 from ._application import (
     WorkflowDefinitionModule,
@@ -129,7 +129,7 @@ class WorkflowRunModule:
         self,
         definitions: WorkflowDefinitionModule,
         datasets: DatasetModule,
-        transforms: TransformModule,
+        functions: FunctionModule,
         gateway: PluginGatewayModule | None,
         store: WorkflowRunStore,
         *,
@@ -137,7 +137,7 @@ class WorkflowRunModule:
     ) -> None:
         self._definitions = definitions
         self._datasets = datasets
-        self._transforms = transforms
+        self._functions = functions
         self._gateway = gateway
         self._store = store
         self._project_files = project_files
@@ -204,8 +204,8 @@ class WorkflowRunModule:
                 }
             elif node.kind == "python":
                 try:
-                    target = await self._transforms.load(access, project_id, node.ref_id)
-                except TransformNotFound as error:
+                    target = await self._functions.load(access, project_id, node.ref_id)
+                except FunctionNotFound as error:
                     raise WorkflowValidationError("Python Function is unavailable.") from error
                 if target.revision != node.version:
                     raise WorkflowValidationError(
@@ -216,7 +216,9 @@ class WorkflowRunModule:
                     "revision": target.revision,
                     "source": target.source,
                     "sourceHash": target.source_hash,
-                    "inputNames": list(target.input_selectors),
+                    "inputNames": list(
+                        cast(Mapping[str, object], target.input_schema.get("properties", {}))
+                    ),
                     "inputSchema": target.input_schema,
                     "outputSchema": target.output_schema,
                     "runtime": target.runtime,
@@ -469,23 +471,23 @@ class WorkflowRunModule:
                 await checkpoint()
                 try:
                     async with call_semaphore:
-                        output = await self._transforms.execute_workflow_function(
+                        output = await self._functions.execute_workflow_function(
                             access,
                             project_id,
                             target,
                             {input_names[0]: item},
                         )
                 except (
-                    TransformExecutionError,
-                    TransformNotFound,
-                    TransformValidationError,
+                    FunctionExecutionError,
+                    FunctionNotFound,
+                    FunctionValidationError,
                 ) as error:
                     item_results[index] = {
                         "index": index,
                         "input": item,
                         "status": "failed",
                         "error": (
-                            error.code if isinstance(error, TransformExecutionError) else str(error)
+                            error.code if isinstance(error, FunctionExecutionError) else str(error)
                         ),
                     }
                     execution_nodes[node.id] = {
@@ -499,7 +501,7 @@ class WorkflowRunModule:
                         None,
                         (
                             error.code
-                            if isinstance(error, TransformExecutionError)
+                            if isinstance(error, FunctionExecutionError)
                             else "stale_target"
                         ),
                     )
@@ -555,21 +557,21 @@ class WorkflowRunModule:
         await checkpoint()
         try:
             async with call_semaphore:
-                output = await self._transforms.execute_workflow_function(
+                output = await self._functions.execute_workflow_function(
                     access,
                     project_id,
                     target,
                     inputs,
                 )
-        except (TransformExecutionError, TransformNotFound, TransformValidationError) as error:
+        except (FunctionExecutionError, FunctionNotFound, FunctionValidationError) as error:
             execution_nodes[node.id] = {
                 "status": "failed",
                 "inputs": inputs,
-                "error": error.code if isinstance(error, TransformExecutionError) else str(error),
+                "error": error.code if isinstance(error, FunctionExecutionError) else str(error),
             }
             await checkpoint()
             return None, (
-                error.code if isinstance(error, TransformExecutionError) else "stale_target"
+                error.code if isinstance(error, FunctionExecutionError) else "stale_target"
             )
         execution_nodes[node.id] = {
             "status": "succeeded",

@@ -5,11 +5,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput, MemoryDatasetStore
+from agent_hub_api.modules.functions import FunctionModule, MemoryFunctionStore
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolNotAllowed
 from agent_hub_api.modules.project_files import ProjectFileAccess, create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
-from agent_hub_api.modules.transforms import MemoryTransformStore, TransformModule
 from agent_hub_api.modules.workflows import (
     MemoryWorkflowStore,
     WorkflowDefinitionModule,
@@ -38,14 +38,12 @@ async def test_project_can_save_and_revise_a_branching_workflow_definition() -> 
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
-    transforms = TransformModule(projects, MemoryTransformStore())
-    map_function = await transforms.define(
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    map_function = await functions.define(
         owner,
         project.id,
         "Double",
         "def transform(inputs, parameters):\n    return {}\n",
-        {"item": "/item"},
-        {"type": "object"},
         input_schema={
             "type": "object",
             "properties": {
@@ -57,18 +55,21 @@ async def test_project_can_save_and_revise_a_branching_workflow_definition() -> 
             },
             "required": ["item"],
         },
+        output_schema={"type": "object"},
     )
-    join_function = await transforms.define(
+    join_function = await functions.define(
         owner,
         project.id,
         "Compare",
         "def transform(inputs, parameters):\n    return {}\n",
-        {"left": "/left", "right": "/right"},
+        {
+            "type": "object",
+            "properties": {"left": {}, "right": {}},
+            "required": ["left", "right"],
+        },
         {"type": "object"},
     )
-    workflows = WorkflowDefinitionModule(
-        projects, datasets, transforms, None, MemoryWorkflowStore()
-    )
+    workflows = WorkflowDefinitionModule(projects, datasets, functions, None, MemoryWorkflowStore())
     graph = WorkflowGraph(
         nodes=(
             WorkflowNode("source", "dataset", dataset.id, dataset.version),
@@ -105,7 +106,7 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
     datasets = DatasetModule(projects, MemoryDatasetStore())
-    transforms = TransformModule(projects, MemoryTransformStore())
+    functions = FunctionModule(projects, MemoryFunctionStore())
     files = create_memory_project_files(projects)
     saved_file = await files.create_visible(
         # The agent can inspect ordinary durable files before proposing a Workflow.
@@ -117,7 +118,7 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
     workflows = WorkflowDefinitionModule(
         projects,
         datasets,
-        transforms,
+        functions,
         None,
         MemoryWorkflowStore(),
         project_files=files,
@@ -143,21 +144,15 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
     with pytest.raises(WorkflowValidationError, match="does-not-exist"):
         await workflows.validate_graph(owner, project.id, invalid)
 
-    function = await transforms.define(
+    function = await functions.define(
         owner,
         project.id,
         "summarize_text",
         "def transform(inputs, parameters):\n    return {'result': '', 'word_count': 0}\n",
-        {"text": ""},
+        {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
         {
             "type": "object",
             "properties": {"result": {"type": "string"}, "word_count": {"type": "integer"}},
-        },
-        input_schema={
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-            "required": ["text"],
-            "additionalProperties": False,
         },
     )
     invalid_output = WorkflowGraph(
@@ -179,19 +174,18 @@ async def test_workflow_preflight_validates_without_saving_and_lists_file_source
         (WorkflowEdge("source", "content", "summarize", "text"),),
         (WorkflowOutput("result", "summarize", "result"),),
     )
-    incompatible_function = await transforms.define(
+    incompatible_function = await functions.define(
         owner,
         project.id,
         "summarize_number",
         "def transform(inputs, parameters):\n    return {'result': str(inputs['text'])}\n",
-        {"text": ""},
-        {"type": "object", "properties": {"result": {"type": "string"}}},
         input_schema={
             "type": "object",
             "properties": {"text": {"type": "integer"}},
             "required": ["text"],
             "additionalProperties": False,
         },
+        output_schema={"type": "object", "properties": {"result": {"type": "string"}}},
     )
     invalid_input = WorkflowGraph(
         invalid_input.nodes[:1]
@@ -209,18 +203,16 @@ async def test_workflow_rejects_cycles_missing_ports_and_stale_targets() -> None
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
     datasets = DatasetModule(projects, MemoryDatasetStore())
-    transforms = TransformModule(projects, MemoryTransformStore())
-    function = await transforms.define(
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    function = await functions.define(
         owner,
         project.id,
         "Pass",
         "def transform(inputs, parameters):\n    return {}\n",
-        {"item": "/item"},
+        {"type": "object", "properties": {"item": {}}, "required": ["item"]},
         {"type": "object"},
     )
-    workflows = WorkflowDefinitionModule(
-        projects, datasets, transforms, None, MemoryWorkflowStore()
-    )
+    workflows = WorkflowDefinitionModule(projects, datasets, functions, None, MemoryWorkflowStore())
     node = WorkflowNode("a", "python", function.id, function.revision)
     with pytest.raises(WorkflowValidationError, match="cycle"):
         await workflows.create(
@@ -265,7 +257,7 @@ async def test_project_workflow_route_saves_reads_and_rejects_stale_edits() -> N
     workflows = WorkflowDefinitionModule(
         projects,
         datasets,
-        TransformModule(projects, MemoryTransformStore()),
+        FunctionModule(projects, MemoryFunctionStore()),
         None,
         MemoryWorkflowStore(),
     )
@@ -329,19 +321,19 @@ async def test_workflow_wires_permitted_mcp_ports_and_rejects_incompatible_input
                 raise PluginToolNotAllowed
             return {"type": "object"}
 
-    transforms = TransformModule(projects, MemoryTransformStore())
-    function = await transforms.define(
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    function = await functions.define(
         owner,
         project.id,
         "Collect",
         "def transform(inputs, parameters):\n    return {}\n",
-        {"items": "/items"},
+        {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]},
         {"type": "object"},
     )
     workflows = WorkflowDefinitionModule(
         projects,
         datasets,
-        transforms,
+        functions,
         cast(PluginGatewayModule, Gateway()),
         MemoryWorkflowStore(),
     )
@@ -398,7 +390,7 @@ async def test_workflow_wires_permitted_mcp_ports_and_rejects_incompatible_input
     repeat_workflows = WorkflowDefinitionModule(
         projects,
         datasets,
-        transforms,
+        functions,
         cast(PluginGatewayModule, RepeatGateway()),
         MemoryWorkflowStore(),
     )

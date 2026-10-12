@@ -2,7 +2,7 @@ import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import asdict
-from typing import Any, cast
+from typing import Any
 
 from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
@@ -34,6 +34,11 @@ from agent_hub_api.modules.agent_execution._project_files_backend import (
 )
 from agent_hub_api.modules.artifacts import ArtifactAccess, ArtifactModule, ArtifactMutationAccess
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
+from agent_hub_api.modules.functions import (
+    FunctionExecutionError,
+    FunctionModule,
+    FunctionValidationError,
+)
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
     PluginManifest,
@@ -43,10 +48,6 @@ from agent_hub_api.modules.plugin_gateway import (
 )
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transforms import (
-    TransformModule,
-    TransformValidationError,
-)
 from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowGraph,
@@ -68,10 +69,10 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Python Functions are authored as transform(inputs, parameters). Use Function tools to "
         "discover, inspect, create, revise, delete, or preview them. A preview is transient and "
         "runs against one record; it does not create a durable Run. Function inputs are named "
-        "by input_selectors_json, a JSON object mapping each name to a JSON Pointer in that "
-        'record; {"record":""} selects the whole record. input_schema_json and '
-        "output_schema_json are JSON Schema objects. Use preview_project_function to check a "
-        "Function before connecting it to a Workflow.",
+        "by input_schema_json and output_schema_json, which are JSON Schema objects. Workflow "
+        "edges provide the named inputs; filtering, sorting, and collection processing belong in "
+        "Functions or Workflow Map policy. Use preview_project_function with example named "
+        "inputs to check a Function before connecting it to a Workflow.",
         "Workflow is the only durable execution path for Python Functions and MCP tools. "
         "Workflow graphs define data sources, wiring, and whether a Function processes one "
         "value or a collection. Use Workflow tools to create, inspect, revise, prepare, execute, "
@@ -144,7 +145,7 @@ class PostgresDeepAgentRunner:
         plugin_gateway: PluginGatewayModule | None = None,
         artifacts: ArtifactModule | None = None,
         datasets: DatasetModule | None = None,
-        transforms: TransformModule | None = None,
+        functions: FunctionModule | None = None,
         workflows: WorkflowDefinitionModule | None = None,
         workflow_runs: WorkflowRunModule | None = None,
     ) -> None:
@@ -153,7 +154,7 @@ class PostgresDeepAgentRunner:
         self._plugin_gateway = plugin_gateway
         self._artifacts = artifacts
         self._datasets = datasets
-        self._transforms = transforms
+        self._functions = functions
         self._workflows = workflows
         self._workflow_runs = workflow_runs
         self._stack: AsyncExitStack | None = None
@@ -214,9 +215,9 @@ class PostgresDeepAgentRunner:
         datasets = getattr(self, "_datasets", None)
         if datasets is not None and subject is not None:
             tools.extend(self._dataset_tools(datasets, project_id, subject))
-        transforms = getattr(self, "_transforms", None)
-        if transforms is not None and subject is not None:
-            tools.extend(self._function_tools(transforms, project_id, subject))
+        functions = getattr(self, "_functions", None)
+        if functions is not None and subject is not None:
+            tools.extend(self._function_tools(functions, project_id, subject))
         workflows = getattr(self, "_workflows", None)
         workflow_runs = getattr(self, "_workflow_runs", None)
         if workflows is not None and subject is not None:
@@ -261,7 +262,7 @@ class PostgresDeepAgentRunner:
                     },
                 }
             )
-        if transforms is not None and subject is not None:
+        if functions is not None and subject is not None:
             interrupt_on.update(
                 {
                     "create_project_function": {
@@ -648,7 +649,7 @@ class PostgresDeepAgentRunner:
 
     @staticmethod
     def _function_tools(
-        functions: TransformModule,
+        functions: FunctionModule,
         project_id: str,
         subject: str,
     ) -> list[BaseTool]:
@@ -659,18 +660,6 @@ class PostgresDeepAgentRunner:
             if not isinstance(value, dict):
                 raise ValueError("Expected a JSON object")
             return value
-
-        def selector_json(raw: str) -> dict[str, str]:
-            try:
-                value = json.loads(raw)
-            except json.JSONDecodeError as error:
-                raise ValueError("input_selectors_json must be a JSON object") from error
-            if not isinstance(value, dict) or any(
-                not isinstance(key, str) or not isinstance(pointer, str)
-                for key, pointer in value.items()
-            ):
-                raise ValueError("input_selectors_json must be a JSON object of names to pointers")
-            return cast(dict[str, str], value)
 
         @tool
         async def discover_project_functions() -> str:
@@ -692,7 +681,6 @@ class PostgresDeepAgentRunner:
                     "id": item.id,
                     "name": item.name,
                     "source": item.source,
-                    "inputSelectors": item.input_selectors,
                     "inputSchema": item.input_schema,
                     "outputSchema": item.output_schema,
                     "runtime": item.runtime,
@@ -704,16 +692,13 @@ class PostgresDeepAgentRunner:
         async def create_project_function(
             name: str,
             source: str,
-            input_selectors_json: str,
             input_schema_json: str,
             output_schema_json: str,
         ) -> str:
             """Create a saved Python Function after approval. It can be used by Workflow nodes.
 
-            source is Python defining transform(inputs, parameters). input_selectors_json
-            maps each declared input to a JSON Pointer in a single input record; an empty
-            pointer selects the whole record. input_schema_json and output_schema_json are
-            JSON Schema objects.
+            source is Python defining transform(inputs, parameters). The input and output
+            schemas are JSON Schema objects. Workflow edges provide the named inputs.
             """
             try:
                 item = await functions.define(
@@ -721,11 +706,10 @@ class PostgresDeepAgentRunner:
                     project_id,
                     name,
                     source,
-                    selector_json(input_selectors_json),
+                    object_json(input_schema_json),
                     object_json(output_schema_json),
-                    input_schema=object_json(input_schema_json),
                 )
-            except (ValueError, TransformValidationError) as error:
+            except (ValueError, FunctionValidationError) as error:
                 return (
                     f"Function was not created: {error}. Propose a corrected change for approval."
                 )
@@ -743,7 +727,6 @@ class PostgresDeepAgentRunner:
             function_id: str,
             name: str,
             source: str,
-            input_selectors_json: str,
             input_schema_json: str,
             output_schema_json: str,
         ) -> str:
@@ -755,11 +738,10 @@ class PostgresDeepAgentRunner:
                     function_id,
                     name,
                     source,
-                    selector_json(input_selectors_json),
+                    object_json(input_schema_json),
                     object_json(output_schema_json),
-                    input_schema=object_json(input_schema_json),
                 )
-            except (ValueError, TransformValidationError) as error:
+            except (ValueError, FunctionValidationError) as error:
                 return (
                     f"Function was not updated: {error}. Propose a corrected change for approval."
                 )
@@ -774,19 +756,19 @@ class PostgresDeepAgentRunner:
         @tool
         async def preview_project_function(
             function_id: str,
-            record_json: str,
+            inputs_json: str,
             parameters_json: str = "{}",
         ) -> str:
-            """Run one transient preview against a single record; this does not save a Run."""
+            """Run one transient preview against named JSON inputs; no Run is saved."""
             try:
                 preview = await functions.preview(
                     access,
                     project_id,
                     function_id,
-                    object_json(record_json),
+                    object_json(inputs_json),
                     object_json(parameters_json),
                 )
-            except (ValueError, TransformValidationError) as error:
+            except (ValueError, FunctionValidationError, FunctionExecutionError) as error:
                 return f"Function preview failed: {error}"
             return json.dumps(
                 {

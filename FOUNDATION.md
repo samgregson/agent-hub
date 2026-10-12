@@ -74,7 +74,7 @@ Use Next.js with React and TypeScript. assistant-ui should supply the conversati
 
 The frontend should not receive MCP credentials. A backend route or the Python API should act as the MCP client and authorization boundary. MCP-provided UI must run in an appropriately sandboxed frame with a narrow host bridge and explicit capabilities.
 
-The selected Project sits above the workspace. The target Project entry point is its active Workflow overview. A left activity rail leads to Chats, Library, Operations, Sources, Plugin management, and optional reviewed Plugin views; the adjacent navigator shows the selected collection. Library groups ordinary Project Files, registered typed Datasets, and Artifacts while preserving their separate ownership and viewers. Thread chat remains central and the preview workspace opens on the right. The right workspace remains selected across Thread switches inside the same Project and can enter an explicit Artifact focus mode. On narrow screens, one primary surface is visible at a time and workspace state is preserved. The original panel decision is recorded in `docs/architecture/workspace-interaction.md`; later navigation decisions are in ADRs 0009 and 0010. Datasets have one primary home in Library and a canonical Project File; Operations groups the delivered Transform and Batch capabilities while the Workflow journey is built incrementally.
+The selected Project sits above the workspace. Its primary task surface is Workflow, where users inspect and run the project DAG, follow data lineage, and open step inputs or outputs. Navigation also leads to Chats, Library, Functions, Sources, Plugin management, and optional reviewed Plugin views. Library groups ordinary Project Files, registered typed Datasets, and Artifacts while preserving their separate ownership and viewers. Functions is where users author and transiently test Python code; Workflow owns bindings, invocation policy, and durable execution for Python Functions and MCP tools. On narrow screens, one primary surface is visible at a time and workspace state is preserved. The original panel decision is recorded in `docs/architecture/workspace-interaction.md`; later navigation decisions are in ADRs 0009 and 0010.
 
 ### Backend
 
@@ -158,9 +158,9 @@ For engineering artifacts, numerical values should never be represented as untyp
 - **Artifact:** a stable logical work product represented by one current portable Artifact Document.
 - **Artifact relation:** typed lineage or reference between Artifacts.
 - **Dataset:** a registered, typed Project File containing structured working inputs, with Dataset-owned identity, Record IDs, validation, and edits.
-- **Batch Definition:** a reusable Project record mapping Dataset values to one Plugin tool's ordinary MCP arguments.
-- **Binding:** a Project-owned, versioned declaration that supplies a selected source to one operation argument; the first kind supplies ordinary Project File content to an MCP Batch Definition.
-- **Batch Run / Result Set:** one host-orchestrated execution and its durable, queryable outcomes; neither is automatically an Artifact.
+- **Function:** reusable Project-owned Python source with named input and output contracts. It supports editing and transient preview; Workflow owns durable execution and data connections.
+- **Workflow Definition:** a reusable Project DAG that configures data connections, Function or MCP Tool steps, and single or Map invocation policy.
+- **Workflow Run:** an immutable host-orchestrated execution record linked to captured inputs, step outcomes, outputs, and lineage.
 
 These are application concepts. Their ownership, persistence, and Module Interfaces are defined in `docs/architecture/system-architecture.md`.
 

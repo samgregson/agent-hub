@@ -4,6 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from agent_hub_api.modules.functions._application import (
+    FunctionDefinition,
+    FunctionExecutionError,
+    FunctionModule,
+    FunctionNotFound,
+    FunctionValidationError,
+)
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
@@ -11,13 +18,6 @@ from agent_hub_api.modules.identity import (
     RequestContext,
 )
 from agent_hub_api.modules.projects import ProjectAccess
-from agent_hub_api.modules.transforms._application import (
-    TransformDefinition,
-    TransformExecutionError,
-    TransformModule,
-    TransformNotFound,
-    TransformValidationError,
-)
 
 
 class _Model(BaseModel):
@@ -27,7 +27,6 @@ class _Model(BaseModel):
 class DefinitionRequest(_Model):
     name: str
     source: str
-    input_selectors: dict[str, str]
     input_schema: dict[str, object]
     output_schema: dict[str, object]
 
@@ -36,7 +35,6 @@ class DefinitionResponse(_Model):
     id: str
     name: str
     source: str
-    input_selectors: dict[str, str]
     input_schema: dict[str, object]
     output_schema: dict[str, object]
     runtime: str | None
@@ -48,7 +46,7 @@ class DefinitionResponse(_Model):
 
 
 class PreviewRequest(_Model):
-    record: dict[str, object]
+    inputs: dict[str, object]
     parameters: dict[str, object]
 
 
@@ -58,12 +56,11 @@ class PreviewResponse(_Model):
     source_hash: str
 
 
-def _response(definition: TransformDefinition) -> DefinitionResponse:
+def _response(definition: FunctionDefinition) -> DefinitionResponse:
     return DefinitionResponse(
         id=definition.id,
         name=definition.name,
         source=definition.source,
-        input_selectors=dict(definition.input_selectors),
         input_schema=dict(definition.input_schema),
         output_schema=dict(definition.output_schema),
         runtime=definition.runtime,
@@ -75,7 +72,7 @@ def _response(definition: TransformDefinition) -> DefinitionResponse:
     )
 
 
-def create_function_router(identity: IdentityModule, transforms: TransformModule) -> APIRouter:
+def create_function_router(identity: IdentityModule, functions: FunctionModule) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}/functions", tags=["functions"])
 
     async def context(request: Request) -> RequestContext:
@@ -97,9 +94,9 @@ def create_function_router(identity: IdentityModule, transforms: TransformModule
         return ProjectAccess(subject=value.subject)
 
     def failure(error: Exception) -> HTTPException:
-        if isinstance(error, TransformNotFound):
+        if isinstance(error, FunctionNotFound):
             return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Function not found")
-        if isinstance(error, TransformExecutionError):
+        if isinstance(error, FunctionExecutionError):
             status_code = {
                 "timeout": status.HTTP_504_GATEWAY_TIMEOUT,
                 "input_limit": status.HTTP_413_CONTENT_TOO_LARGE,
@@ -117,17 +114,16 @@ def create_function_router(identity: IdentityModule, transforms: TransformModule
     ) -> DefinitionResponse:
         try:
             return _response(
-                await transforms.define(
+                await functions.define(
                     access(request_context),
                     project_id,
                     body.name,
                     body.source,
-                    body.input_selectors,
+                    body.input_schema,
                     body.output_schema,
-                    input_schema=body.input_schema,
                 )
             )
-        except (TransformNotFound, TransformValidationError) as error:
+        except (FunctionNotFound, FunctionValidationError) as error:
             raise failure(error) from error
 
     @router.get("", response_model=list[DefinitionResponse])
@@ -135,9 +131,9 @@ def create_function_router(identity: IdentityModule, transforms: TransformModule
         project_id: str, request_context: Context
     ) -> list[DefinitionResponse]:
         try:
-            items = await transforms.list(access(request_context), project_id)
+            items = await functions.list(access(request_context), project_id)
             return [_response(item) for item in items]
-        except TransformNotFound as error:
+        except FunctionNotFound as error:
             raise failure(error) from error
 
     @router.get("/{definition_id}", response_model=DefinitionResponse)
@@ -145,9 +141,9 @@ def create_function_router(identity: IdentityModule, transforms: TransformModule
         project_id: str, definition_id: str, request_context: Context
     ) -> DefinitionResponse:
         try:
-            definition = await transforms.load(access(request_context), project_id, definition_id)
+            definition = await functions.load(access(request_context), project_id, definition_id)
             return _response(definition)
-        except TransformNotFound as error:
+        except FunctionNotFound as error:
             raise failure(error) from error
 
     @router.post("/{definition_id}/preview", response_model=PreviewResponse)
@@ -158,11 +154,11 @@ def create_function_router(identity: IdentityModule, transforms: TransformModule
         request_context: Context,
     ) -> PreviewResponse:
         try:
-            result = await transforms.preview(
+            result = await functions.preview(
                 access(request_context),
                 project_id,
                 definition_id,
-                body.record,
+                body.inputs,
                 body.parameters,
             )
             return PreviewResponse(
@@ -170,7 +166,7 @@ def create_function_router(identity: IdentityModule, transforms: TransformModule
                 runtime=result.runtime,
                 source_hash=result.source_hash,
             )
-        except (TransformNotFound, TransformValidationError, TransformExecutionError) as error:
+        except (FunctionNotFound, FunctionValidationError, FunctionExecutionError) as error:
             raise failure(error) from error
 
     @router.put("/{definition_id}", response_model=DefinitionResponse)
@@ -182,25 +178,24 @@ def create_function_router(identity: IdentityModule, transforms: TransformModule
     ) -> DefinitionResponse:
         try:
             return _response(
-                await transforms.revise(
+                await functions.revise(
                     access(request_context),
                     project_id,
                     definition_id,
                     body.name,
                     body.source,
-                    body.input_selectors,
+                    body.input_schema,
                     body.output_schema,
-                    input_schema=body.input_schema,
                 )
             )
-        except (TransformNotFound, TransformValidationError) as error:
+        except (FunctionNotFound, FunctionValidationError) as error:
             raise failure(error) from error
 
     @router.delete("/{definition_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete(project_id: str, definition_id: str, request_context: Context) -> None:
         try:
-            await transforms.delete(access(request_context), project_id, definition_id)
-        except TransformNotFound as error:
+            await functions.delete(access(request_context), project_id, definition_id)
+        except FunctionNotFound as error:
             raise failure(error) from error
 
     return router

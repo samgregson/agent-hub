@@ -1,4 +1,4 @@
-import { runTransform } from "./runner.mjs";
+import { runFunction } from "./runner.mjs";
 import { handle } from "./server.mjs";
 
 Deno.test("runtime endpoint reports the pinned package lock", async () => {
@@ -40,11 +40,11 @@ def transform(inputs, parameters):
     parameters: { factor: 2 },
   };
 
-  const preview = await runTransform(request);
-  const durable = await runTransform(request);
+  const preview = await runFunction(request);
+  const durable = await runFunction(request);
 
   for (const result of [preview, durable]) {
-    if (!result.ok) throw new Error(`Transform failed: ${result.code}`);
+    if (!result.ok) throw new Error(`Function execution failed: ${result.code}`);
     if (
       JSON.stringify(result.output) !== JSON.stringify({
         value: 6,
@@ -59,8 +59,8 @@ def transform(inputs, parameters):
   }
 });
 
-Deno.test("time and output limits terminate a transform", async () => {
-  const loop = await runTransform({
+Deno.test("time and output limits terminate a Function", async () => {
+  const loop = await runFunction({
     source: "def transform(inputs, parameters):\n    while True: pass\n",
     inputs: {},
     parameters: {},
@@ -69,7 +69,7 @@ Deno.test("time and output limits terminate a transform", async () => {
     throw new Error(`Unexpected timeout result: ${JSON.stringify(loop)}`);
   }
 
-  const oversized = await runTransform({
+  const oversized = await runFunction({
     source:
       "def transform(inputs, parameters):\n    return {'data': 'x' * 5000}\n",
     inputs: {},

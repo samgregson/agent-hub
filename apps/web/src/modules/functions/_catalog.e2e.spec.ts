@@ -27,7 +27,6 @@ async function prepareFunctionWorkbench(page: Page) {
           id: "function-1",
           name: "Double load",
           source,
-          inputSelectors: { load: "/load" },
           inputSchema: {
             type: "object",
             properties: { load: { type: "number" } },
@@ -63,7 +62,6 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
 }) => {
   const previews: Array<Record<string, unknown>> = [];
   let previewCount = 0;
-  const durableRuns: Array<Record<string, unknown>> = [];
   await prepareFunctionWorkbench(page);
   await page.route(
     `**/api/projects/${project.id}/functions/function-1/preview`,
@@ -86,24 +84,11 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
       });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/functions/function-1/runs`,
-    (route) => {
-      durableRuns.push(
-        route.request().postDataJSON() as Record<string, unknown>,
-      );
-      return route.fulfill({
-        status: 201,
-        json: { id: "run-1", status: "succeeded" },
-      });
-    },
-  );
-
   const surface = await openFunctions(page, false);
   await expect(
     surface.getByRole("heading", { name: "Double load", exact: true }),
   ).toBeVisible();
-  await surface.getByLabel("Input record (JSON object)").fill('{"load":4}');
+  await surface.getByLabel("Function inputs (JSON object)").fill('{"load":4}');
   await surface.getByLabel("Parameters (JSON object)").fill('{"factor":2}');
   await surface.getByRole("button", { name: "Preview output" }).click();
 
@@ -119,23 +104,15 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
   await expect(preview).toContainText('"factor": 2');
   await expect(preview).toContainText('"value": 8');
   expect(previews).toEqual([
-    { record: { load: 4 }, parameters: { factor: 2 } },
+    { inputs: { load: 4 }, parameters: { factor: 2 } },
   ]);
-  expect(durableRuns).toHaveLength(0);
-  await expect(
-    surface.getByRole("region", { name: "Retained Runs" }),
-  ).toHaveCount(0);
-  await expect(
-    surface.getByRole("button", { name: "Start durable Run" }),
-  ).toHaveCount(0);
 
-  await surface.getByLabel("Input record (JSON object)").fill('{"load":5}');
+  await surface.getByLabel("Function inputs (JSON object)").fill('{"load":5}');
   await expect(preview).toHaveCount(0);
   await surface.getByRole("button", { name: "Preview output" }).click();
   await expect(surface.locator("p[role=alert]")).toContainText(
     "Preview exceeded the time limit.",
   );
-  expect(durableRuns).toHaveLength(0);
 });
 
 test("Function preview workbench remains reachable at phone width", async ({
@@ -195,7 +172,6 @@ test("new Function submissions include their named input schema", async ({
         id: "function-new",
         name: "Read a load",
         source,
-        inputSelectors: { load: "/load" },
         inputSchema: submitted.inputSchema,
         outputSchema: { type: "object" },
         runtime: "deno:2.9.7;pyodide:314.0.7",
@@ -212,7 +188,6 @@ test("new Function submissions include their named input schema", async ({
     surface.getByText("Read a load saved as revision 1.", { exact: true }),
   ).toBeVisible();
   expect(submitted).toMatchObject({
-    inputSelectors: { load: "/load" },
     inputSchema: {
       type: "object",
       properties: { load: { type: "number", minimum: 0 } },

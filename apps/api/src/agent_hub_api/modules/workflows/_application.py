@@ -13,6 +13,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from agent_hub_api.modules.call_review import MAX_MAP_INVOCATIONS
 from agent_hub_api.modules.datasets import DatasetModule, DatasetNotFound
+from agent_hub_api.modules.functions import FunctionModule, FunctionNotFound
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
     PluginNotAvailable,
@@ -25,7 +26,6 @@ from agent_hub_api.modules.project_files import (
     ProjectFilesModule,
 )
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
-from agent_hub_api.modules.transforms import TransformModule, TransformNotFound
 
 MAX_NODES = 32
 MAX_EDGES = 128
@@ -154,7 +154,7 @@ class WorkflowDefinitionModule:
         self,
         projects: ProjectModule,
         datasets: DatasetModule,
-        transforms: TransformModule,
+        functions: FunctionModule,
         gateway: PluginGatewayModule | None,
         store: WorkflowStore,
         *,
@@ -162,7 +162,7 @@ class WorkflowDefinitionModule:
     ) -> None:
         self._projects = projects
         self._datasets = datasets
-        self._transforms = transforms
+        self._functions = functions
         self._gateway = gateway
         self._store = store
         self._project_files = project_files
@@ -363,8 +363,8 @@ class WorkflowDefinitionModule:
             if node.tool_name is not None or not isinstance(node.version, int):
                 raise WorkflowValidationError("Python Function node has an invalid reference.")
             try:
-                definition = await self._transforms.load(access, project_id, node.ref_id)
-            except TransformNotFound as error:
+                definition = await self._functions.load(access, project_id, node.ref_id)
+            except FunctionNotFound as error:
                 raise WorkflowValidationError(
                     f"Python Function ID {node.ref_id!r} is unavailable; use the ID returned "
                     "by discover_project_functions, not the Function name."
