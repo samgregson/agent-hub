@@ -483,16 +483,16 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(
     page.getByRole("region", { name: "Workflow nodes" }),
   ).toContainText("call-6");
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("To node")
       .last(),
   ).toHaveValue("call-6");
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("Input port")
       .last(),
   ).toHaveValue("items");
@@ -501,16 +501,16 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     .selectOption("MCP · Calculator / calculate");
   await page.getByLabel("Call shape").selectOption("single");
   await page.getByRole("button", { name: "Add node" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("To node")
       .last(),
   ).toHaveValue("call-7");
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("Input port")
       .last(),
   ).toHaveValue("record");
@@ -568,6 +568,8 @@ test("a Project Workflow can be created from Library and Functions", async ({
     updatedAt: "2026-10-01T00:00:00.000Z",
   };
   let createRequest: Record<string, unknown> | undefined;
+  let runRequest: Record<string, unknown> | undefined;
+  let savedGraph: unknown;
 
   await page.route("**/api/projects", async (route) => {
     await route.fulfill({ json: [project] });
@@ -578,12 +580,13 @@ test("a Project Workflow can be created from Library and Functions", async ({
   await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
     if (route.request().method() === "POST") {
       createRequest = route.request().postDataJSON() as Record<string, unknown>;
+      savedGraph = createRequest.graph;
       await route.fulfill({
         json: {
           id: "workflow-new",
           name: createRequest.name,
           version: 1,
-          graph: createRequest.graph,
+          graph: savedGraph,
         },
         status: 201,
       });
@@ -611,8 +614,12 @@ test("a Project Workflow can be created from Library and Functions", async ({
           revision: 2,
           inputSchema: {
             type: "object",
-            properties: { records: {} },
-            required: ["records"],
+            properties: {
+              records: {},
+              label: { type: "string" },
+              factor: { type: "number" },
+            },
+            required: ["records", "label", "factor"],
             additionalProperties: false,
           },
         },
@@ -622,6 +629,48 @@ test("a Project Workflow can be created from Library and Functions", async ({
   await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
     await route.fulfill({ json: [] });
   });
+  await page.route(
+    `**/api/projects/${project.id}/workflows/workflow-new/runs/prepare`,
+    async (route) => {
+      runRequest = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          id: "workflow-run-prepared",
+          workflowId: "workflow-new",
+          definitionVersion: 1,
+          status: "prepared",
+          snapshot: {
+            graph: savedGraph,
+            workflowInputs: runRequest.workflowInputs,
+          },
+          execution: {},
+          initiatorSubject: "owner",
+          createdAt: "2026-10-12T09:00:00.000Z",
+        },
+        status: 201,
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/workflows/workflow-new/runs/workflow-run-prepared/execute`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          id: "workflow-run-prepared",
+          workflowId: "workflow-new",
+          definitionVersion: 1,
+          status: "succeeded",
+          snapshot: {
+            graph: savedGraph,
+            workflowInputs: runRequest?.workflowInputs,
+          },
+          execution: { nodes: {}, outputs: { result: [1] } },
+          initiatorSubject: "owner",
+          createdAt: "2026-10-12T09:00:00.000Z",
+        },
+      });
+    },
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -632,6 +681,7 @@ test("a Project Workflow can be created from Library and Functions", async ({
     .last()
     .click();
   await page.getByRole("button", { name: "Create Workflow" }).click();
+  await page.getByRole("button", { name: "Add Workflow Input" }).click();
   await page.getByLabel("Library item or call").selectOption("Dataset · Loads");
   await page.getByRole("button", { name: "Add node" }).click();
   await page
@@ -639,7 +689,20 @@ test("a Project Workflow can be created from Library and Functions", async ({
     .selectOption("Function · Calculate loads");
   await page.getByLabel("Call shape").selectOption("map");
   await page.getByRole("button", { name: "Add node" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page
+    .getByLabel("Value comes from")
+    .nth(1)
+    .selectOption("workflowInput");
+  await page
+    .getByRole("combobox", { name: "Workflow Input", exact: true })
+    .selectOption("input1");
+  await page.getByLabel("Input port").nth(1).fill("label");
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page.getByLabel("Value comes from").nth(2).selectOption("literal");
+  await page.getByLabel("Input port").nth(2).fill("factor");
+  await page.getByLabel("Literal for binding 3").fill("2");
   await page
     .getByRole("region", { name: "Workflow outputs editor" })
     .getByLabel("From node")
@@ -651,7 +714,8 @@ test("a Project Workflow can be created from Library and Functions", async ({
   expect(createRequest?.name).toBe("Load check");
   const graph = createRequest?.graph as {
     nodes: Array<{ kind: string; shape: string }>;
-    edges: Array<{ sourcePort: string; targetPort: string }>;
+    edges: Array<Record<string, unknown>>;
+    inputs: Array<Record<string, unknown>>;
     outputs: Array<{ node: string; port: string }>;
   };
   expect(graph.nodes.map((node) => node.kind)).toEqual(["dataset", "python"]);
@@ -660,7 +724,31 @@ test("a Project Workflow can be created from Library and Functions", async ({
     sourcePort: "records",
     targetPort: "items",
   });
+  expect(graph.inputs).toEqual([
+    { name: "input1", required: true, schema: { type: "string" } },
+  ]);
+  expect(graph.edges[1]).toMatchObject({
+    sourceKind: "workflowInput",
+    sourceInput: "input1",
+    targetPort: "label",
+  });
+  expect(graph.edges[2]).toMatchObject({
+    sourceKind: "literal",
+    literal: 2,
+    targetPort: "factor",
+  });
   expect(graph.outputs[0]).toMatchObject({ node: "call-2", port: "result" });
+  await expect(
+    page.getByRole("list", { name: "Workflow dependencies" }),
+  ).toContainText("Workflow Input · input1");
+  await expect(
+    page.getByRole("list", { name: "Workflow dependencies" }),
+  ).toContainText("Literal · 2");
+  await page.getByLabel("Workflow Input input1").fill("test label");
+  await page.getByRole("button", { name: "Run Workflow" }).click();
+  await expect
+    .poll(() => runRequest?.workflowInputs)
+    .toEqual({ input1: "test label" });
   await expect
     .poll(() =>
       page.evaluate(
@@ -770,10 +858,10 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
     .selectOption("MCP · Calculator / check");
   await page.getByLabel("Call shape").selectOption("map");
   await page.getByRole("button", { name: "Add node" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
   const secondConnection = page
-    .getByRole("region", { name: "Workflow connections" })
+    .getByRole("region", { name: "Workflow bindings" })
     .locator('[class*="editorRow"]')
     .nth(1);
   await secondConnection.getByLabel("From node").selectOption("input-2");
@@ -788,6 +876,7 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
 
   const graph = createRequest?.graph as {
     edges: Array<{
+      sourceKind: string;
       sourceNode: string;
       sourcePort: string;
       targetNode: string;
@@ -796,12 +885,14 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
   };
   expect(graph.edges).toEqual([
     {
+      sourceKind: "node",
       sourceNode: "input-1",
       sourcePort: "records",
       targetNode: "call-3",
       targetPort: "items",
     },
     {
+      sourceKind: "node",
       sourceNode: "input-2",
       sourcePort: "content",
       targetNode: "call-3",

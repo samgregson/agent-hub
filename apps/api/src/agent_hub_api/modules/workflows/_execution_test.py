@@ -19,6 +19,7 @@ from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowEdge,
     WorkflowGraph,
+    WorkflowInput,
     WorkflowNode,
     WorkflowOutput,
     WorkflowRunModule,
@@ -50,7 +51,14 @@ class _Runner:
         marker = next(
             (
                 name
-                for name in ("# double", "# triple", "# combine", "# template")
+                for name in (
+                    "# double",
+                    "# triple",
+                    "# combine",
+                    "# template",
+                    "# bind",
+                    "# map-bindings",
+                )
                 if name in source
             ),
             "unknown",
@@ -76,6 +84,11 @@ class _Runner:
             return {"total": sum(item["value"] for item in left + right)}, "fixture"
         if "# template" in source:
             return {"template": inputs["template"]}, "fixture"
+        if "# bind" in source:
+            return inputs["payload"], "fixture"
+        if "# map-bindings" in source:
+            record = cast(dict[str, int], inputs["record"])
+            return {"value": record["value"] * int(cast(float, inputs["scale"]))}, "fixture"
         raise AssertionError("Unexpected transform source")
 
 
@@ -147,6 +160,216 @@ async def test_workflow_captures_project_file_content_before_execution() -> None
     nodes = cast(dict[str, object], completed.execution["nodes"])
     assert cast(dict[str, object], nodes["function"])["inputs"] == {"template": "template-v1"}
     assert completed.execution["outputs"] == {"rendered": {"template": "template-v1"}}
+
+
+@pytest.mark.asyncio
+async def test_workflow_captures_and_resolves_runtime_and_literal_bindings() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Workflow bindings")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    dataset = await datasets.create_dataset(
+        access,
+        project.id,
+        "Source records",
+        [DatasetRecordInput({"oldName": "beam A"})],
+    )
+    runner = _Runner()
+    functions = FunctionModule(projects, MemoryFunctionStore(), runner)
+    function = await functions.define(
+        access,
+        project.id,
+        "Assemble payload",
+        "# bind\ndef transform(inputs, parameters):\n    return inputs['payload']\n",
+        {
+            "type": "object",
+            "properties": {
+                "payload": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "operator": {"type": "string"},
+                        "retry_count": {"type": "integer"},
+                    },
+                    "required": ["label", "operator", "retry_count"],
+                    "additionalProperties": False,
+                }
+            },
+            "required": ["payload"],
+        },
+        {"type": "object"},
+    )
+    definitions = WorkflowDefinitionModule(
+        projects, datasets, functions, None, MemoryWorkflowStore()
+    )
+    graph = WorkflowGraph(
+        nodes=(
+            WorkflowNode("source", "dataset", dataset.id, dataset.version),
+            WorkflowNode("target", "python", function.id, function.revision),
+        ),
+        edges=(
+            WorkflowEdge(
+                "source",
+                "records",
+                "target",
+                "payload",
+                source_path="/0/oldName",
+                target_path="/label",
+            ),
+            WorkflowEdge(
+                None,
+                None,
+                "target",
+                "payload",
+                source_kind="workflowInput",
+                source_input="request",
+                source_path="/operatorName",
+                target_path="/operator",
+            ),
+            WorkflowEdge(
+                None,
+                None,
+                "target",
+                "payload",
+                source_kind="literal",
+                literal=3,
+                target_path="/retry_count",
+            ),
+        ),
+        outputs=(WorkflowOutput("payload", "target", "result"),),
+        inputs=(
+            WorkflowInput(
+                "request",
+                {
+                    "type": "object",
+                    "properties": {"operatorName": {"type": "string"}},
+                    "required": ["operatorName"],
+                },
+            ),
+        ),
+    )
+    definition = await definitions.create(access, project.id, "Assemble", graph)
+    runs = WorkflowRunModule(definitions, datasets, functions, None, MemoryWorkflowRunStore())
+
+    with pytest.raises(WorkflowValidationError, match="Missing required Workflow Inputs"):
+        await runs.prepare(access, project.id, definition.id, "missing-input", expected_version=1)
+    with pytest.raises(WorkflowValidationError, match="does not match"):
+        await runs.prepare(
+            access,
+            project.id,
+            definition.id,
+            "invalid-input",
+            expected_version=1,
+            workflow_inputs={"request": {"operatorName": 3}},
+        )
+    prepared = await runs.prepare(
+        access,
+        project.id,
+        definition.id,
+        "binding-run",
+        expected_version=1,
+        workflow_inputs={"request": {"operatorName": "engineer"}},
+    )
+    completed = await runs.execute(access, project.id, prepared.id)
+
+    assert prepared.snapshot["workflowInputs"] == {"request": {"operatorName": "engineer"}}
+    assert completed.status == "succeeded", completed.execution
+    nodes = cast(dict[str, object], completed.execution["nodes"])
+    assert cast(dict[str, object], nodes["target"])["inputs"] == {
+        "payload": {"label": "beam A", "operator": "engineer", "retry_count": 3}
+    }
+    assert completed.execution["outputs"] == {
+        "payload": {"label": "beam A", "operator": "engineer", "retry_count": 3}
+    }
+
+
+@pytest.mark.asyncio
+async def test_map_workflow_binds_selected_item_fields_and_shared_values() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Mapped bindings")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    dataset = await datasets.create_dataset(
+        access,
+        project.id,
+        "Legacy values",
+        [DatasetRecordInput({"legacy": 2}), DatasetRecordInput({"legacy": 5})],
+    )
+    runner = _Runner()
+    functions = FunctionModule(projects, MemoryFunctionStore(), runner)
+    transform_source = """# map-bindings
+def transform(inputs, parameters):
+    return {"value": inputs["record"]["value"] * inputs["scale"]}
+"""
+    function = await functions.define(
+        access,
+        project.id,
+        "Scale item",
+        transform_source,
+        {
+            "type": "object",
+            "properties": {
+                "record": {
+                    "type": "object",
+                    "properties": {"value": {"type": "integer"}},
+                    "required": ["value"],
+                },
+                "scale": {"type": "number"},
+            },
+            "required": ["record", "scale"],
+        },
+        {"type": "object", "properties": {"value": {"type": "integer"}}},
+    )
+    definitions = WorkflowDefinitionModule(
+        projects, datasets, functions, None, MemoryWorkflowStore()
+    )
+    graph = WorkflowGraph(
+        nodes=(
+            WorkflowNode("source", "dataset", dataset.id, dataset.version),
+            WorkflowNode(
+                "scale",
+                "python",
+                function.id,
+                function.revision,
+                shape="map",
+                map_input="record",
+            ),
+        ),
+        edges=(
+            WorkflowEdge(
+                "source",
+                "records",
+                "scale",
+                "items",
+                source_path="/legacy",
+                target_path="/value",
+            ),
+            WorkflowEdge(
+                None,
+                None,
+                "scale",
+                "scale",
+                source_kind="literal",
+                literal=4,
+            ),
+        ),
+        outputs=(WorkflowOutput("values", "scale", "result"),),
+    )
+    definitions_saved = await definitions.create(access, project.id, "Scale values", graph)
+    runs = WorkflowRunModule(definitions, datasets, functions, None, MemoryWorkflowRunStore())
+
+    prepared = await runs.prepare(
+        access, project.id, definitions_saved.id, "map-bindings", expected_version=1
+    )
+    completed = await runs.execute(access, project.id, prepared.id)
+
+    assert completed.status == "succeeded", completed.execution
+    nodes = cast(dict[str, object], completed.execution["nodes"])
+    assert cast(dict[str, object], nodes["scale"])["inputs"] == {
+        "items": [{"value": 2}, {"value": 5}],
+        "scale": 4,
+    }
+    assert completed.execution["outputs"] == {"values": [{"value": 8}, {"value": 20}]}
 
 
 @pytest.mark.asyncio

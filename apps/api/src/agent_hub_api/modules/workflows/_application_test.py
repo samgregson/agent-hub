@@ -15,6 +15,7 @@ from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowEdge,
     WorkflowGraph,
+    WorkflowInput,
     WorkflowNode,
     WorkflowNotFound,
     WorkflowOutput,
@@ -243,6 +244,118 @@ async def test_workflow_rejects_cycles_missing_ports_and_stale_targets() -> None
                 (WorkflowOutput("result", "a", "result"),),
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_workflow_accepts_field_bindings_from_inputs_and_literals() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="owner")
+    project = await projects.create(owner, "Bindings")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    target = await functions.define(
+        owner,
+        project.id,
+        "Build payload",
+        "def transform(inputs, parameters):\n    return inputs['payload']\n",
+        {
+            "type": "object",
+            "properties": {
+                "payload": {
+                    "type": "object",
+                    "properties": {
+                        "label": {"type": "string"},
+                        "retry_count": {"type": "integer"},
+                    },
+                    "required": ["label", "retry_count"],
+                    "additionalProperties": False,
+                }
+            },
+            "required": ["payload"],
+        },
+        {"type": "object"},
+    )
+    workflows = WorkflowDefinitionModule(projects, datasets, functions, None, MemoryWorkflowStore())
+    graph = WorkflowGraph(
+        nodes=(WorkflowNode("target", "python", target.id, target.revision),),
+        edges=(
+            WorkflowEdge(
+                None,
+                None,
+                "target",
+                "payload",
+                source_kind="workflowInput",
+                source_input="request",
+                source_path="/displayName",
+                target_path="/label",
+            ),
+            WorkflowEdge(
+                None,
+                None,
+                "target",
+                "payload",
+                source_kind="literal",
+                literal=3,
+                target_path="/retry_count",
+            ),
+        ),
+        outputs=(WorkflowOutput("payload", "target", "result"),),
+        inputs=(
+            WorkflowInput(
+                "request",
+                {
+                    "type": "object",
+                    "properties": {"displayName": {"type": "string"}},
+                    "required": ["displayName"],
+                },
+            ),
+        ),
+    )
+
+    saved = await workflows.create(owner, project.id, "Assemble payload", graph)
+
+    assert saved.graph == graph
+
+    unknown_source_field = WorkflowGraph(
+        graph.nodes,
+        (
+            WorkflowEdge(
+                None,
+                None,
+                "target",
+                "payload",
+                source_kind="workflowInput",
+                source_input="request",
+                source_path="/missing",
+                target_path="/label",
+            ),
+            graph.edges[1],
+        ),
+        graph.outputs,
+        graph.inputs,
+    )
+    with pytest.raises(WorkflowValidationError, match="unknown field"):
+        await workflows.validate_graph(owner, project.id, unknown_source_field)
+
+    overlapping = WorkflowGraph(
+        graph.nodes,
+        graph.edges
+        + (
+            WorkflowEdge(
+                None,
+                None,
+                "target",
+                "payload",
+                source_kind="literal",
+                literal="other label",
+                target_path="/label",
+            ),
+        ),
+        graph.outputs,
+        graph.inputs,
+    )
+    with pytest.raises(WorkflowValidationError, match="conflicting bindings"):
+        await workflows.validate_graph(owner, project.id, overlapping)
 
 
 @pytest.mark.asyncio

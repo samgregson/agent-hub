@@ -49,7 +49,7 @@ A configured node in a Workflow that calls a Python Function or MCP Tool. It own
 _Avoid_: Operation, Batch Definition, Function definition
 
 **Workflow Binding**:
-A graph-owned mapping that assigns a whole value or selected fields from a Project source, upstream step output, Workflow Input, or literal value to a target step input. Multiple bindings can assemble a target value; calculations and other actual transformations belong in Functions.
+A graph-owned mapping that assigns a whole value or selected fields from a Project source, upstream step output, Workflow Input, or literal value to a target step input. RFC 6901 JSON Pointer paths select source fields and assemble target paths; an empty path means the whole value. Multiple non-overlapping bindings can assemble a nested target value; calculations and other actual transformations belong in Functions.
 _Avoid_: Adapter Function, implicit name matching
 
 **Map**:

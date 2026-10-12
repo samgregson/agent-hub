@@ -16,6 +16,7 @@ from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowEdge,
     WorkflowGraph,
+    WorkflowInput,
     WorkflowNode,
     WorkflowNotFound,
     WorkflowOutput,
@@ -176,6 +177,7 @@ async def test_prepared_run_route_round_trips_without_dispatching_calls() -> Non
         (WorkflowNode("source", "dataset", dataset.id, dataset.version),),
         (),
         (WorkflowOutput("result", "source", "records"),),
+        (WorkflowInput("comment", {"type": "string"}),),
     )
     definition = await definitions.create(owner, project.id, "Inspection", graph)
     runs = WorkflowRunModule(definitions, datasets, functions, None, MemoryWorkflowRunStore())
@@ -191,10 +193,16 @@ async def test_prepared_run_route_round_trips_without_dispatching_calls() -> Non
     base = f"/api/projects/{project.id}/workflows/{definition.id}/runs"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post(
-            f"{base}/prepare", json={"idempotencyKey": "request-1", "expectedVersion": 1}
+            f"{base}/prepare",
+            json={
+                "idempotencyKey": "request-1",
+                "expectedVersion": 1,
+                "workflowInputs": {"comment": "route test"},
+            },
         )
         assert created.status_code == 201
         assert created.json()["status"] == "prepared"
+        assert created.json()["snapshot"]["workflowInputs"] == {"comment": "route test"}
         assert created.json()["snapshot"]["graph"] == json.loads(json.dumps(asdict(graph)))
         assert (await client.get(base)).json()[0]["id"] == created.json()["id"]
         assert (await client.get(f"{base}/{created.json()['id']}")).json() == created.json()

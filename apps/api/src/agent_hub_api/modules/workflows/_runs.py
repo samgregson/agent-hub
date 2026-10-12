@@ -38,6 +38,7 @@ from ._application import (
     WorkflowNode,
     WorkflowNotFound,
     WorkflowValidationError,
+    _pointer_tokens,
     _project_file_path,
 )
 
@@ -154,6 +155,7 @@ class WorkflowRunModule:
         idempotency_key: str,
         *,
         expected_version: int,
+        workflow_inputs: Mapping[str, object] | None = None,
     ) -> WorkflowRun:
         if not 1 <= len(idempotency_key) <= 120:
             raise WorkflowValidationError("Request key must contain 1–120 characters.")
@@ -164,6 +166,7 @@ class WorkflowRunModule:
         if definition.version != expected_version:
             raise WorkflowValidationError("Workflow version changed; review it again.")
         await self._definitions.check_current(access, project_id, definition)
+        captured_inputs = _validate_workflow_inputs(definition.graph, workflow_inputs or {})
         sources: dict[str, object] = {}
         targets: dict[str, object] = {}
         for node in definition.graph.nodes:
@@ -219,6 +222,11 @@ class WorkflowRunModule:
                     "inputNames": list(
                         cast(Mapping[str, object], target.input_schema.get("properties", {}))
                     ),
+                    "mapInput": node.map_input
+                    or next(
+                        iter(cast(Mapping[str, object], target.input_schema.get("properties", {}))),
+                        None,
+                    ),
                     "inputSchema": target.input_schema,
                     "outputSchema": target.output_schema,
                     "runtime": target.runtime,
@@ -257,7 +265,14 @@ class WorkflowRunModule:
                     "outputSchema": output_schema,
                 }
         snapshot = json.loads(
-            json.dumps({"graph": asdict(definition.graph), "sources": sources, "targets": targets})
+            json.dumps(
+                {
+                    "graph": asdict(definition.graph),
+                    "sources": sources,
+                    "targets": targets,
+                    "workflowInputs": captured_inputs,
+                }
+            )
         )
         run = WorkflowRun(
             str(uuid4()),
@@ -294,6 +309,7 @@ class WorkflowRunModule:
         execution_start = replace(run, status="running", execution={"nodes": execution_nodes})
         run = await self._replace(execution_start, expected_status)
         source_snapshots = _mapping(run.snapshot.get("sources"))
+        workflow_inputs = _mapping(run.snapshot.get("workflowInputs"))
         node_outputs: dict[str, dict[str, object]] = {}
         nodes = {node.id: node for node in graph.nodes}
         for node in graph.nodes:
@@ -333,7 +349,7 @@ class WorkflowRunModule:
                 node_id
                 for node_id in pending
                 if all(
-                    edge.source_node in node_outputs
+                    edge.source_kind != "node" or edge.source_node in node_outputs
                     for edge in graph.edges
                     if edge.target_node == node_id
                 )
@@ -346,10 +362,34 @@ class WorkflowRunModule:
                 edges = [edge for edge in graph.edges if edge.target_node == node_id]
                 inputs: dict[str, object] = {}
                 for edge in edges:
-                    outputs = node_outputs[edge.source_node]
-                    if edge.source_port not in outputs:
-                        return await self._fail(run, execution_nodes, node_id, "upstream_output")
-                    inputs[edge.target_port] = outputs[edge.source_port]
+                    try:
+                        if edge.source_kind == "node":
+                            if edge.source_node is None or edge.source_port is None:
+                                raise WorkflowValidationError("Node binding is incomplete.")
+                            outputs = node_outputs[edge.source_node]
+                            if edge.source_port not in outputs:
+                                raise WorkflowValidationError("Upstream output is unavailable.")
+                            value = outputs[edge.source_port]
+                        elif edge.source_kind == "workflowInput":
+                            if edge.source_input not in workflow_inputs:
+                                raise WorkflowValidationError("Workflow Input is unavailable.")
+                            value = workflow_inputs[cast(str, edge.source_input)]
+                        else:
+                            value = edge.literal
+                        value = _select_binding_value(
+                            value,
+                            edge.source_path,
+                            each_item=nodes[node_id].shape == "map" and edge.target_port == "items",
+                        )
+                        _assign_binding_value(
+                            inputs,
+                            edge.target_port,
+                            edge.target_path,
+                            value,
+                            each_item=nodes[node_id].shape == "map" and edge.target_port == "items",
+                        )
+                    except (KeyError, TypeError, WorkflowValidationError):
+                        return await self._fail(run, execution_nodes, node_id, "binding_value")
                 work.append((node, inputs, edges))
             results = await asyncio.gather(
                 *(
@@ -429,14 +469,28 @@ class WorkflowRunModule:
         previous = _mapping(execution_nodes.get(node.id))
         if node.shape == "map":
             items = inputs.get("items")
+            map_input = target.get("mapInput")
             if (
                 not isinstance(items, list)
                 or len(items) > MAX_MAP_INVOCATIONS
-                or len(input_names) != 1
+                or not isinstance(map_input, str)
+                or map_input not in input_names
                 or not edges
             ):
                 return None, "map_input"
-            records = _source_records_for_edge(graph, source_snapshots, edges[0])
+            item_edge = next(
+                (
+                    edge
+                    for edge in edges
+                    if edge.target_port == "items" and edge.source_kind == "node"
+                ),
+                None,
+            )
+            records = (
+                _source_records_for_edge(graph, source_snapshots, item_edge)
+                if item_edge is not None
+                else None
+            )
             item_results = _indexed_progress(previous.get("items"))
             outputs: dict[int, object] = {}
             pending_items: list[tuple[int, object]] = []
@@ -455,7 +509,7 @@ class WorkflowRunModule:
                 item_identity = (
                     _mapping(records[index]).get("id")
                     if records is not None and index < len(records)
-                    else f"{edges[0].source_node}:{index}"
+                    else f"{node.id}:{index}"
                 )
                 item_results[index] = {
                     "index": index,
@@ -475,7 +529,12 @@ class WorkflowRunModule:
                             access,
                             project_id,
                             target,
-                            {input_names[0]: item},
+                            {
+                                **{
+                                    name: value for name, value in inputs.items() if name != "items"
+                                },
+                                map_input: item,
+                            },
                         )
                 except (
                     FunctionExecutionError,
@@ -906,6 +965,123 @@ def _same_workflow(run: WorkflowRun, workflow_id: str) -> WorkflowRun:
     return run
 
 
+def _validate_workflow_inputs(
+    graph: WorkflowGraph, values: Mapping[str, object]
+) -> dict[str, object]:
+    definitions = {item.name: item for item in graph.inputs}
+    unknown = values.keys() - definitions.keys()
+    if unknown:
+        raise WorkflowValidationError(
+            "Unknown Workflow Inputs: " + ", ".join(sorted(unknown)) + "."
+        )
+    bound_inputs = {
+        edge.source_input
+        for edge in graph.edges
+        if edge.source_kind == "workflowInput" and edge.source_input is not None
+    }
+    missing = [
+        name
+        for name, item in definitions.items()
+        if (item.required or name in bound_inputs) and name not in values
+    ]
+    if missing:
+        raise WorkflowValidationError(
+            "Missing required Workflow Inputs: " + ", ".join(missing) + "."
+        )
+    for name, value in values.items():
+        try:
+            Draft202012Validator(definitions[name].schema).validate(value)
+        except JsonSchemaValidationError as error:
+            raise WorkflowValidationError(
+                f"Workflow Input {name!r} does not match its declared schema."
+            ) from error
+    try:
+        return cast(dict[str, object], json.loads(json.dumps(dict(values))))
+    except (TypeError, ValueError) as error:
+        raise WorkflowValidationError("Workflow Inputs must contain only JSON values.") from error
+
+
+def _select_binding_value(value: object, pointer: str, *, each_item: bool) -> object:
+    tokens = _pointer_tokens(pointer)
+    if each_item:
+        if not isinstance(value, list):
+            raise WorkflowValidationError("Map item binding source must be a collection.")
+        return [_select_pointer(item, tokens) for item in value]
+    return _select_pointer(value, tokens)
+
+
+def _select_pointer(value: object, tokens: Sequence[str]) -> object:
+    current = value
+    for token in tokens:
+        if isinstance(current, Mapping):
+            if token not in current:
+                raise WorkflowValidationError("Binding field is missing from the runtime value.")
+            current = current[token]
+        elif isinstance(current, list) and token.isdecimal():
+            index = int(token)
+            if index >= len(current):
+                raise WorkflowValidationError("Binding array index is outside the runtime value.")
+            current = current[index]
+        else:
+            raise WorkflowValidationError("Binding field path does not match the runtime value.")
+    return current
+
+
+def _assign_binding_value(
+    target: dict[str, object],
+    port: str,
+    pointer: str,
+    value: object,
+    *,
+    each_item: bool,
+) -> None:
+    tokens = _pointer_tokens(pointer)
+    if each_item and tokens:
+        if not isinstance(value, list):
+            raise WorkflowValidationError("Map item target binding needs a collection value.")
+        current = target.get(port)
+        if current is None:
+            current = [{} for _ in value]
+            target[port] = current
+        if not isinstance(current, list) or len(current) != len(value):
+            raise WorkflowValidationError("Map item bindings have different collection lengths.")
+        for item, item_value in zip(current, value, strict=True):
+            if not isinstance(item, dict):
+                raise WorkflowValidationError("Map item target is not an object.")
+            _set_pointer(item, tokens, item_value)
+        return
+    if not tokens:
+        if port in target:
+            raise WorkflowValidationError("Workflow input is bound more than once.")
+        target[port] = value
+        return
+    current = target.get(port)
+    if current is None:
+        current = {}
+        target[port] = current
+    if not isinstance(current, dict):
+        raise WorkflowValidationError("Nested bindings require an object target.")
+    _set_pointer(current, tokens, value)
+
+
+def _set_pointer(target: dict[str, object], tokens: Sequence[str], value: object) -> None:
+    current = target
+    for token in tokens[:-1]:
+        nested = current.get(token)
+        if nested is None:
+            nested = {}
+            current[token] = nested
+        if not isinstance(nested, dict):
+            raise WorkflowValidationError("Nested binding paths conflict at runtime.")
+        current = nested
+    if not tokens:
+        raise WorkflowValidationError("Cannot assign an empty nested binding path.")
+    key = tokens[-1]
+    if key in current:
+        raise WorkflowValidationError("Workflow input is bound more than once.")
+    current[key] = value
+
+
 def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
@@ -931,7 +1107,8 @@ def _topological_nodes(graph: WorkflowGraph) -> tuple[WorkflowNode, ...]:
     nodes = {node.id: node for node in graph.nodes}
     dependencies: dict[str, set[str]] = {node.id: set() for node in graph.nodes}
     for edge in graph.edges:
-        dependencies[edge.target_node].add(edge.source_node)
+        if edge.source_kind == "node" and edge.source_node is not None:
+            dependencies[edge.target_node].add(edge.source_node)
     ordered: list[WorkflowNode] = []
     while dependencies:
         ready = sorted(node for node, parents in dependencies.items() if not parents)
@@ -950,6 +1127,8 @@ def _source_records_for_edge(
     sources: Mapping[str, object],
     edge: WorkflowEdge,
 ) -> list[object] | None:
+    if edge.source_node is None:
+        return None
     node = next((item for item in graph.nodes if item.id == edge.source_node), None)
     if node is None or node.kind != "dataset" or edge.source_port != "records":
         return None

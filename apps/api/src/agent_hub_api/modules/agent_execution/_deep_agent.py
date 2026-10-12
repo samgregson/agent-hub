@@ -78,14 +78,20 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "value or a collection. Use Workflow tools to create, inspect, revise, prepare, execute, "
         "resume, and inspect Workflow Runs. Report outputs from saved Workflow Runs.",
         "Workflow Definitions are saved Project DAGs. graph_json must be an object with nodes, "
-        "edges, and outputs arrays. Each node has id, kind, ref_id, and version (optionally "
-        "shape and tool_name); node kinds are dataset, file, python, and mcp. Each edge has "
-        "source_node, source_port, target_node, and target_port. Each output has name, node, "
-        "and port. Do not use a node map, from/to edge keys, or an outputs map. Dataset sources "
-        "expose ordered records. Project File nodes use kind file, the absolute /project path "
-        "as ref_id, the current integer version, and expose captured text on content. Call "
-        "discover_project_file_sources before composing a graph; never use /scratch paths as "
-        "Workflow sources.",
+        "edges, outputs, and optional inputs arrays. Each node has id, kind, ref_id, and version "
+        "(optionally shape, tool_name, and map_input); node kinds are dataset, file, python, and "
+        "mcp. Edges are graph-owned value bindings with target_node and target_port. A node "
+        "binding uses source_kind='node', source_node, and source_port. A run-time input binding "
+        "uses source_kind='workflowInput' and source_input; a constant uses source_kind='literal' "
+        "and literal. Workflow Inputs declare name, JSON Schema in schema, and optional required. "
+        "source_path and target_path are RFC 6901 JSON Pointers; empty means the whole value. Use "
+        "them to select fields, rename them, and assemble nested target inputs from several "
+        "bindings. Map nodes send each item from items to map_input for Python Functions; "
+        "other named ports are shared inputs. Each output has name, node, and port. Do not use a "
+        "node map, from/to edge keys, or an outputs map. Dataset sources expose ordered records. "
+        "Project File nodes use kind file, the absolute /project path as ref_id, the current "
+        "integer version, and expose captured text on content. Call discover_project_file_sources "
+        "before composing a graph; never use /scratch paths as Workflow sources.",
         "Python Function nodes use kind python, the saved Function UUID as ref_id, its revision "
         "as version, and shape single or map. Their input ports are declared input names. The "
         "result output passes the entire value matching the Function output schema; it does not "
@@ -99,7 +105,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Before creating or revising a Workflow, call validate_project_workflow with the complete "
         "graph_json and fix every reported error. Validation does not save or execute the graph. "
         "Then use the approval-gated create or revise tool. Prepare a Workflow Run to capture "
-        "its exact inputs, then execute the prepared Run. Completed nodes are reused on resume; "
+        "its exact inputs. Supply declared runtime values through workflow_inputs_json when "
+        "preparing a Run; saved Preview defaults are never used. Then execute the prepared "
+        "Run. Completed nodes are reused on resume; "
         "an interrupted single MCP call with unknown outcome is never dispatched again "
         "automatically. Inspect the saved Run for node outputs and failures.",
     )
@@ -598,16 +606,29 @@ class PostgresDeepAgentRunner:
 
             @tool
             async def prepare_project_workflow_run(
-                workflow_id: str, expected_version: int, idempotency_key: str
+                workflow_id: str,
+                expected_version: int,
+                idempotency_key: str,
+                workflow_inputs_json: str = "{}",
             ) -> str:
-                """After approval, capture a Workflow Run without executing its graph."""
-                run = await workflow_runs.prepare(
-                    access,
-                    project_id,
-                    workflow_id,
-                    idempotency_key,
-                    expected_version=expected_version,
-                )
+                """After approval, capture a Workflow Run and declared runtime inputs."""
+                try:
+                    workflow_inputs = json.loads(workflow_inputs_json)
+                except json.JSONDecodeError:
+                    return "Workflow Inputs must be a JSON object."
+                if not isinstance(workflow_inputs, dict):
+                    return "Workflow Inputs must be a JSON object."
+                try:
+                    run = await workflow_runs.prepare(
+                        access,
+                        project_id,
+                        workflow_id,
+                        idempotency_key,
+                        expected_version=expected_version,
+                        workflow_inputs=workflow_inputs,
+                    )
+                except WorkflowValidationError as error:
+                    return f"Workflow Run could not be prepared: {error}"
                 return json.dumps(
                     {
                         "id": run.id,

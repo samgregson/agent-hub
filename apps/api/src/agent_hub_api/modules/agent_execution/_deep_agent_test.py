@@ -83,8 +83,11 @@ def test_agent_instructions_describe_function_preview_and_workflow_execution() -
 
 
 def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
-    assert "nodes, edges, and outputs arrays" in _AGENT_SYSTEM_PROMPT
-    assert "source_node, source_port, target_node, and target_port" in _AGENT_SYSTEM_PROMPT
+    assert "edges, outputs, and optional inputs arrays" in _AGENT_SYSTEM_PROMPT
+    assert "target_node and target_port" in _AGENT_SYSTEM_PROMPT
+    assert "source_kind='workflowInput'" in _AGENT_SYSTEM_PROMPT
+    assert "RFC 6901 JSON Pointers" in _AGENT_SYSTEM_PROMPT
+    assert "workflow_inputs_json" in _AGENT_SYSTEM_PROMPT
     assert "name, node, and port" in _AGENT_SYSTEM_PROMPT
     assert "Do not use a node map, from/to edge keys, or an outputs map" in _AGENT_SYSTEM_PROMPT
     assert "saved Function UUID as ref_id" in _AGENT_SYSTEM_PROMPT
@@ -226,6 +229,47 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         {"graph_json": function_graph}
     )
     assert "structurally valid" in function_preflight
+    input_workflow_graph = json.dumps(
+        {
+            "nodes": [
+                {
+                    "id": "normalize",
+                    "kind": "python",
+                    "ref_id": function.id,
+                    "version": function.revision,
+                }
+            ],
+            "edges": [
+                {
+                    "source_kind": "workflowInput",
+                    "source_input": "request",
+                    "target_node": "normalize",
+                    "target_port": "text",
+                }
+            ],
+            "inputs": [{"name": "request", "schema": {"type": "string"}, "required": True}],
+            "outputs": [{"name": "normalized", "node": "normalize", "port": "result"}],
+        }
+    )
+    input_workflow = json.loads(
+        await tools["create_project_workflow"].ainvoke(
+            {"name": "Normalize input", "graph_json": input_workflow_graph}
+        )
+    )
+    input_run = json.loads(
+        await tools["prepare_project_workflow_run"].ainvoke(
+            {
+                "workflow_id": input_workflow["id"],
+                "expected_version": 1,
+                "idempotency_key": "runtime-input-run",
+                "workflow_inputs_json": '{"request":"  sample  "}',
+            }
+        )
+    )
+    input_run_snapshot = json.loads(
+        await tools["load_project_workflow_run"].ainvoke({"run_id": input_run["id"]})
+    )["snapshot"]
+    assert input_run_snapshot["workflowInputs"] == {"request": "  sample  "}
     bad_function_graph = function_graph.replace(function.id, "normalize_text")
     function_error = await tools["validate_project_workflow"].ainvoke(
         {"graph_json": bad_function_graph}

@@ -1,13 +1,14 @@
 """Versioned Project Workflow Definitions with validated DAG wiring."""
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema import SchemaError as JsonSchemaSchemaError
 from jsonschema import ValidationError as JsonSchemaValidationError
 from pydantic import TypeAdapter, ValidationError
 
@@ -30,6 +31,7 @@ from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, Project
 MAX_NODES = 32
 MAX_EDGES = 128
 MAX_OUTPUTS = 20
+MAX_INPUTS = 64
 _NODE_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,63}\Z")
 
 
@@ -41,14 +43,27 @@ class WorkflowNode:
     version: int | str
     shape: str = "single"
     tool_name: str | None = None
+    map_input: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class WorkflowEdge:
-    source_node: str
-    source_port: str
-    target_node: str
-    target_port: str
+    source_node: str | None = None
+    source_port: str | None = None
+    target_node: str = ""
+    target_port: str = ""
+    source_kind: str = "node"
+    source_input: str | None = None
+    source_path: str = ""
+    target_path: str = ""
+    literal: object = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowInput:
+    name: str
+    schema: Mapping[str, object]
+    required: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +78,7 @@ class WorkflowGraph:
     nodes: tuple[WorkflowNode, ...]
     edges: tuple[WorkflowEdge, ...]
     outputs: tuple[WorkflowOutput, ...]
+    inputs: tuple[WorkflowInput, ...] = ()
 
     @classmethod
     def from_json(cls, raw: str) -> "WorkflowGraph":
@@ -257,39 +273,108 @@ class WorkflowDefinitionModule:
     async def _validate(self, access: ProjectAccess, project_id: str, graph: WorkflowGraph) -> None:
         if not 1 <= len(graph.nodes) <= MAX_NODES:
             raise WorkflowValidationError("Workflow needs 1–32 nodes.")
-        if len(graph.edges) > MAX_EDGES or not 1 <= len(graph.outputs) <= MAX_OUTPUTS:
-            raise WorkflowValidationError("Workflow exceeds its edge or output bound.")
+        if (
+            len(graph.edges) > MAX_EDGES
+            or not 1 <= len(graph.outputs) <= MAX_OUTPUTS
+            or len(graph.inputs) > MAX_INPUTS
+        ):
+            raise WorkflowValidationError("Workflow exceeds its binding, input, or output bound.")
         nodes = {node.id: node for node in graph.nodes}
         if len(nodes) != len(graph.nodes) or any(not _NODE_ID.fullmatch(id) for id in nodes):
             raise WorkflowValidationError("Workflow node IDs must be unique and valid.")
+        workflow_inputs = {item.name: item for item in graph.inputs}
+        if len(workflow_inputs) != len(graph.inputs) or any(
+            not _NODE_ID.fullmatch(name) for name in workflow_inputs
+        ):
+            raise WorkflowValidationError("Workflow Input names must be unique and valid.")
+        for item in graph.inputs:
+            try:
+                Draft202012Validator.check_schema(item.schema)
+            except (JsonSchemaValidationError, JsonSchemaSchemaError) as error:
+                raise WorkflowValidationError(
+                    f"Workflow Input {item.name!r} has an invalid JSON Schema."
+                ) from error
         ports = {node.id: await self._describe(access, project_id, node) for node in graph.nodes}
-        incoming: dict[tuple[str, str], WorkflowEdge] = {}
+        incoming: dict[tuple[str, str], list[WorkflowEdge]] = {}
         dependencies: dict[str, set[str]] = {node.id: set() for node in graph.nodes}
         for edge in graph.edges:
-            source = ports.get(edge.source_node)
             target = ports.get(edge.target_node)
-            if source is None or target is None:
-                raise WorkflowValidationError("Workflow edge refers to an unknown node.")
-            source_schema = source.outputs.get(edge.source_port)
+            if target is None:
+                raise WorkflowValidationError("Workflow binding refers to an unknown target node.")
             target_schema = target.inputs.get(edge.target_port)
-            if source_schema is None or target_schema is None:
+            if target_schema is None:
                 raise WorkflowValidationError("Workflow edge refers to an unknown port.")
             key = (edge.target_node, edge.target_port)
-            if key in incoming:
-                raise WorkflowValidationError("A call input can have only one incoming edge.")
-            if not _compatible(source_schema, target_schema):
+            mapped_item = nodes[edge.target_node].shape == "map" and edge.target_port == "items"
+            selected_target_schema = _schema_at_path(
+                target_schema, edge.target_path, each_item=mapped_item
+            )
+            if edge.source_kind == "node":
+                if edge.source_node is None or edge.source_port is None:
+                    raise WorkflowValidationError("Node binding needs a source node and port.")
+                source = ports.get(edge.source_node)
+                if source is None:
+                    raise WorkflowValidationError(
+                        "Workflow binding refers to an unknown source node."
+                    )
+                source_schema = source.outputs.get(edge.source_port)
+                if source_schema is None:
+                    raise WorkflowValidationError(
+                        "Workflow binding refers to an unknown source port."
+                    )
+                selected_source_schema = _schema_at_path(
+                    source_schema,
+                    edge.source_path,
+                    each_item=mapped_item,
+                )
+                if (
+                    nodes[edge.source_node].kind == "dataset"
+                    and nodes[edge.target_node].shape == "map"
+                ):
+                    dataset = await self._datasets.load_dataset(
+                        access, project_id, nodes[edge.source_node].ref_id
+                    )
+                    if len(dataset.records) > MAX_MAP_INVOCATIONS:
+                        raise WorkflowValidationError("Map input exceeds 100 Dataset Records.")
+                dependencies[edge.target_node].add(edge.source_node)
+            elif edge.source_kind == "workflowInput":
+                input_definition = workflow_inputs.get(edge.source_input or "")
+                if input_definition is None:
+                    raise WorkflowValidationError(
+                        f"Workflow binding refers to undeclared Workflow Input "
+                        f"{edge.source_input!r}."
+                    )
+                selected_source_schema = _schema_at_path(
+                    input_definition.schema, edge.source_path, each_item=mapped_item
+                )
+            elif edge.source_kind == "literal":
+                selected_source_schema = _schema_at_path(
+                    _schema_for_values([edge.literal]), edge.source_path, each_item=mapped_item
+                )
+            else:
+                raise WorkflowValidationError("Workflow binding has an unknown source kind.")
+            if not _compatible(selected_source_schema, selected_target_schema):
                 raise WorkflowValidationError(
                     f"Workflow has incompatible schemas for input "
-                    f"{edge.target_node}.{edge.target_port}."
+                    f"{edge.target_node}.{edge.target_port}{edge.target_path}."
                 )
-            source_node = nodes[edge.source_node]
-            target_node = nodes[edge.target_node]
-            if source_node.kind == "dataset" and target_node.shape == "map":
-                dataset = await self._datasets.load_dataset(access, project_id, source_node.ref_id)
-                if len(dataset.records) > MAX_MAP_INVOCATIONS:
-                    raise WorkflowValidationError("Map input exceeds 100 Dataset Records.")
-            incoming[key] = edge
-            dependencies[edge.target_node].add(edge.source_node)
+            if edge.source_kind == "literal":
+                try:
+                    Draft202012Validator(selected_target_schema).validate(
+                        _value_at_path(edge.literal, edge.source_path, each_item=mapped_item)
+                    )
+                except JsonSchemaValidationError as error:
+                    raise WorkflowValidationError(
+                        f"Literal binding does not match input "
+                        f"{edge.target_node}.{edge.target_port}{edge.target_path}."
+                    ) from error
+            existing = incoming.setdefault(key, [])
+            if any(_paths_overlap(binding.target_path, edge.target_path) for binding in existing):
+                raise WorkflowValidationError(
+                    f"Workflow has conflicting bindings for input {edge.target_node}."
+                    f"{edge.target_port}{edge.target_path}."
+                )
+            existing.append(edge)
         if _has_cycle(dependencies):
             raise WorkflowValidationError("Workflow graph contains a cycle.")
         for node in graph.nodes:
@@ -301,6 +386,14 @@ class WorkflowDefinitionModule:
                     f"Workflow node {node.id} has a required input without an edge: "
                     + ", ".join(sorted(missing))
                 )
+            for port, bindings in (
+                (port, values) for (owner, port), values in incoming.items() if owner == node.id
+            ):
+                if not _target_required_fields_bound(ports[node.id].inputs[port], bindings):
+                    raise WorkflowValidationError(
+                        f"Workflow node {node.id} has required fields without bindings for "
+                        f"input {port}."
+                    )
         await self._validate_mcp_maps(access, project_id, graph, ports, incoming, nodes)
         names: set[str] = set()
         for output in graph.outputs:
@@ -355,7 +448,14 @@ class WorkflowDefinitionModule:
             if dataset.version != node.version:
                 raise WorkflowValidationError("Dataset version changed; review the Workflow again.")
             return _Ports(
-                {}, frozenset(), {"records": {"type": "array", "items": {"type": "object"}}}
+                {},
+                frozenset(),
+                {
+                    "records": {
+                        "type": "array",
+                        "items": _schema_for_values(record.value for record in dataset.records),
+                    }
+                },
             )
         if node.shape not in {"single", "map"}:
             raise WorkflowValidationError("Call shape must be single or map.")
@@ -375,19 +475,28 @@ class WorkflowDefinitionModule:
                 )
             properties = _schema_properties(definition.input_schema)
             names = tuple(properties)
-            if node.shape == "map" and len(names) != 1:
-                raise WorkflowValidationError("Mapped Python Function needs one named input.")
+            map_input = node.map_input or (names[0] if names else None)
+            if node.shape == "map" and (map_input is None or map_input not in properties):
+                raise WorkflowValidationError("Mapped Python Function needs a declared item input.")
             function_inputs: Mapping[str, Mapping[str, object]] = dict(properties)
             if node.shape == "map":
-                only_property = properties[names[0]]
-                function_inputs = {"items": {"type": "array", "items": dict(only_property)}}
+                assert map_input is not None
+                function_inputs = {
+                    "items": {"type": "array", "items": dict(properties[map_input])},
+                    **{name: schema for name, schema in properties.items() if name != map_input},
+                }
             required_names = definition.input_schema.get("required", [])
             if not isinstance(required_names, list) or not all(
                 isinstance(name, str) for name in required_names
             ):
                 raise WorkflowValidationError("Python Function has invalid required inputs.")
             function_required = (
-                frozenset({"items"}) if node.shape == "map" else frozenset(required_names)
+                (
+                    frozenset({"items"})
+                    | frozenset(name for name in required_names if name != map_input)
+                )
+                if node.shape == "map"
+                else frozenset(required_names)
             )
             output: Mapping[str, object] = dict(definition.output_schema)
             if node.shape == "map":
@@ -456,38 +565,60 @@ class WorkflowDefinitionModule:
         project_id: str,
         graph: WorkflowGraph,
         ports: Mapping[str, _Ports],
-        incoming: Mapping[tuple[str, str], WorkflowEdge],
+        incoming: Mapping[tuple[str, str], Sequence[WorkflowEdge]],
         nodes: Mapping[str, WorkflowNode],
     ) -> None:
         for node in graph.nodes:
             node_ports = ports[node.id]
             if node.kind != "mcp" or node.shape != "map" or node_ports.map_schema is None:
                 continue
-            item_edge = incoming.get((node.id, "items"))
-            item_source = nodes[item_edge.source_node] if item_edge is not None else None
+            node_bindings = [
+                binding
+                for (target_id, _), bindings in incoming.items()
+                if target_id == node.id
+                for binding in bindings
+            ]
+            if any(
+                binding.source_kind == "workflowInput" or binding.source_path or binding.target_path
+                for binding in node_bindings
+            ):
+                continue
+            item_bindings = incoming.get((node.id, "items"), ())
+            item_edge = item_bindings[0] if len(item_bindings) == 1 else None
+            item_source = (
+                nodes[item_edge.source_node]
+                if item_edge is not None and item_edge.source_node is not None
+                else None
+            )
             if item_source is None or item_source.kind != "dataset":
                 continue
             dataset = await self._datasets.load_dataset(access, project_id, item_source.ref_id)
             constants: dict[str, object] = {}
-            for (target_id, target_port), edge in incoming.items():
+            for (target_id, target_port), bindings in incoming.items():
                 if target_id != node.id or target_port == "items":
                     continue
-                source_node = nodes[edge.source_node]
-                if source_node.kind != "file":
-                    continue
-                if self._project_files is None:
-                    raise WorkflowValidationError("Project File input is unavailable.")
-                try:
-                    file = await self._project_files.load_ordinary_file(
-                        project_id, _project_file_path(source_node.ref_id)
-                    )
-                except ProjectFileError as error:
-                    raise WorkflowValidationError("Project File input is unavailable.") from error
-                if file.version != source_node.version:
-                    raise WorkflowValidationError(
-                        "Project File version changed; review the Workflow again."
-                    )
-                constants[target_port] = file.content
+                for edge in bindings:
+                    if edge.source_kind == "literal" and edge.target_path == "":
+                        constants[target_port] = edge.literal
+                    elif edge.source_kind == "node" and edge.source_node is not None:
+                        source_node = nodes[edge.source_node]
+                        if source_node.kind != "file" or edge.target_path:
+                            continue
+                        if self._project_files is None:
+                            raise WorkflowValidationError("Project File input is unavailable.")
+                        try:
+                            file = await self._project_files.load_ordinary_file(
+                                project_id, _project_file_path(source_node.ref_id)
+                            )
+                        except ProjectFileError as error:
+                            raise WorkflowValidationError(
+                                "Project File input is unavailable."
+                            ) from error
+                        if file.version != source_node.version:
+                            raise WorkflowValidationError(
+                                "Project File version changed; review the Workflow again."
+                            )
+                        constants[target_port] = file.content
             validator = Draft202012Validator(node_ports.map_schema)
             for record in dataset.records:
                 collisions = constants.keys() & record.value.keys()
@@ -520,6 +651,151 @@ def _schema_properties(schema: Mapping[str, object]) -> Mapping[str, Mapping[str
     ):
         raise WorkflowValidationError("MCP tool has invalid named input ports.")
     return {name: value for name, value in raw.items() if isinstance(name, str)}
+
+
+def _schema_for_values(values: Iterable[object]) -> Mapping[str, object]:
+    samples = list(values)
+    if not samples:
+        return {"type": "object"}
+    types = sorted({_json_type(value) for value in samples})
+    if len(types) == 1 and types[0] == "object":
+        records = [value for value in samples if isinstance(value, Mapping)]
+        keys = set().union(*(record.keys() for record in records))
+        properties = {
+            key: _schema_for_values([record[key] for record in records if key in record])
+            for key in sorted(keys)
+            if isinstance(key, str)
+        }
+        required = sorted(key for key in properties if all(key in record for record in records))
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
+        }
+    if len(types) == 1 and types[0] == "array":
+        items = [item for value in samples if isinstance(value, list) for item in value]
+        return {"type": "array", "items": _schema_for_values(items)}
+    return {"type": types[0] if len(types) == 1 else types}
+
+
+def _json_type(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, list):
+        return "array"
+    return "null"
+
+
+def _pointer_tokens(pointer: str) -> tuple[str, ...]:
+    if pointer == "":
+        return ()
+    if not pointer.startswith("/"):
+        raise WorkflowValidationError("Binding field paths must be JSON Pointers or empty.")
+    tokens: list[str] = []
+    for token in pointer[1:].split("/"):
+        if re.search(r"~(?![01])", token):
+            raise WorkflowValidationError("Binding field path has an invalid JSON Pointer escape.")
+        tokens.append(token.replace("~1", "/").replace("~0", "~"))
+    return tuple(tokens)
+
+
+def _value_at_path(value: object, pointer: str, *, each_item: bool = False) -> object:
+    if each_item:
+        if not isinstance(value, list):
+            raise WorkflowValidationError("Map item binding source must be a collection.")
+        return [_value_at_path(item, pointer) for item in value]
+    current = value
+    for token in _pointer_tokens(pointer):
+        if isinstance(current, Mapping) and token in current:
+            current = current[token]
+        elif isinstance(current, list) and token.isdecimal() and int(token) < len(current):
+            current = current[int(token)]
+        else:
+            raise WorkflowValidationError(
+                f"Binding field path {pointer!r} does not exist in the literal value."
+            )
+    return current
+
+
+def _schema_at_path(
+    schema: Mapping[str, object], pointer: str, *, each_item: bool = False
+) -> Mapping[str, object]:
+    tokens = _pointer_tokens(pointer)
+    current: Mapping[str, object] = schema
+    if each_item:
+        items = current.get("items")
+        if not isinstance(items, Mapping):
+            raise WorkflowValidationError("Map item binding needs an array source and target.")
+        current = items
+    for token in tokens:
+        schema_type = current.get("type")
+        if schema_type == "array" or (isinstance(schema_type, list) and "array" in schema_type):
+            items = current.get("items")
+            if not isinstance(items, Mapping) or not token.isdecimal():
+                raise WorkflowValidationError(
+                    f"Binding field path {pointer!r} does not select an array item."
+                )
+            current = items
+            continue
+        properties = current.get("properties")
+        if not isinstance(properties, Mapping) or token not in properties:
+            raise WorkflowValidationError(
+                f"Binding field path {pointer!r} refers to an unknown field."
+            )
+        selected = properties[token]
+        if not isinstance(selected, Mapping):
+            raise WorkflowValidationError("Binding field path refers to an invalid schema.")
+        current = selected
+    if each_item:
+        return {"type": "array", "items": dict(current)}
+    return current
+
+
+def _paths_overlap(left: str, right: str) -> bool:
+    left_tokens = _pointer_tokens(left)
+    right_tokens = _pointer_tokens(right)
+    shorter = min(len(left_tokens), len(right_tokens))
+    return left_tokens[:shorter] == right_tokens[:shorter]
+
+
+def _target_required_fields_bound(
+    schema: Mapping[str, object], bindings: Sequence[WorkflowEdge]
+) -> bool:
+    paths = [_pointer_tokens(binding.target_path) for binding in bindings]
+    if any(not path for path in paths):
+        return True
+
+    def required_paths(
+        current: Mapping[str, object], prefix: tuple[str, ...]
+    ) -> list[tuple[str, ...]]:
+        properties = current.get("properties")
+        required = current.get("required", [])
+        if not isinstance(properties, Mapping) or not isinstance(required, list):
+            return []
+        result: list[tuple[str, ...]] = []
+        for name in required:
+            if not isinstance(name, str) or not isinstance(properties.get(name), Mapping):
+                continue
+            path = (*prefix, name)
+            child = properties[name]
+            result.extend(required_paths(child, path))
+            if not any(existing[: len(path)] == path for existing in result):
+                result.append(path)
+        return result
+
+    required = required_paths(schema, ())
+    return all(any(path[: len(binding)] == binding for binding in paths) for path in required)
 
 
 def _project_file_path(value: str) -> str:
