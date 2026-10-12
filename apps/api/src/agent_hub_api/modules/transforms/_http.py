@@ -75,8 +75,8 @@ def _response(definition: TransformDefinition) -> DefinitionResponse:
     )
 
 
-def create_transform_router(identity: IdentityModule, transforms: TransformModule) -> APIRouter:
-    router = APIRouter(prefix="/projects/{project_id}/transforms", tags=["transforms"])
+def create_function_router(identity: IdentityModule, transforms: TransformModule) -> APIRouter:
+    router = APIRouter(prefix="/projects/{project_id}/functions", tags=["functions"])
 
     async def context(request: Request) -> RequestContext:
         try:

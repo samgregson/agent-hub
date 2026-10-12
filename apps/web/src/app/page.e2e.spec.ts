@@ -277,27 +277,24 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
       await route.fulfill({ json: { files: [] } });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({
-        json: [
-          {
-            id: "summary-function",
-            name: "Summarize loads",
-            revision: 1,
-            inputSelectors: { records: "$" },
-            inputSchema: {
-              type: "object",
-              properties: { records: {} },
-              required: ["records"],
-              additionalProperties: false,
-            },
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "summary-function",
+          name: "Summarize loads",
+          revision: 1,
+          inputSelectors: { records: "$" },
+          inputSchema: {
+            type: "object",
+            properties: { records: {} },
+            required: ["records"],
+            additionalProperties: false,
           },
-        ],
-      });
-    },
-  );
+        },
+      ],
+    });
+  });
   await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
     await route.fulfill({
       json: [
@@ -570,27 +567,24 @@ test("a Project Workflow can be created from Library and Functions", async ({
       await route.fulfill({ json: { files: [] } });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({
-        json: [
-          {
-            id: "calculate",
-            name: "Calculate loads",
-            revision: 2,
-            inputSelectors: { records: "$" },
-            inputSchema: {
-              type: "object",
-              properties: { records: {} },
-              required: ["records"],
-              additionalProperties: false,
-            },
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "calculate",
+          name: "Calculate loads",
+          revision: 2,
+          inputSelectors: { records: "$" },
+          inputSchema: {
+            type: "object",
+            properties: { records: {} },
+            required: ["records"],
+            additionalProperties: false,
           },
-        ],
-      });
-    },
-  );
+        },
+      ],
+    });
+  });
   await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
     await route.fulfill({ json: [] });
   });
@@ -688,12 +682,9 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
       });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
   await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
     await route.fulfill({
       json: [
@@ -1143,12 +1134,9 @@ test("Functions has a dedicated Project destination without Operations subcatego
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
 
   await page.goto("/");
   const projectViews = page.getByRole("navigation", { name: "Project views" });

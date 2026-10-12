@@ -20,7 +20,7 @@ async function prepareFunctionWorkbench(page: Page) {
   await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
     route.fulfill({ json: [] }),
   );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
+  await page.route(`**/api/projects/${project.id}/functions`, (route) =>
     route.fulfill({
       json: [
         {
@@ -66,7 +66,7 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
   const durableRuns: Array<Record<string, unknown>> = [];
   await prepareFunctionWorkbench(page);
   await page.route(
-    `**/api/projects/${project.id}/transforms/function-1/preview`,
+    `**/api/projects/${project.id}/functions/function-1/preview`,
     async (route) => {
       previews.push(route.request().postDataJSON() as Record<string, unknown>);
       previewCount += 1;
@@ -87,7 +87,7 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
     },
   );
   await page.route(
-    `**/api/projects/${project.id}/transforms/function-1/runs`,
+    `**/api/projects/${project.id}/functions/function-1/runs`,
     (route) => {
       durableRuns.push(
         route.request().postDataJSON() as Record<string, unknown>,
@@ -143,7 +143,7 @@ test("Function preview workbench remains reachable at phone width", async ({
 }) => {
   await prepareFunctionWorkbench(page);
   await page.route(
-    `**/api/projects/${project.id}/transforms/function-1/preview`,
+    `**/api/projects/${project.id}/functions/function-1/preview`,
     (route) =>
       route.fulfill({
         json: {
@@ -183,33 +183,30 @@ test("new Function submissions include their named input schema", async ({
   );
 
   let submitted: Record<string, unknown> | null = null;
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      if (route.request().method() !== "POST") {
-        await route.fulfill({ json: [] });
-        return;
-      }
-      submitted = route.request().postDataJSON() as Record<string, unknown>;
-      await route.fulfill({
-        status: 201,
-        json: {
-          id: "function-new",
-          name: "Read a load",
-          source,
-          inputSelectors: { load: "/load" },
-          inputSchema: submitted.inputSchema,
-          outputSchema: { type: "object" },
-          runtime: "deno:2.9.7;pyodide:314.0.7",
-          packageHash: "package-hash",
-          sourceHash: "source-hash",
-          revision: 1,
-          createdAt: "2026-10-11T00:00:00Z",
-          updatedAt: "2026-10-11T00:00:00Z",
-        },
-      });
-    },
-  );
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    submitted = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      status: 201,
+      json: {
+        id: "function-new",
+        name: "Read a load",
+        source,
+        inputSelectors: { load: "/load" },
+        inputSchema: submitted.inputSchema,
+        outputSchema: { type: "object" },
+        runtime: "deno:2.9.7;pyodide:314.0.7",
+        packageHash: "package-hash",
+        sourceHash: "source-hash",
+        revision: 1,
+        createdAt: "2026-10-11T00:00:00Z",
+        updatedAt: "2026-10-11T00:00:00Z",
+      },
+    });
+  });
   await surface.getByRole("button", { name: "Save Function" }).click();
   await expect(
     surface.getByText("Read a load saved as revision 1.", { exact: true }),

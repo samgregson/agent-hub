@@ -54,7 +54,7 @@ export function WorkflowDefinitionEditor({
     void Promise.all([
       fetch(`${root}/datasets`, { cache: "no-store" }),
       fetch(`${root}/files/index`, { cache: "no-store" }),
-      fetch(`${root}/transforms`, { cache: "no-store" }),
+      fetch(`${root}/functions`, { cache: "no-store" }),
       fetch(`${root}/plugins`, { cache: "no-store" }),
     ])
       .then(async (responses) => {

@@ -4,18 +4,14 @@ interface RouteContext {
   params: Promise<{ projectId: string; definitionId: string }>;
 }
 
-async function forward(
+export async function POST(
   request: Request,
   context: RouteContext,
 ): Promise<Response> {
   const { projectId, definitionId } = await context.params;
   return forwardBackendRequest(
     request,
-    `/api/projects/${encodeURIComponent(projectId)}/transforms/${encodeURIComponent(definitionId)}`,
+    `/api/projects/${encodeURIComponent(projectId)}/functions/${encodeURIComponent(definitionId)}/preview`,
     "application/json",
   );
 }
-
-export const GET = forward;
-export const PUT = forward;
-export const DELETE = forward;

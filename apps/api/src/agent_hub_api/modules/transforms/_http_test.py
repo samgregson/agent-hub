@@ -9,7 +9,7 @@ from agent_hub_api.modules.transforms import (
     MemoryTransformStore,
     TransformModule,
     TransformRuntimeIdentity,
-    create_transform_router,
+    create_function_router,
 )
 from agent_hub_api.settings import Settings
 
@@ -22,14 +22,14 @@ class _PinnedRunner:
 def test_function_http_surface_exposes_authoring_and_preview_without_runs() -> None:
     projects = create_memory_project_module()
     app_settings = Settings(environment="test", fixed_identity_subject="sam")
-    router = create_transform_router(
+    router = create_function_router(
         create_identity_module(app_settings),
         TransformModule(projects, MemoryTransformStore()),
     )
     paths = {route.path for route in router.routes if isinstance(route, APIRoute)}
 
-    assert "/projects/{project_id}/transforms" in paths
-    assert "/projects/{project_id}/transforms/{definition_id}/preview" in paths
+    assert "/projects/{project_id}/functions" in paths
+    assert "/projects/{project_id}/functions/{definition_id}/preview" in paths
     assert not any(
         suffix in path
         for path in paths
@@ -43,13 +43,13 @@ async def test_transform_definition_http_round_trip() -> None:
     project = await projects.create(ProjectAccess(subject="sam"), "Bridge")
     app = FastAPI()
     app.include_router(
-        create_transform_router(
+        create_function_router(
             create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
             TransformModule(projects, MemoryTransformStore()),
         ),
         prefix="/api",
     )
-    path = f"/api/projects/{project.id}/transforms"
+    path = f"/api/projects/{project.id}/functions"
     body = {
         "name": "Double loads",
         "source": "def transform(inputs, parameters):\n    return {}\n",
@@ -103,7 +103,7 @@ async def test_preview_http_uses_definition_and_returns_transient_output() -> No
     )
     app = FastAPI()
     app.include_router(
-        create_transform_router(
+        create_function_router(
             create_identity_module(Settings(environment="test", fixed_identity_subject="sam")),
             transforms,
         ),
@@ -111,7 +111,7 @@ async def test_preview_http_uses_definition_and_returns_transient_output() -> No
     )
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
-            f"/api/projects/{project.id}/transforms/{definition.id}/preview",
+            f"/api/projects/{project.id}/functions/{definition.id}/preview",
             json={"record": {"load": 3}, "parameters": {}},
         )
     assert response.status_code == 200

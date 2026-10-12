@@ -19,7 +19,7 @@ from agent_hub_api.modules.transforms._application import (
     TransformValidationError,
     create_postgres_transform_module,
 )
-from agent_hub_api.modules.transforms._http import create_transform_router
+from agent_hub_api.modules.transforms._http import create_function_router
 
 __all__ = [
     "DatasetSelection",
@@ -41,5 +41,5 @@ __all__ = [
     "TransformRuntimeIdentity",
     "TransformValidationError",
     "create_postgres_transform_module",
-    "create_transform_router",
+    "create_function_router",
 ]

@@ -60,7 +60,7 @@ export function FunctionCatalog({
   projectId: string;
   selectedFunctionId: string | null;
 }) {
-  const root = `/api/projects/${encodeURIComponent(projectId)}/transforms`;
+  const root = `/api/projects/${encodeURIComponent(projectId)}/functions`;
   const [definitions, setDefinitions] = useState<Definition[] | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [recordJson, setRecordJson] = useState('{"load": 3}');

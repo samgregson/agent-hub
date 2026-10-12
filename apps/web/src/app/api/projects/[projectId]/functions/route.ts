@@ -11,7 +11,7 @@ async function forward(
   const { projectId } = await context.params;
   return forwardBackendRequest(
     request,
-    `/api/projects/${encodeURIComponent(projectId)}/transforms`,
+    `/api/projects/${encodeURIComponent(projectId)}/functions`,
     "application/json",
   );
 }

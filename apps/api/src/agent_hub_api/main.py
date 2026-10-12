@@ -46,8 +46,8 @@ from agent_hub_api.modules.transform_inputs import (
     create_transform_input_router,
 )
 from agent_hub_api.modules.transforms import (
+    create_function_router,
     create_postgres_transform_module,
-    create_transform_router,
 )
 from agent_hub_api.modules.workflows import (
     create_postgres_workflow_module,
@@ -174,7 +174,7 @@ def create_app(
         prefix="/api",
     )
     application.include_router(
-        create_transform_router(resolved_identity, resolved_transforms), prefix="/api"
+        create_function_router(resolved_identity, resolved_transforms), prefix="/api"
     )
     application.include_router(
         create_transform_input_router(resolved_identity, resolved_transform_inputs),
