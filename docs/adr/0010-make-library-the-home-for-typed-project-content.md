@@ -16,4 +16,4 @@ A Dataset is a registered, typed Project File in the Project Virtual Filesystem.
 
 ## Consequences
 
-Issue #45 owns migration from the current Dataset tables to canonical typed Project Files, including compatibility, protected writes, and existing Run snapshots. Issue #37 owns Library placement and the eventual rail rework. Until those slices ship, the current Dataset APIs and separate navigation remain functional. Artifact elevation and Result Set ownership do not change. Typed file and Artifact inputs to MCP operations need explicit Binding contracts rather than filename inference.
+Issue #45 owns migration from the current Dataset tables to canonical typed Project Files, including compatibility, protected writes, and existing Run snapshots. Issue #37 owns Library placement and the eventual rail rework. Until those slices ship, the current Dataset APIs and separate navigation remain functional. Artifact elevation and Result Set ownership do not change. Workflows connect typed file and Dataset inputs to MCP operations through explicit named graph edges rather than filename inference or a separate Binding record.

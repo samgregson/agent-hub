@@ -52,7 +52,6 @@ class BatchDefinition:
     created_at: datetime
     updated_at: datetime
     transform_definition_id: str | None = None
-    file_argument: str | None = None
 
 
 class DatasetNotFound(Exception):
@@ -188,12 +187,11 @@ class DatasetModule:
         plugin_id: str,
         tool_name: str,
         argument_mappings: Mapping[str, str],
-        file_argument: str | None = None,
     ) -> BatchDefinition:
         dataset = await self.load_dataset(access, project_id, dataset_id)
         schema = await self._tool_schemas.input_schema(access, project_id, plugin_id, tool_name)
         mappings = _mappings(argument_mappings)
-        _validate_mappings(dataset.records, mappings, schema, file_argument=file_argument)
+        _validate_mappings(dataset.records, mappings, schema)
         now = datetime.now(UTC)
         return await self._store.create_definition(
             BatchDefinition(
@@ -207,7 +205,6 @@ class DatasetModule:
                 input_schema=dict(schema),
                 created_at=now,
                 updated_at=now,
-                file_argument=file_argument,
             )
         )
 
@@ -262,13 +259,12 @@ class DatasetModule:
         plugin_id: str,
         tool_name: str,
         argument_mappings: Mapping[str, str],
-        file_argument: str | None = None,
     ) -> BatchDefinition:
         current = await self.load_definition(access, project_id, definition_id)
         dataset = await self.load_dataset(access, project_id, dataset_id)
         schema = await self._tool_schemas.input_schema(access, project_id, plugin_id, tool_name)
         mappings = _mappings(argument_mappings)
-        _validate_mappings(dataset.records, mappings, schema, file_argument=file_argument)
+        _validate_mappings(dataset.records, mappings, schema)
         updated = BatchDefinition(
             id=current.id,
             project_id=current.project_id,
@@ -280,7 +276,6 @@ class DatasetModule:
             input_schema=dict(schema),
             created_at=current.created_at,
             updated_at=datetime.now(UTC),
-            file_argument=file_argument,
         )
         saved = await self._store.replace_definition(updated)
         if saved is None:
@@ -435,8 +430,8 @@ class PostgresDatasetStore:
                 """INSERT INTO batch_definitions
                 (project_id, batch_definition_id, dataset_id, name, plugin_id, tool_name,
                  argument_mappings, input_schema, created_at, updated_at,
-                 transform_definition_id, file_argument)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                 transform_definition_id)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 _definition_values(definition),
             )
         return definition
@@ -466,7 +461,7 @@ class PostgresDatasetStore:
             cursor = await connection.execute(
                 """UPDATE batch_definitions SET dataset_id=%s, name=%s, plugin_id=%s,
                 tool_name=%s, argument_mappings=%s, input_schema=%s, updated_at=%s,
-                transform_definition_id=%s, file_argument=%s
+                transform_definition_id=%s
                 WHERE project_id=%s AND batch_definition_id=%s RETURNING batch_definition_id""",
                 (
                     definition.dataset_id,
@@ -477,7 +472,6 @@ class PostgresDatasetStore:
                     json.dumps(definition.input_schema),
                     definition.updated_at,
                     definition.transform_definition_id,
-                    definition.file_argument,
                     definition.project_id,
                     definition.id,
                 ),
@@ -619,7 +613,6 @@ def _definition_values(definition: BatchDefinition) -> tuple[object, ...]:
         definition.created_at,
         definition.updated_at,
         definition.transform_definition_id,
-        definition.file_argument,
     )
 
 
@@ -642,7 +635,6 @@ def _definition_from_row(row: Mapping[str, object]) -> BatchDefinition:
             if row.get("transform_definition_id") is not None
             else None
         ),
-        file_argument=(str(row["file_argument"]) if row.get("file_argument") is not None else None),
     )
 
 
@@ -713,24 +705,7 @@ def _validate_mappings(
     records: Sequence[DatasetRecord],
     mappings: Mapping[str, str],
     schema: Mapping[str, object],
-    *,
-    file_argument: str | None = None,
 ) -> None:
-    if file_argument is not None:
-        properties = schema.get("properties")
-        if (
-            not file_argument
-            or not isinstance(properties, Mapping)
-            or file_argument not in properties
-            or file_argument in mappings
-        ):
-            raise DatasetValidationError(
-                "The file argument must be a distinct declared MCP tool argument."
-            )
-        raw_required = schema.get("required", [])
-        if not isinstance(raw_required, list):
-            raise DatasetValidationError("Invalid MCP tool input schema.")
-        schema = {**schema, "required": [name for name in raw_required if name != file_argument]}
     if not records:
         return
     validator = Draft202012Validator(schema)

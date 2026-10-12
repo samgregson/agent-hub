@@ -625,6 +625,149 @@ test("a Project Workflow can be created from Library and Operations", async ({
     .toBe(true);
 });
 
+test("Workflow editor exposes shared Project File inputs on MCP Map nodes", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-01T00:00:00.000Z",
+    id: "project-mcp-map-file",
+    name: "Test Project",
+    updatedAt: "2026-10-01T00:00:00.000Z",
+  };
+  let createRequest: Record<string, unknown> | undefined;
+
+  await page.route("**/api/projects", async (route) => {
+    await route.fulfill({ json: [project] });
+  });
+  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
+    if (route.request().method() === "POST") {
+      createRequest = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          id: "workflow-new",
+          name: createRequest.name,
+          version: 1,
+          graph: createRequest.graph,
+        },
+        status: 201,
+      });
+      return;
+    }
+    await route.fulfill({ json: [] });
+  });
+  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
+    await route.fulfill({
+      json: [{ id: "loads", name: "Loads", version: 2 }],
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/files/index`,
+    async (route) => {
+      await route.fulfill({
+        json: { files: [{ path: "/project/check.py", version: 3 }] },
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/transforms`,
+    async (route) => {
+      await route.fulfill({ json: [] });
+    },
+  );
+  await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          enabled: true,
+          id: "calculator",
+          name: "Calculator",
+          tools: [{ name: "check" }],
+          version: "v1",
+        },
+      ],
+    });
+  });
+  await page.route(
+    `**/api/projects/${project.id}/plugins/calculator/tools`,
+    async (route) => {
+      await route.fulfill({
+        json: [
+          {
+            inputSchema: {
+              type: "object",
+              required: ["load", "template"],
+              properties: {
+                load: { type: "number" },
+                template: { type: "string" },
+              },
+            },
+            name: "check",
+            outputSchema: { type: "object" },
+            repeatSafe: true,
+            version: "v1",
+          },
+        ],
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page.getByRole("button", { name: "Create Workflow" }).click();
+  await page.getByLabel("Library item or call").selectOption("Dataset · Loads");
+  await page.getByRole("button", { name: "Add node" }).click();
+  await page
+    .getByLabel("Library item or call")
+    .selectOption("Project File · /project/check.py");
+  await page.getByRole("button", { name: "Add node" }).click();
+  await page
+    .getByLabel("Library item or call")
+    .selectOption("MCP · Calculator / check");
+  await page.getByLabel("Call shape").selectOption("map");
+  await page.getByRole("button", { name: "Add node" }).click();
+  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add connection" }).click();
+  const secondConnection = page
+    .getByRole("region", { name: "Workflow connections" })
+    .locator('[class*="editorRow"]')
+    .nth(1);
+  await secondConnection.getByLabel("From node").selectOption("input-2");
+  await secondConnection.getByLabel("To node").selectOption("call-3");
+  await expect(secondConnection.getByLabel("Input port")).toHaveAttribute(
+    "list",
+    "workflow-input-ports-1",
+  );
+  await secondConnection.getByLabel("Input port").fill("template");
+  await page.getByLabel("Workflow name").fill("Calculate each row");
+  await page.getByRole("button", { name: "Create Workflow" }).click();
+
+  const graph = createRequest?.graph as {
+    edges: Array<{
+      sourceNode: string;
+      sourcePort: string;
+      targetNode: string;
+      targetPort: string;
+    }>;
+  };
+  expect(graph.edges).toEqual([
+    {
+      sourceNode: "input-1",
+      sourcePort: "records",
+      targetNode: "call-3",
+      targetPort: "items",
+    },
+    {
+      sourceNode: "input-2",
+      sourcePort: "content",
+      targetNode: "call-3",
+      targetPort: "template",
+    },
+  ]);
+});
+
 test("Datasets are created and deleted through Library commands", async ({
   page,
 }) => {
@@ -1819,130 +1962,6 @@ test("the foundation fixture App renders a portable status Artifact", async ({
   await expect(
     page.frameLocator('iframe[title="Artifact App"]').locator("#status"),
   ).toHaveText("available");
-});
-
-test("a Project File Binding can be inspected and rebound after its source changes", async ({
-  page,
-}) => {
-  const project = {
-    createdAt: "2026-09-24T00:00:00.000Z",
-    id: "project-binding",
-    name: "Template project",
-    updatedAt: "2026-09-24T00:00:00.000Z",
-  };
-  const definition = {
-    id: "definition-binding",
-    datasetId: "dataset-binding",
-    datasetAvailable: true,
-    name: "Render values",
-    pluginId: "foundation-fixture",
-    toolName: "render_template_value",
-    transformDefinitionId: null,
-    fileArgument: "template",
-    argumentMappings: { value: "/value" },
-  };
-  let fileVersion = 1;
-  let bindingVersion = 0;
-  const writes: Array<Record<string, unknown>> = [];
-  await page.route("**/api/projects", async (route) => {
-    await route.fulfill({ json: [project] });
-  });
-  await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
-    await route.fulfill({ json: [] });
-  });
-  await page.route(`**/api/projects/${project.id}/artifacts`, async (route) => {
-    await route.fulfill({ json: { artifacts: [] } });
-  });
-  await page.route(
-    `**/api/projects/${project.id}/files/index`,
-    async (route) => {
-      await route.fulfill({
-        json: {
-          files: [{ path: "/project/template.txt", version: fileVersion }],
-        },
-      });
-    },
-  );
-  await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
-    await route.fulfill({
-      json: [{ id: definition.datasetId, name: "Values", records: [] }],
-    });
-  });
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-definitions`,
-    async (route) => {
-      await route.fulfill({ json: [definition] });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-definitions/${definition.id}/file-binding`,
-    async (route) => {
-      if (route.request().method() === "GET") {
-        if (bindingVersion === 0) {
-          await route.fulfill({ status: 404 });
-          return;
-        }
-      } else {
-        writes.push(route.request().postDataJSON() as Record<string, unknown>);
-        bindingVersion += 1;
-      }
-      await route.fulfill({
-        json: {
-          id: "binding-1",
-          definitionId: definition.id,
-          argument: "template",
-          sourcePath: "/project/template.txt",
-          expectedFileVersion: fileVersion,
-          cardinality: "scalar-to-selected-records",
-          version: bindingVersion,
-        },
-        status: route.request().method() === "POST" ? 201 : 200,
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs?**`,
-    async (route) => {
-      await route.fulfill({ json: { items: [], nextOffset: null } });
-    },
-  );
-
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("button", { name: "Inspect Batch Definition Render values" })
-    .click();
-  const panel = page.getByRole("region", { name: "Project File Binding" });
-  await expect(panel.getByText("No file bound yet.")).toBeVisible();
-  await panel.getByLabel("Project File").selectOption("/project/template.txt");
-  await panel.getByRole("button", { name: "Bind Project File" }).click();
-  await expect(panel.getByText(/Binding v1/)).toBeVisible();
-  expect(writes[0]).toMatchObject({
-    sourcePath: "/project/template.txt",
-    expectedFileVersion: 1,
-  });
-
-  fileVersion = 2;
-  await panel.getByRole("button", { name: "Refresh Project Files" }).click();
-  await expect(panel.getByRole("option", { name: /v2/ })).toHaveCount(1);
-  await panel
-    .getByRole("button", { name: "Rebind current file version" })
-    .click();
-  await expect(panel.getByText(/Binding v2/)).toBeVisible();
-  expect(writes[1]).toMatchObject({
-    sourcePath: "/project/template.txt",
-    expectedFileVersion: 2,
-    expectedBindingVersion: 1,
-  });
 });
 
 test("selection planning and runs reach the Project API through the browser", async ({

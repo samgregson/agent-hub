@@ -662,6 +662,105 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
 
 
 @pytest.mark.asyncio
+async def test_mcp_map_merges_captured_project_file_input_into_each_dataset_record() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Workflow file map")
+    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    dataset = await datasets.create_dataset(
+        access,
+        project.id,
+        "Inputs",
+        [DatasetRecordInput({"load": 12}), DatasetRecordInput({"load": 18})],
+    )
+    project_files = create_memory_project_files(projects)
+    file = await project_files.write(project.id, "/calculations/check.py", "template-v1")
+
+    class Gateway:
+        calls: list[dict[str, object]]
+
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def tool_version(self, *_: object) -> str:
+            return "v1"
+
+        async def input_schema(self, *_: object) -> dict[str, object]:
+            return {
+                "type": "object",
+                "required": ["load", "template"],
+                "properties": {
+                    "load": {"type": "integer"},
+                    "template": {"type": "string"},
+                },
+            }
+
+        async def output_schema(
+            self, *_: object, require_repeat_safe: bool = False
+        ) -> dict[str, object]:
+            assert require_repeat_safe
+            return {"type": "object"}
+
+        async def batch_call(
+            self,
+            _access: object,
+            _project_id: str,
+            _plugin_id: str,
+            _tool_name: str,
+            arguments: dict[str, object],
+        ) -> PluginToolResult:
+            self.calls.append(arguments)
+            return PluginToolResult((), {"load": arguments["load"]})
+
+    gateway = Gateway()
+    transforms = TransformModule(projects, MemoryTransformStore())
+    definitions = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowStore(),
+        project_files=project_files,
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("dataset", "dataset", dataset.id, dataset.version),
+            WorkflowNode("template", "file", f"/project{file.path}", file.version),
+            WorkflowNode("calculate", "mcp", "plugin", "v1", shape="map", tool_name="check"),
+        ),
+        (
+            WorkflowEdge("dataset", "records", "calculate", "items"),
+            WorkflowEdge("template", "content", "calculate", "template"),
+        ),
+        (WorkflowOutput("results", "calculate", "result"),),
+    )
+    definition = await definitions.create(access, project.id, "Check records", graph)
+    runs = WorkflowRunModule(
+        definitions,
+        datasets,
+        transforms,
+        cast(PluginGatewayModule, gateway),
+        MemoryWorkflowRunStore(),
+        project_files=project_files,
+    )
+
+    prepared = await runs.prepare(
+        access, project.id, definition.id, "request-1", expected_version=1
+    )
+    await project_files.write(project.id, file.path, "template-v2")
+    completed = await runs.execute(access, project.id, prepared.id)
+
+    assert completed.status == "succeeded", completed.execution
+    assert gateway.calls == [
+        {"load": 12, "template": "template-v1"},
+        {"load": 18, "template": "template-v1"},
+    ]
+    assert completed.execution["outputs"] == {
+        "results": [{"load": 12}, {"load": 18}],
+    }
+
+
+@pytest.mark.asyncio
 async def test_changed_python_target_fails_explicitly_after_snapshot_preparation() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")

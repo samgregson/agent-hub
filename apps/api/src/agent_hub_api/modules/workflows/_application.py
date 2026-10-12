@@ -132,6 +132,7 @@ class _Ports:
     inputs: Mapping[str, Mapping[str, object]]
     required: frozenset[str]
     outputs: Mapping[str, Mapping[str, object]]
+    map_schema: Mapping[str, object] | None = None
 
 
 class WorkflowDefinitionModule:
@@ -249,18 +250,6 @@ class WorkflowDefinitionModule:
                 dataset = await self._datasets.load_dataset(access, project_id, source_node.ref_id)
                 if len(dataset.records) > MAX_MAP_INVOCATIONS:
                     raise WorkflowValidationError("Map input exceeds 100 Dataset Records.")
-                if target_node.kind == "mcp":
-                    item_schema = target_schema.get("items", {})
-                    assert isinstance(item_schema, Mapping)
-                    validator = Draft202012Validator(item_schema)
-                    for record in dataset.records:
-                        try:
-                            validator.validate(record.value)
-                        except JsonSchemaValidationError as error:
-                            raise WorkflowValidationError(
-                                f"Dataset Record {record.position + 1} does not match "
-                                "the MCP tool input schema."
-                            ) from error
             incoming[key] = edge
             dependencies[edge.target_node].add(edge.source_node)
         if _has_cycle(dependencies):
@@ -274,6 +263,7 @@ class WorkflowDefinitionModule:
                     f"Workflow node {node.id} has a required input without an edge: "
                     + ", ".join(sorted(missing))
                 )
+        await self._validate_mcp_maps(access, project_id, graph, ports, incoming, nodes)
         names: set[str] = set()
         for output in graph.outputs:
             if not _NODE_ID.fullmatch(output.name) or output.name in names:
@@ -370,9 +360,17 @@ class WorkflowDefinitionModule:
                 )
             if node.shape == "map":
                 return _Ports(
-                    {"items": {"type": "array", "items": dict(input_schema)}},
+                    {
+                        "items": {"type": "array", "items": {"type": "object"}},
+                        **{
+                            name: schema
+                            for name, schema in _schema_properties(input_schema).items()
+                            if name != "items"
+                        },
+                    },
                     frozenset({"items"}),
                     {"result": {"type": "array", "items": dict(output_schema)}},
+                    dict(input_schema),
                 )
             properties = input_schema.get("properties", {})
             if not isinstance(properties, Mapping):
@@ -392,12 +390,76 @@ class WorkflowDefinitionModule:
             return _Ports(inputs, frozenset(required), {"result": dict(output_schema)})
         raise WorkflowValidationError("Workflow node kind is unknown.")
 
+    async def _validate_mcp_maps(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        graph: WorkflowGraph,
+        ports: Mapping[str, _Ports],
+        incoming: Mapping[tuple[str, str], WorkflowEdge],
+        nodes: Mapping[str, WorkflowNode],
+    ) -> None:
+        for node in graph.nodes:
+            node_ports = ports[node.id]
+            if node.kind != "mcp" or node.shape != "map" or node_ports.map_schema is None:
+                continue
+            item_edge = incoming.get((node.id, "items"))
+            item_source = nodes[item_edge.source_node] if item_edge is not None else None
+            if item_source is None or item_source.kind != "dataset":
+                continue
+            dataset = await self._datasets.load_dataset(access, project_id, item_source.ref_id)
+            constants: dict[str, object] = {}
+            for (target_id, target_port), edge in incoming.items():
+                if target_id != node.id or target_port == "items":
+                    continue
+                source_node = nodes[edge.source_node]
+                if source_node.kind != "file":
+                    continue
+                if self._project_files is None:
+                    raise WorkflowValidationError("Project File input is unavailable.")
+                try:
+                    file = await self._project_files.load_ordinary_file(
+                        project_id, _project_file_path(source_node.ref_id)
+                    )
+                except ProjectFileError as error:
+                    raise WorkflowValidationError("Project File input is unavailable.") from error
+                if file.version != source_node.version:
+                    raise WorkflowValidationError(
+                        "Project File version changed; review the Workflow again."
+                    )
+                constants[target_port] = file.content
+            validator = Draft202012Validator(node_ports.map_schema)
+            for record in dataset.records:
+                collisions = constants.keys() & record.value.keys()
+                if collisions:
+                    raise WorkflowValidationError(
+                        f"Dataset Record {record.position + 1} already supplies mapped MCP input "
+                        + ", ".join(sorted(collisions))
+                        + "."
+                    )
+                try:
+                    validator.validate({**record.value, **constants})
+                except JsonSchemaValidationError as error:
+                    raise WorkflowValidationError(
+                        f"Dataset Record {record.position + 1} and connected inputs do not match "
+                        "the MCP tool input schema."
+                    ) from error
+
 
 def _name(value: str) -> str:
     normalized = value.strip()
     if not 1 <= len(normalized) <= 120:
         raise WorkflowValidationError("Workflow name must contain 1–120 characters.")
     return normalized
+
+
+def _schema_properties(schema: Mapping[str, object]) -> Mapping[str, Mapping[str, object]]:
+    raw = schema.get("properties", {})
+    if not isinstance(raw, Mapping) or any(
+        not isinstance(name, str) or not isinstance(value, Mapping) for name, value in raw.items()
+    ):
+        raise WorkflowValidationError("MCP tool has invalid named input ports.")
+    return {name: value for name, value in raw.items() if isinstance(name, str)}
 
 
 def _project_file_path(value: str) -> str:

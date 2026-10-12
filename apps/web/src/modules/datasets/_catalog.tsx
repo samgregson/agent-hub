@@ -26,22 +26,6 @@ interface BatchDefinition {
   pluginId: string | null;
   toolName: string | null;
   transformDefinitionId: string | null;
-  fileArgument: string | null;
-}
-
-interface FileBinding {
-  id: string;
-  definitionId: string;
-  argument: string;
-  sourcePath: string;
-  expectedFileVersion: number;
-  version: number;
-  cardinality: string;
-}
-
-interface ProjectFileOption {
-  path: string;
-  version: number;
 }
 
 interface TransformDefinitionOption {
@@ -65,13 +49,6 @@ interface BatchRun {
   definitionSnapshot?: {
     mode?: string;
     transformDefinitionId?: string;
-    fileBinding?: {
-      argument: string;
-      sourcePath: string;
-      sourceVersion: number;
-      content: string;
-      sha256: string;
-    };
   };
 }
 
@@ -168,13 +145,6 @@ export function DatasetCatalog({
   const [runOrder, setRunOrder] = useState("newest");
   const [runStatus, setRunStatus] = useState("all");
   const [selectedRun, setSelectedRun] = useState<BatchRun | null>(null);
-  const [selectedDefinitionId, setSelectedDefinitionId] = useState<
-    string | null
-  >(null);
-  const [selectedBinding, setSelectedBinding] = useState<FileBinding | null>(
-    null,
-  );
-  const [fileOptions, setFileOptions] = useState<ProjectFileOption[]>([]);
   const [resultPage, setResultPage] = useState<
     (ResultPage & { runId: string; queryKey: string }) | null
   >(null);
@@ -184,9 +154,6 @@ export function DatasetCatalog({
   const resultQueryKey = JSON.stringify(resultQuery);
   const selectedRunId = selectedRun?.id;
   const selectedRunStatus = selectedRun?.status;
-  const selectedDefinition = definitions?.find(
-    (item) => item.id === selectedDefinitionId,
-  );
   const visibleResults =
     resultPage?.runId === selectedRunId &&
     resultPage?.queryKey === resultQueryKey
@@ -198,61 +165,6 @@ export function DatasetCatalog({
       ?.name ??
     `Definition ${run.definitionId.slice(0, 8)}`;
   const [selectedDataset, setSelectedDataset] = useState<Dataset | null>(null);
-
-  async function refreshFileOptions() {
-    const response = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/files/index`,
-      { cache: "no-store" },
-    );
-    if (!response.ok) {
-      setError("Project Files could not be loaded.");
-      return;
-    }
-    const catalog = (await response.json()) as { files: ProjectFileOption[] };
-    setFileOptions(
-      catalog.files.filter(
-        (file) =>
-          !file.path.startsWith("/project/.datasets/") &&
-          !file.path.startsWith("/project/.artifacts/"),
-      ),
-    );
-  }
-
-  useEffect(() => {
-    if (!selectedDefinition?.fileArgument) return;
-    let active = true;
-    void Promise.all([
-      fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/batch-definitions/${encodeURIComponent(selectedDefinition.id)}/file-binding`,
-        { cache: "no-store" },
-      ),
-      fetch(`/api/projects/${encodeURIComponent(projectId)}/files/index`, {
-        cache: "no-store",
-      }),
-    ]).then(async ([bindingResponse, filesResponse]) => {
-      if (!active) return;
-      setSelectedBinding(
-        bindingResponse.ok
-          ? ((await bindingResponse.json()) as FileBinding)
-          : null,
-      );
-      if (filesResponse.ok) {
-        const catalog = (await filesResponse.json()) as {
-          files: ProjectFileOption[];
-        };
-        setFileOptions(
-          catalog.files.filter(
-            (file) =>
-              !file.path.startsWith("/project/.datasets/") &&
-              !file.path.startsWith("/project/.artifacts/"),
-          ),
-        );
-      }
-    });
-    return () => {
-      active = false;
-    };
-  }, [projectId, selectedDefinition?.id, selectedDefinition?.fileArgument]);
 
   useEffect(() => {
     if (!selectedRunId) return;
@@ -526,8 +438,6 @@ export function DatasetCatalog({
                   name: form.get("name"),
                   pluginId: form.get("pluginId"),
                   toolName: form.get("toolName"),
-                  fileArgument:
-                    String(form.get("fileArgument") || "").trim() || null,
                 },
           ),
         },
@@ -541,7 +451,6 @@ export function DatasetCatalog({
         );
       const created = (await response.json()) as BatchDefinition;
       setDefinitions((current) => [...(current ?? []), created]);
-      if (created.fileArgument) setSelectedDefinitionId(created.id);
       setIsAdding(false);
       requestAnimationFrame(() => {
         document.getElementById(`batch-definition-${created.id}`)?.focus();
@@ -553,36 +462,6 @@ export function DatasetCatalog({
           : "Batch Definition could not be saved.",
       );
     }
-  }
-
-  async function saveBinding(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!selectedDefinition) return;
-    const form = new FormData(event.currentTarget);
-    const file = fileOptions.find(
-      (item) => item.path === form.get("sourcePath"),
-    );
-    if (!file) return;
-    const response = await fetch(
-      `/api/projects/${encodeURIComponent(projectId)}/batch-definitions/${encodeURIComponent(selectedDefinition.id)}/file-binding`,
-      {
-        method: selectedBinding ? "PUT" : "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          sourcePath: file.path,
-          expectedFileVersion: file.version,
-          expectedBindingVersion: selectedBinding?.version,
-        }),
-      },
-    );
-    if (!response.ok) {
-      setError(
-        await responseMessage(response, "File Binding could not be saved."),
-      );
-      return;
-    }
-    setSelectedBinding((await response.json()) as FileBinding);
-    setError(null);
   }
 
   async function deleteDefinition(definition: BatchDefinition) {
@@ -846,9 +725,6 @@ export function DatasetCatalog({
                       rows={4}
                     />
                   </Field>
-                  <Field label="Project File argument (optional)">
-                    <input name="fileArgument" placeholder="template" />
-                  </Field>
                 </>
               )}
               <div className={styles.formActions}>
@@ -865,10 +741,7 @@ export function DatasetCatalog({
             {definitions?.map((definition) => (
               <CollectionItem
                 onOpen={() => {
-                  setSelectedBinding(null);
-                  setSelectedDefinitionId(definition.id);
                   setRunDefinition(definition.id);
-                  void refreshFileOptions();
                 }}
                 openLabel={`Inspect Batch Definition ${definition.name}`}
                 actions={
@@ -912,63 +785,13 @@ export function DatasetCatalog({
                         definition.pluginId ?? "",
                         definition.toolName ?? "",
                       )
-                }${definition.datasetAvailable ? "" : " · Dataset unavailable"}${definition.fileArgument ? ` · File → ${definition.fileArgument}` : ""}`}
+                }${definition.datasetAvailable ? "" : " · Dataset unavailable"}`}
                 id={`batch-definition-${definition.id}`}
                 key={definition.id}
                 title={definition.name}
               />
             ))}
           </Collection>
-          {selectedDefinition?.fileArgument ? (
-            <section
-              aria-label="Project File Binding"
-              className={styles.detail}
-            >
-              <h2>{selectedDefinition.name} · Project File input</h2>
-              <p>
-                One file supplies <code>{selectedDefinition.fileArgument}</code>{" "}
-                to each selected Dataset Record. Editing the file requires an
-                explicit rebind before the next Run.
-              </p>
-              {selectedBinding ? (
-                <p>
-                  {selectedBinding.sourcePath} · file v
-                  {selectedBinding.expectedFileVersion}
-                  {` · Binding v${selectedBinding.version}`}
-                </p>
-              ) : (
-                <p>No file bound yet.</p>
-              )}
-              <form
-                className={styles.form}
-                onSubmit={(event) => void saveBinding(event)}
-              >
-                <Field label="Project File">
-                  <select
-                    key={`${selectedDefinition.id}:${selectedBinding?.version ?? 0}`}
-                    name="sourcePath"
-                    required
-                    defaultValue={selectedBinding?.sourcePath ?? ""}
-                  >
-                    <option value="">Choose a Project File…</option>
-                    {fileOptions.map((file) => (
-                      <option key={file.path} value={file.path}>
-                        {file.path} · v{file.version}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Button onClick={() => void refreshFileOptions()} type="button">
-                  Refresh Project Files
-                </Button>
-                <Button type="submit" variant="primary">
-                  {selectedBinding
-                    ? "Rebind current file version"
-                    : "Bind Project File"}
-                </Button>
-              </form>
-            </section>
-          ) : null}
           {definitions?.length === 0 ? <p>No Batch Definitions yet.</p> : null}
           {runs ? (
             <section
@@ -1066,21 +889,6 @@ export function DatasetCatalog({
                     ? "Started directly by a user"
                     : "Initiator context unavailable"}
               </p>
-              {selectedRun.definitionSnapshot?.fileBinding ? (
-                <details>
-                  <summary>
-                    Captured file ·{" "}
-                    {selectedRun.definitionSnapshot.fileBinding.sourcePath}
-                    {` v${selectedRun.definitionSnapshot.fileBinding.sourceVersion}`}
-                  </summary>
-                  <p>
-                    SHA-256: {selectedRun.definitionSnapshot.fileBinding.sha256}
-                  </p>
-                  <pre className={styles.boundContent}>
-                    {selectedRun.definitionSnapshot.fileBinding.content}
-                  </pre>
-                </details>
-              ) : null}
               <form
                 aria-label="Result Set query"
                 className={styles.resultQuery}

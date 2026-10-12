@@ -39,7 +39,6 @@ apps/api/src/agent_hub_api/
     agent_execution/           # Deep Agent construction and Run lifecycle
     agent_transport/           # Project-authorized AG-UI orchestration and transport
     project_files/             # project-scoped Deep Agents filesystem
-    bindings/                  # host-owned Project File to MCP argument rules
     call_review/               # common review shape for Python and MCP call plans
     input_selection/           # bounded source-neutral value selection rules
     transform_inputs/          # coordinates retained Result Set and MCP output into Transform Runs
@@ -101,7 +100,7 @@ Additionally:
 
 These directions should be enforced by TypeScript restricted-import rules, Python import checks, and contract tests as the corresponding Modules appear.
 
-`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Input Selection is a lower Module containing only source-neutral selection rules and value identities. Dataset, Transform, Batch Execution, and Artifact keep authority over their own records, authorization, and durable Runs. Transform Inputs coordinates the two Dataset execution modes and retained Batch Result Set and MCP Tool Result Snapshot values through the Dataset, Batch Execution, Artifact, and Transform Interfaces; it owns cross-source review and provenance without moving those decisions into `main.py`.
+`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Input Selection is a lower Module containing only source-neutral selection rules and value identities. Dataset, Transform, Batch Execution, Workflow, and Artifact keep authority over their own records, authorization, and durable Runs. Transform Inputs coordinates the two Dataset execution modes and retained Batch Result Set and MCP Tool Result Snapshot values through the Dataset, Batch Execution, Artifact, and Transform Interfaces; it owns cross-source review and provenance without moving those decisions into `main.py`.
 
 ## Frontend ownership
 
@@ -109,7 +108,7 @@ The Workspace Module owns selected Project, activity view, selected Thread, sele
 
 The Operation Calls web Module owns the shared review/start presentation for direct Python Function and MCP tool calls, including explicit Map calls. It consumes the owning backend Modules' plans and displays their retained Run results; it does not authorize or execute a call itself.
 
-The Call Review API Module defines the common read-only review envelope for those four call shapes. Transform and Batch Execution still own planning, submission, authorization, and execution; the envelope captures their target, source, named ports, exact bindings, invocation bound, output kind, and agent approval rule.
+The Call Review API Module defines the common read-only review envelope for those four call shapes. Transform and Batch Execution still own planning, submission, authorization, and execution; the envelope captures their target, source, named ports, exact inputs, invocation bound, output kind, and agent approval rule.
 
 The Workflow Module owns saved Project graph definitions, version checks, and static port/cardinality/cycle validation. It resolves Project File and Dataset inputs, Function targets, and MCP targets through those Modules' Interfaces. A prepared Workflow Run pins the exact graph, Project File text and version, Dataset Record IDs and values, Function source and runtime identity, MCP schema and version, initiator, and request key. DAG execution schedules up to four dependency-ready nodes concurrently and applies one four-call limit across Map items and single calls. Checkpoint writes are serialized while node inputs, outputs, MCP target identities, and child Python Run IDs are retained. MCP Map dispatch validates its first item before fanning out. Startup marks active Runs interrupted; resumption reuses completed node and Map-item checkpoints, with deterministic child Run IDs for Python calls. A single MCP call with an unknown outcome is terminal and is never replayed automatically; repeat-safe MCP Map items may resume. Call execution remains with Transform and Plugin Gateway.
 

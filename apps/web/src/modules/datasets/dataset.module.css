@@ -26,17 +26,6 @@
   padding: var(--space-3);
 }
 
-.boundContent {
-  max-height: 18rem;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  padding: var(--space-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--surface-raised);
-}
-
 .formActions {
   display: flex;
   justify-content: flex-end;

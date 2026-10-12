@@ -198,13 +198,19 @@ export function WorkflowDefinitionEditor({
   function inputPortsFor(nodeId: string) {
     const node = graph.nodes.find((candidate) => candidate.id === nodeId);
     if (!node || node.kind === "dataset" || node.kind === "file") return [];
-    if (node.shape === "map") return ["items"];
     const item = catalog.items?.find(
       (candidate) =>
         candidate.id === node.refId &&
         candidate.kind === node.kind &&
         candidate.toolName === node.toolName,
     );
+    if (node.shape === "map")
+      return node.kind === "mcp"
+        ? [
+            "items",
+            ...(item?.inputPorts ?? []).filter((port) => port !== "items"),
+          ]
+        : ["items"];
     return item?.inputPorts ?? [];
   }
 

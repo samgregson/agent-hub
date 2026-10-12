@@ -15,7 +15,6 @@ from agent_hub_api.modules.batch_execution._application import (
     BatchRunStatus,
     McpCallValidationError,
 )
-from agent_hub_api.modules.bindings import BindingUnavailable
 from agent_hub_api.modules.datasets import DatasetNotFound, DatasetValidationError
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
@@ -216,8 +215,6 @@ def create_batch_execution_router(
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
         except TransformExecutionError as error:
             raise HTTPException(status_code=422, detail=error.code) from error
-        except BindingUnavailable as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
         except BatchRunIdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -476,8 +473,6 @@ def create_batch_execution_router(
             raise HTTPException(status_code=404, detail="Batch Run target not found") from error
         except TransformExecutionError as error:
             raise HTTPException(status_code=422, detail=error.code) from error
-        except BindingUnavailable as error:
-            raise HTTPException(status_code=409, detail=str(error)) from error
         except BatchRunIdempotencyConflict as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 

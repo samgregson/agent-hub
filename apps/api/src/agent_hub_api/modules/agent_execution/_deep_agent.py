@@ -41,7 +41,6 @@ from agent_hub_api.modules.batch_execution import (
     BatchRun,
     BatchRunStatus,
 )
-from agent_hub_api.modules.bindings import BindingModule
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.plugin_gateway import (
     PluginGatewayModule,
@@ -185,7 +184,6 @@ class PostgresDeepAgentRunner:
         datasets: DatasetModule | None = None,
         batches: BatchExecutionModule | None = None,
         transforms: TransformModule | None = None,
-        bindings: BindingModule | None = None,
         transform_inputs: TransformInputModule | None = None,
         workflows: WorkflowDefinitionModule | None = None,
         workflow_runs: WorkflowRunModule | None = None,
@@ -197,7 +195,6 @@ class PostgresDeepAgentRunner:
         self._datasets = datasets
         self._batches = batches
         self._transforms = transforms
-        self._bindings = bindings
         self._transform_inputs = transform_inputs
         self._workflows = workflows
         self._workflow_runs = workflow_runs
@@ -259,9 +256,6 @@ class PostgresDeepAgentRunner:
         datasets = getattr(self, "_datasets", None)
         if datasets is not None and subject is not None:
             tools.extend(self._dataset_tools(datasets, project_id, subject))
-        bindings = getattr(self, "_bindings", None)
-        if bindings is not None and subject is not None:
-            tools.extend(self._binding_tools(bindings, project_id, subject))
         batches = getattr(self, "_batches", None)
         if batches is not None and subject is not None and thread_id and run_id:
             tools.extend(self._batch_tools(batches, project_id, subject, thread_id, run_id))
@@ -347,15 +341,6 @@ class PostgresDeepAgentRunner:
             interrupt_on["start_project_python_map"] = {
                 "allowed_decisions": ["approve", "reject"],
                 "description": "Map this Python Function over the reviewed Dataset Records?",
-            }
-        if bindings is not None and subject is not None:
-            interrupt_on["bind_project_file_to_batch_definition"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Bind this Project File to the Batch Definition?",
-            }
-            interrupt_on["rebind_project_file_to_batch_definition"] = {
-                "allowed_decisions": ["approve", "reject"],
-                "description": "Update this Project File Binding?",
             }
         if transforms is not None and subject is not None:
             interrupt_on.update(
@@ -614,7 +599,6 @@ class PostgresDeepAgentRunner:
                     "toolName": definition.tool_name,
                     "transformDefinitionId": definition.transform_definition_id,
                     "argumentMappings": definition.argument_mappings,
-                    "fileArgument": definition.file_argument,
                 }
             )
 
@@ -657,7 +641,6 @@ class PostgresDeepAgentRunner:
             plugin_id: str,
             tool_name: str,
             argument_mappings_json: str,
-            file_argument: str | None = None,
         ) -> str:
             """Create a schema-validated Batch Definition after user approval."""
             try:
@@ -676,7 +659,6 @@ class PostgresDeepAgentRunner:
                 plugin_id,
                 tool_name,
                 mappings,
-                file_argument=file_argument,
             )
             return f"Created Batch Definition {definition.name} ({definition.id})."
 
@@ -694,7 +676,6 @@ class PostgresDeepAgentRunner:
             plugin_id: str,
             tool_name: str,
             argument_mappings_json: str,
-            file_argument: str | None = None,
         ) -> str:
             """Update a schema-validated Batch Definition after user approval."""
             definition = await datasets.update_definition(
@@ -706,7 +687,6 @@ class PostgresDeepAgentRunner:
                 plugin_id,
                 tool_name,
                 _argument_mappings(argument_mappings_json),
-                file_argument=file_argument,
             )
             return f"Updated Batch Definition {definition.name} ({definition.id})."
 
@@ -720,66 +700,6 @@ class PostgresDeepAgentRunner:
             create_project_batch_definition,
             delete_project_batch_definition,
             update_project_batch_definition,
-        ]
-
-    @staticmethod
-    def _binding_tools(bindings: BindingModule, project_id: str, subject: str) -> list[BaseTool]:
-        access = ProjectAccess(subject=subject)
-
-        @tool
-        async def load_project_file_binding(definition_id: str) -> str:
-            """Inspect the Project File Binding for one Batch Definition."""
-            binding = await bindings.load(access, project_id, definition_id)
-            return json.dumps(
-                {
-                    "id": binding.id,
-                    "definitionId": binding.definition_id,
-                    "argument": binding.argument,
-                    "sourcePath": f"/project{binding.source_path}",
-                    "expectedFileVersion": binding.expected_file_version,
-                    "cardinality": "scalar-to-selected-records",
-                    "version": binding.version,
-                }
-            )
-
-        @tool
-        async def bind_project_file_to_batch_definition(
-            definition_id: str, source_path: str, expected_file_version: int
-        ) -> str:
-            """Bind a versioned Project File to a declared Batch argument after approval."""
-            binding = await bindings.bind_file(
-                access,
-                project_id,
-                definition_id,
-                source_path.removeprefix("/project"),
-                expected_file_version,
-            )
-            return (
-                f"Bound {binding.source_path} v{binding.expected_file_version} to {definition_id}."
-            )
-
-        @tool
-        async def rebind_project_file_to_batch_definition(
-            definition_id: str,
-            source_path: str,
-            expected_file_version: int,
-            expected_binding_version: int,
-        ) -> str:
-            """Update a file Binding after approval using its loaded Binding version."""
-            binding = await bindings.rebind_file(
-                access,
-                project_id,
-                definition_id,
-                source_path.removeprefix("/project"),
-                expected_file_version,
-                expected_binding_version=expected_binding_version,
-            )
-            return f"Updated file Binding {binding.id} to version {binding.version}."
-
-        return [
-            load_project_file_binding,
-            bind_project_file_to_batch_definition,
-            rebind_project_file_to_batch_definition,
         ]
 
     @staticmethod

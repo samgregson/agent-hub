@@ -23,7 +23,6 @@ from agent_hub_api.modules.batch_execution import (
     create_batch_execution_router,
     create_postgres_batch_execution_module,
 )
-from agent_hub_api.modules.bindings import create_binding_router, create_postgres_binding_module
 from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.observability import RequestLoggingMiddleware
@@ -84,9 +83,6 @@ def create_app(
     resolved_datasets = create_postgres_dataset_module(
         resolved_settings, resolved_projects, resolved_plugin_gateway
     )
-    resolved_bindings = create_postgres_binding_module(
-        resolved_settings, resolved_projects, resolved_datasets, resolved_project_files
-    )
     resolved_transforms = create_postgres_transform_module(
         resolved_settings,
         resolved_projects,
@@ -99,7 +95,6 @@ def create_app(
         resolved_datasets,
         resolved_plugin_gateway,
         transforms=resolved_transforms,
-        bindings=resolved_bindings,
     )
     resolved_transform_inputs = TransformInputModule(
         resolved_batches, resolved_transforms, resolved_artifacts, resolved_datasets
@@ -130,7 +125,6 @@ def create_app(
             resolved_datasets,
             resolved_batches,
             resolved_transforms,
-            resolved_bindings,
             resolved_transform_inputs,
             resolved_workflows,
             resolved_workflow_runs,
@@ -176,9 +170,6 @@ def create_app(
     )
     application.include_router(
         create_dataset_router(resolved_identity, resolved_datasets, resolved_batches), prefix="/api"
-    )
-    application.include_router(
-        create_binding_router(resolved_identity, resolved_bindings), prefix="/api"
     )
     application.include_router(
         create_batch_execution_router(resolved_identity, resolved_batches),

@@ -11,7 +11,6 @@ from jsonschema import Draft202012Validator, ValidationError  # type: ignore[imp
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
-from agent_hub_api.modules.bindings import BindingModule, BindingUnavailable, CapturedFileBinding
 from agent_hub_api.modules.call_review import MAX_MAP_INVOCATIONS, call_review
 from agent_hub_api.modules.datasets import (
     BatchDefinition,
@@ -28,7 +27,6 @@ from agent_hub_api.modules.transforms import (
 )
 from agent_hub_api.settings import Settings
 
-MAX_FILE_BOUND_INVOCATIONS = 100
 MAX_DIRECT_CALL_INPUT_BYTES = 64_000
 
 
@@ -320,7 +318,6 @@ class BatchExecutionModule:
         store: BatchRunStore,
         max_concurrency: int = 4,
         transforms: TransformModule | None = None,
-        bindings: BindingModule | None = None,
     ) -> None:
         if max_concurrency < 1:
             raise ValueError("max_concurrency must be at least one")
@@ -332,7 +329,6 @@ class BatchExecutionModule:
         )
         self._max_concurrency = max_concurrency
         self._transforms = transforms
-        self._bindings = bindings
         self._tasks: dict[tuple[str, str], asyncio.Task[BatchRun]] = {}
 
     async def plan_python_dataset_map(
@@ -759,7 +755,6 @@ class BatchExecutionModule:
         if existing is not None:
             return existing
         definition = await self._datasets.load_definition(access, project_id, definition_id)
-        binding = await self._capture_binding(access, project_id, definition)
         snapshot = await self._definition_snapshot(access, project_id, definition)
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         record = next((item for item in dataset.records if item.id == record_id), None)
@@ -768,7 +763,7 @@ class BatchExecutionModule:
         arguments = (
             dict(record.value)
             if definition.transform_definition_id
-            else _bound_arguments(record.value, definition, binding)
+            else _arguments(record.value, definition)
         )
         now = datetime.now(UTC)
         run = BatchRun(
@@ -779,7 +774,6 @@ class BatchExecutionModule:
             {
                 **snapshot,
                 **_dataset_snapshot(dataset.id, dataset.version, (record,)),
-                **({"fileBinding": binding.snapshot()} if binding else {}),
             },
             (ResultRecord(record.id, arguments),),
             now,
@@ -822,20 +816,17 @@ class BatchExecutionModule:
         if existing is not None:
             return existing
         definition = await self._datasets.load_definition(access, project_id, definition_id)
-        binding = await self._capture_binding(access, project_id, definition)
         snapshot = await self._definition_snapshot(access, project_id, definition)
         dataset = await self._datasets.load_dataset(access, project_id, definition.dataset_id)
         if not dataset.records:
             raise BatchRunNotFound
-        if binding is not None and len(dataset.records) > MAX_FILE_BOUND_INVOCATIONS:
-            raise BindingUnavailable("A file-bound Batch Run is limited to 100 Records.")
         now = datetime.now(UTC)
         captured = tuple(
             (
                 record.id,
                 dict(record.value)
                 if definition.transform_definition_id
-                else _bound_arguments(record.value, definition, binding),
+                else _arguments(record.value, definition),
             )
             for record in dataset.records
         )
@@ -847,7 +838,6 @@ class BatchExecutionModule:
             {
                 **snapshot,
                 **_dataset_snapshot(dataset.id, dataset.version, dataset.records),
-                **({"fileBinding": binding.snapshot()} if binding else {}),
                 "maxConcurrency": self._max_concurrency,
                 "recordIds": [record_id for record_id, _ in captured],
             },
@@ -1183,15 +1173,6 @@ class BatchExecutionModule:
             access, project_id, definition.plugin_id, definition.tool_name
         )
         return _snapshot(definition, schema)
-
-    async def _capture_binding(
-        self, access: ProjectAccess, project_id: str, definition: BatchDefinition
-    ) -> CapturedFileBinding | None:
-        if definition.file_argument is None:
-            return None
-        if self._bindings is None:
-            raise BindingUnavailable("File Bindings are unavailable.")
-        return await self._bindings.capture(access, project_id, definition)
 
 
 class MemoryBatchRunStore:
@@ -1547,23 +1528,6 @@ def _arguments(value: Mapping[str, object], definition: BatchDefinition) -> Mapp
     return {name: _select(value, pointer) for name, pointer in definition.argument_mappings.items()}
 
 
-def _bound_arguments(
-    value: Mapping[str, object],
-    definition: BatchDefinition,
-    binding: CapturedFileBinding | None,
-) -> Mapping[str, object]:
-    arguments = dict(_arguments(value, definition))
-    if binding is not None:
-        arguments[binding.argument] = binding.content
-        try:
-            Draft202012Validator(definition.input_schema).validate(arguments)
-        except ValidationError as error:
-            raise BindingUnavailable(
-                "Bound arguments do not satisfy the MCP input schema."
-            ) from error
-    return arguments
-
-
 def _validate_result_path(path: str) -> None:
     if not (path.startswith(("/input/", "/structuredOutput/")) or path == "/error"):
         raise ValueError("Result paths must select input, structuredOutput, or error.")
@@ -1661,7 +1625,6 @@ def create_postgres_batch_execution_module(
     datasets: DatasetModule,
     gateway: PluginGatewayModule,
     transforms: TransformModule | None = None,
-    bindings: BindingModule | None = None,
 ) -> BatchExecutionModule:
     return BatchExecutionModule(
         projects,
@@ -1669,5 +1632,4 @@ def create_postgres_batch_execution_module(
         gateway,
         PostgresBatchRunStore(settings),
         transforms=transforms,
-        bindings=bindings,
     )

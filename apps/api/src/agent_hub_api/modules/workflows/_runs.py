@@ -732,7 +732,10 @@ class WorkflowRunModule:
                 "error": "map_input",
             }
             return None, "map_input"
-        records = _source_records_for_edge(graph, source_snapshots, edges[0])
+        item_edge = next((edge for edge in edges if edge.target_port == "items"), None)
+        if item_edge is None:
+            return None, "map_input"
+        records = _source_records_for_edge(graph, source_snapshots, item_edge)
         item_results = _indexed_progress(previous.get("items"))
         outputs: dict[int, object] = {}
         pending_items: list[tuple[int, object]] = []
@@ -760,6 +763,24 @@ class WorkflowRunModule:
                 }
                 await checkpoint()
                 return index, None, "map_input"
+            call_arguments = dict(item)
+            constant_inputs = {name: value for name, value in inputs.items() if name != "items"}
+            collisions = call_arguments.keys() & constant_inputs.keys()
+            if collisions:
+                item_results[index] = {
+                    "index": index,
+                    "input": dict(item),
+                    "status": "failed",
+                    "error": "map_input_conflict",
+                }
+                execution_nodes[node.id] = {
+                    "status": "failed",
+                    "inputs": dict(inputs),
+                    "items": _ordered_items(item_results),
+                }
+                await checkpoint()
+                return index, None, "map_input_conflict"
+            call_arguments.update(constant_inputs)
             item_identity = (
                 _mapping(records[index]).get("id")
                 if records is not None and index < len(records)
@@ -768,7 +789,8 @@ class WorkflowRunModule:
             item_results[index] = {
                 "index": index,
                 "itemId": item_identity,
-                "input": dict(item),
+                "recordInput": dict(item),
+                "input": call_arguments,
                 "status": "running",
                 "mcpCall": {"pluginId": plugin_id, "toolName": tool_name},
             }
@@ -779,14 +801,14 @@ class WorkflowRunModule:
             }
             await checkpoint()
             try:
-                Draft202012Validator(input_schema).validate(dict(item))
+                Draft202012Validator(input_schema).validate(call_arguments)
             except JsonSchemaValidationError:
                 code = "invalid_mcp_input"
             else:
                 try:
                     async with call_semaphore:
                         result = await gateway.batch_call(
-                            access, project_id, plugin_id, tool_name, item
+                            access, project_id, plugin_id, tool_name, call_arguments
                         )
                 except (
                     PluginCallLimitExceeded,

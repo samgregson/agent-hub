@@ -1,7 +1,7 @@
 """Store Project Workflow Definitions.
 
 Revision ID: 0024_workflow_definitions
-Revises: 0023_file_bindings
+Revises: 0022_artifact_audit_events
 """
 
 from collections.abc import Sequence
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0024_workflow_definitions"
-down_revision = "0023_file_bindings"
+down_revision = "0022_artifact_audit_events"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
