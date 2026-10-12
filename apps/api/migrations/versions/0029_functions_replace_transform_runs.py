@@ -20,8 +20,7 @@ def upgrade() -> None:
     op.drop_column("transform_definitions", "input_selectors")
     op.rename_table("transform_definitions", "functions")
     op.execute(
-        "ALTER TABLE functions RENAME CONSTRAINT "
-        "transform_definitions_pkey TO functions_pkey"
+        "ALTER TABLE functions RENAME CONSTRAINT transform_definitions_pkey TO functions_pkey"
     )
     op.alter_column(
         "functions",

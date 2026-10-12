@@ -35,7 +35,12 @@ test("Plugins are available through the browser-facing Project API", async ({
         enabled: false,
         id: "reference-calculation",
         name: "Reference calculation",
-        tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
+        tools: [
+          { name: "calculate_cantilever_tip_load", readOnly: false },
+          { name: "check_uniform_beam_deflection", readOnly: false },
+          { name: "size_for_deflection", readOnly: false },
+          { name: "draft_beam_review_note", readOnly: false },
+        ],
         version: "0.1.0",
       },
     ]),
@@ -1348,7 +1353,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
     updatedAt: "2026-09-21T00:00:00.000Z",
   };
   const artifactId = "artifact-123";
-  let documentRequests = 0;
+  let exposeUpdatedVersion = false;
   const artifactDocument = (documentVersion: number, threadId: string) => ({
     artifact: {
       documentVersion,
@@ -1397,12 +1402,10 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   await page.route(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
     async (route) => {
-      documentRequests += 1;
       await route.fulfill({
-        json:
-          documentRequests <= 2
-            ? artifactDocument(1, "thread-a")
-            : artifactDocument(2, "thread-b"),
+        json: exposeUpdatedVersion
+          ? artifactDocument(2, "thread-b")
+          : artifactDocument(1, "thread-a"),
       });
     },
   );
@@ -1424,6 +1427,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   const changedDocumentResponse = page.waitForResponse(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
   );
+  exposeUpdatedVersion = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await changedDocumentResponse;
 

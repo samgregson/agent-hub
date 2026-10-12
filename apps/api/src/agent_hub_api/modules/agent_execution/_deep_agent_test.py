@@ -94,6 +94,8 @@ def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
     assert "discover_project_file_sources" in _AGENT_SYSTEM_PROMPT
     assert "does not unwrap object properties" in _AGENT_SYSTEM_PROMPT
     assert "Workflow output schema properties are inside the result value" in _AGENT_SYSTEM_PROMPT
+    assert "A single Function may accept a named array input" in _AGENT_SYSTEM_PROMPT
+    assert "Never map a collection filter" in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -519,9 +521,7 @@ async def test_unavailable_function_preview_returns_actionable_tool_error() -> N
     )
     tools = {
         item.name: item
-        for item in PostgresDeepAgentRunner._function_tools(
-            functions, project.id, access.subject
-        )
+        for item in PostgresDeepAgentRunner._function_tools(functions, project.id, access.subject)
     }
 
     result = await tools["preview_project_function"].ainvoke(

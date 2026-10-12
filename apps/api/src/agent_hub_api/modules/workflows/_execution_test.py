@@ -644,6 +644,281 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
 
 
 @pytest.mark.asyncio
+async def test_beam_workflow_maps_checks_filters_collection_then_maps_followups() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Beam workflow")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    dataset = await datasets.create_dataset(
+        access,
+        project.id,
+        "Floor beams",
+        [
+            DatasetRecordInput(
+                {
+                    "beam_ref": "B-12",
+                    "span_m": 6,
+                    "imposed_load_kn_m2": 3,
+                    "tributary_width_m": 3,
+                    "elastic_modulus_gpa": 210,
+                    "inertia_mm4": 40_000_000,
+                    "deflection_limit_ratio": 360,
+                }
+            ),
+            DatasetRecordInput(
+                {
+                    "beam_ref": "B-13",
+                    "span_m": 5,
+                    "imposed_load_kn_m2": 2.5,
+                    "tributary_width_m": 3,
+                    "elastic_modulus_gpa": 210,
+                    "inertia_mm4": 40_000_000,
+                    "deflection_limit_ratio": 360,
+                }
+            ),
+            DatasetRecordInput(
+                {
+                    "beam_ref": "B-14",
+                    "span_m": 7,
+                    "imposed_load_kn_m2": 3,
+                    "tributary_width_m": 3,
+                    "elastic_modulus_gpa": 210,
+                    "inertia_mm4": 100_000_000,
+                    "deflection_limit_ratio": 360,
+                }
+            ),
+        ],
+    )
+    sizing_fields = (
+        "beam_ref",
+        "span_m",
+        "imposed_load_kn_m2",
+        "tributary_width_m",
+        "elastic_modulus_gpa",
+        "limit_mm",
+        "trial_inertia_mm4",
+        "trial_deflection_mm",
+    )
+
+    class Gateway:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def tool_version(self, *_: object) -> str:
+            return "1.0.0"
+
+        async def input_schema(
+            self, _access: object, _project_id: str, _plugin: str, name: str
+        ) -> dict[str, object]:
+            fields = (
+                (
+                    "beam_ref",
+                    "span_m",
+                    "imposed_load_kn_m2",
+                    "tributary_width_m",
+                    "elastic_modulus_gpa",
+                    "inertia_mm4",
+                    "deflection_limit_ratio",
+                )
+                if name == "check_uniform_beam_deflection"
+                else sizing_fields
+                if name == "size_for_deflection"
+                else (*sizing_fields, "minimum_inertia_mm4")
+            )
+            return {
+                "type": "object",
+                "properties": {field: {} for field in fields},
+                "required": list(fields),
+            }
+
+        async def output_schema(
+            self, *_: object, require_repeat_safe: bool = False
+        ) -> dict[str, object]:
+            if require_repeat_safe:
+                return {"type": "object"}
+            return {"type": "object"}
+
+        async def batch_call(
+            self,
+            _access: object,
+            _project_id: str,
+            _plugin: str,
+            name: str,
+            arguments: dict[str, object],
+        ) -> PluginToolResult:
+            self.calls.append((name, arguments))
+            if name == "check_uniform_beam_deflection":
+                span_mm = cast(float, arguments["span_m"]) * 1000
+                line_load = cast(float, arguments["imposed_load_kn_m2"]) * cast(
+                    float, arguments["tributary_width_m"]
+                )
+                deflection = (
+                    5
+                    * line_load
+                    * span_mm**4
+                    / (
+                        384
+                        * cast(float, arguments["elastic_modulus_gpa"])
+                        * 1000
+                        * cast(float, arguments["inertia_mm4"])
+                    )
+                )
+                limit = span_mm / cast(float, arguments["deflection_limit_ratio"])
+                return PluginToolResult(
+                    (),
+                    {
+                        **arguments,
+                        "maximum_deflection_mm": deflection,
+                        "limit_mm": limit,
+                        "check_status": "fails" if deflection > limit else "passes",
+                    },
+                )
+            if name == "size_for_deflection":
+                return PluginToolResult(
+                    (),
+                    {
+                        **arguments,
+                        "minimum_inertia_mm4": 43_392_857.14285714,
+                    },
+                )
+            assert name == "draft_beam_review_note"
+            return PluginToolResult(
+                (),
+                {"beam_ref": arguments["beam_ref"], "note": "Review only"},
+            )
+
+    class BeamFunctionRunner:
+        async def identity(self) -> FunctionRuntimeIdentity:
+            return FunctionRuntimeIdentity("fixture", "fixture-hash")
+
+        async def execute(
+            self, source: str, inputs: dict[str, object], parameters: dict[str, object]
+        ) -> tuple[object, str]:
+            del parameters
+            assert 'if item["check_status"] == "fails"' in source
+            items = cast(list[dict[str, object]], inputs["items"])
+            selected = [item for item in items if item["check_status"] == "fails"]
+            return [
+                {
+                    "beam_ref": item["beam_ref"],
+                    "span_m": item["span_m"],
+                    "imposed_load_kn_m2": item["imposed_load_kn_m2"],
+                    "tributary_width_m": item["tributary_width_m"],
+                    "elastic_modulus_gpa": item["elastic_modulus_gpa"],
+                    "limit_mm": item["limit_mm"],
+                    "trial_inertia_mm4": item["inertia_mm4"],
+                    "trial_deflection_mm": item["maximum_deflection_mm"],
+                }
+                for item in selected
+            ], "fixture"
+
+    gateway = Gateway()
+    functions = FunctionModule(projects, MemoryFunctionStore(), BeamFunctionRunner())
+    filtered = await functions.define(
+        access,
+        project.id,
+        "Filter failed checks",
+        """def transform(inputs, parameters):
+    return [
+        {
+            "beam_ref": item["beam_ref"],
+            "span_m": item["span_m"],
+            "imposed_load_kn_m2": item["imposed_load_kn_m2"],
+            "tributary_width_m": item["tributary_width_m"],
+            "elastic_modulus_gpa": item["elastic_modulus_gpa"],
+            "limit_mm": item["limit_mm"],
+            "trial_inertia_mm4": item["inertia_mm4"],
+            "trial_deflection_mm": item["maximum_deflection_mm"],
+        }
+        for item in inputs["items"]
+        if item["check_status"] == "fails"
+    ]
+""",
+        {
+            "type": "object",
+            "properties": {"items": {"type": "array", "items": {"type": "object"}}},
+            "required": ["items"],
+        },
+        {"type": "array", "items": {"type": "object"}},
+    )
+    gateway_module = cast(PluginGatewayModule, gateway)
+    definitions = WorkflowDefinitionModule(
+        projects, datasets, functions, gateway_module, MemoryWorkflowStore()
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "dataset", dataset.id, dataset.version),
+            WorkflowNode(
+                "check",
+                "mcp",
+                "reference-calculation",
+                "1.0.0",
+                shape="map",
+                tool_name="check_uniform_beam_deflection",
+            ),
+            WorkflowNode("filter", "python", filtered.id, filtered.revision),
+            WorkflowNode(
+                "size",
+                "mcp",
+                "reference-calculation",
+                "1.0.0",
+                shape="map",
+                tool_name="size_for_deflection",
+            ),
+            WorkflowNode(
+                "note",
+                "mcp",
+                "reference-calculation",
+                "1.0.0",
+                shape="map",
+                tool_name="draft_beam_review_note",
+            ),
+        ),
+        (
+            WorkflowEdge("source", "records", "check", "items"),
+            WorkflowEdge("check", "result", "filter", "items"),
+            WorkflowEdge("filter", "result", "size", "items"),
+            WorkflowEdge("size", "result", "note", "items"),
+        ),
+        (
+            WorkflowOutput("checks", "check", "result"),
+            WorkflowOutput("failed", "filter", "result"),
+            WorkflowOutput("sizes", "size", "result"),
+            WorkflowOutput("notes", "note", "result"),
+        ),
+    )
+    definition = await definitions.create(access, project.id, "Beam check", graph)
+    runs = WorkflowRunModule(
+        definitions, datasets, functions, gateway_module, MemoryWorkflowRunStore()
+    )
+
+    prepared = await runs.prepare(
+        access, project.id, definition.id, "beam-demo", expected_version=definition.version
+    )
+    completed = await runs.execute(access, project.id, prepared.id)
+
+    assert completed.status == "succeeded", completed.execution
+    outputs = cast(dict[str, object], completed.execution["outputs"])
+    assert [item["beam_ref"] for item in cast(list[dict[str, object]], outputs["failed"])] == [
+        "B-12"
+    ]
+    assert cast(list[dict[str, object]], outputs["sizes"])[0]["minimum_inertia_mm4"] == (
+        43_392_857.14285714
+    )
+    assert cast(list[dict[str, object]], outputs["notes"]) == [
+        {"beam_ref": "B-12", "note": "Review only"}
+    ]
+    assert [name for name, _ in gateway.calls].count("check_uniform_beam_deflection") == 3
+    assert [name for name, _ in gateway.calls].count("size_for_deflection") == 1
+    assert [name for name, _ in gateway.calls].count("draft_beam_review_note") == 1
+    check_node = cast(
+        dict[str, object], cast(dict[str, object], completed.execution["nodes"])["check"]
+    )
+    check_items = cast(list[dict[str, object]], check_node["items"])
+    assert [item["itemId"] for item in check_items] == [record.id for record in dataset.records]
+
+
+@pytest.mark.asyncio
 async def test_mcp_map_merges_captured_project_file_input_into_each_dataset_record() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")

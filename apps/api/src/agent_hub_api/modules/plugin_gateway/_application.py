@@ -502,6 +502,9 @@ def create_postgres_plugin_gateway(
         endpoint="http://reference-calculation:8000/mcp",
         tools=(
             PluginTool(name="calculate_cantilever_tip_load", read_only=False, repeat_safe=True),
+            PluginTool(name="check_uniform_beam_deflection", read_only=False, repeat_safe=True),
+            PluginTool(name="size_for_deflection", read_only=False, repeat_safe=True),
+            PluginTool(name="draft_beam_review_note", read_only=False, repeat_safe=True),
         ),
         app_resource_uri="ui://agent-hub-reference-calculation/cantilever.html",
         app_tool_names=(),
