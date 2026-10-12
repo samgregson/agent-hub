@@ -85,6 +85,16 @@ def test_agent_instructions_describe_transform_language_and_selectors() -> None:
     assert "null output during that state" in _AGENT_SYSTEM_PROMPT
 
 
+def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
+    assert "nodes, edges, and outputs arrays" in _AGENT_SYSTEM_PROMPT
+    assert "source_node, source_port, target_node, and target_port" in _AGENT_SYSTEM_PROMPT
+    assert "name, node, and port" in _AGENT_SYSTEM_PROMPT
+    assert "Do not use a node map, from/to edge keys, or an outputs map" in _AGENT_SYSTEM_PROMPT
+    assert "saved Function ID as ref_id" in _AGENT_SYSTEM_PROMPT
+    assert "Function's declared input names" in _AGENT_SYSTEM_PROMPT
+    assert "Create or discover these targets before composing the graph" in _AGENT_SYSTEM_PROMPT
+
+
 @pytest.mark.asyncio
 async def test_agent_workflow_edits_are_approval_gated_and_readable(
     monkeypatch: pytest.MonkeyPatch,
@@ -147,6 +157,20 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         "reject",
     ]
     tools = {registered.name: registered for registered in captured["tools"]}
+    invalid = await tools["create_project_workflow"].ainvoke(
+        {
+            "name": "Invalid demo",
+            "graph_json": json.dumps(
+                {
+                    "nodes": {"input": {"type": "input"}},
+                    "edges": [],
+                    "outputs": {"result": "input"},
+                }
+            ),
+        }
+    )
+    assert "Workflow graph is invalid" in invalid
+
     graph_json = json.dumps(
         {
             "nodes": [{"id": "source", "kind": "dataset", "ref_id": dataset.id, "version": 1}],
@@ -163,6 +187,22 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         )
     )
     assert created["version"] == 1
+    invalid_revision = await tools["revise_project_workflow"].ainvoke(
+        {
+            "workflow_id": created["id"],
+            "name": "Invalid revision",
+            "expected_version": 1,
+            "graph_json": json.dumps(
+                {
+                    "nodes": {"input": {"type": "input"}},
+                    "edges": [],
+                    "outputs": {"result": "input"},
+                }
+            ),
+        }
+    )
+    assert "Workflow graph is invalid" in invalid_revision
+
     loaded = json.loads(
         await tools["load_project_workflow"].ainvoke(
             {

@@ -3133,6 +3133,126 @@ test("rejected Project File approval remains a resolved card after reload", asyn
   ).toBeHidden();
 });
 
+test("approving a restored workflow interrupt resumes the AG-UI run", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "project-restored-workflow",
+    name: "Workflow review",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-09-16T00:00:00.000Z",
+    id: "thread-restored-workflow",
+    projectId: project.id,
+    title: "Demo workflow",
+    updatedAt: "2026-09-16T00:00:00.000Z",
+  };
+  const resumeRequests: unknown[] = [];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      resumeRequests.push(input.resume);
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TEXT_MESSAGE_START",
+            messageId: "assistant-after-approval",
+            role: "assistant",
+          },
+          {
+            type: "TEXT_MESSAGE_CONTENT",
+            messageId: "assistant-after-approval",
+            delta: "Created the demo workflow.",
+          },
+          {
+            type: "TEXT_MESSAGE_END",
+            messageId: "assistant-after-approval",
+          },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: { type: "success" },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: {
+          approvals: [],
+          interrupts: [
+            {
+              id: "interrupt-create-workflow",
+              reason: "tool_call",
+              toolCallId: "tool-create-workflow",
+            },
+          ],
+          messages: [
+            {
+              content: null,
+              id: "assistant-pending-workflow",
+              role: "assistant",
+              toolCalls: [
+                {
+                  function: {
+                    arguments: JSON.stringify({
+                      graph_json: JSON.stringify({
+                        edges: [],
+                        nodes: {
+                          input: { output: "value", type: "input" },
+                        },
+                        outputs: { value: "input" },
+                      }),
+                      name: "Demo workflow",
+                    }),
+                    name: "create_project_workflow",
+                  },
+                  id: "tool-create-workflow",
+                  type: "function",
+                },
+              ],
+            },
+          ],
+        },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  const card = page.getByRole("region", { name: "Approve protected action" });
+  await expect(card).toContainText("Demo workflow");
+  await card.getByRole("button", { name: "Approve" }).click();
+  await expect
+    .poll(() => resumeRequests)
+    .toEqual([
+      [
+        {
+          interruptId: "interrupt-create-workflow",
+          payload: { approved: true },
+          status: "resolved",
+        },
+      ],
+    ]);
+});
+
 function sse(events: object[]) {
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
 }

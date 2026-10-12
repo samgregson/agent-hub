@@ -67,6 +67,7 @@ from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowGraph,
     WorkflowRunModule,
+    WorkflowValidationError,
 )
 from agent_hub_api.settings import Settings
 
@@ -122,10 +123,20 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "a response, link it as Markdown using its absolute /project or /scratch path.",
         "Workflow Definitions are saved Project DAGs. Use list_project_workflows and "
         "load_project_workflow to inspect them, then create_project_workflow or "
-        "revise_project_workflow for a user-requested change. The graph JSON has nodes, "
-        "edges, and named outputs. Dataset source nodes expose ordered records; Project File "
-        "source nodes use kind file, ref_id as the absolute /project path, the current integer "
-        "version, and expose captured text on the content output. Creating or revising a "
+        "revise_project_workflow for a user-requested change. graph_json must be an object "
+        "with nodes, edges, and outputs arrays. Each node is an object with id, kind, "
+        "ref_id, and version (optionally shape and tool_name); node kinds are dataset, file, "
+        "python, and mcp. Each edge is an object with source_node, source_port, target_node, "
+        "and target_port. Each output is an object with name, node, and port. Do not use "
+        "a node map, from/to edge keys, or an outputs map. Dataset source nodes expose "
+        "ordered records. Project File nodes use kind file, the absolute /project path as "
+        "ref_id, the current integer version, and expose captured text on the content output. "
+        "Python Function nodes use kind python, the saved Function ID as ref_id, its revision "
+        "as the integer version, and shape single or map; their input ports are the Function's "
+        "declared input names and their output port is result. MCP nodes use kind mcp, the "
+        "enabled Plugin ID as ref_id, the Plugin version as version, and the selected tool's "
+        "name as tool_name. Create or discover these targets before composing the graph. "
+        "Creating or revising a "
         "Workflow invokes the approval "
         "card automatically. Use prepare_project_workflow_run when the user wants "
         "to capture exact inputs for a Run, then execute_project_workflow_run to run "
@@ -1079,25 +1090,37 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def create_project_workflow(name: str, graph_json: str) -> str:
-            """Create a Workflow after approval; graph_json uses snake_case keys."""
-            graph = WorkflowGraph.from_json(graph_json)
-            item = await workflows.create(access, project_id, name, graph)
+            """Create a Workflow after approval; graph_json uses snake_case graph fields."""
+            try:
+                graph = WorkflowGraph.from_json(graph_json)
+                item = await workflows.create(access, project_id, name, graph)
+            except WorkflowValidationError as error:
+                return (
+                    f"Workflow graph is invalid: {error} "
+                    "Correct graph_json and call this tool again."
+                )
             return json.dumps({"id": item.id, "name": item.name, "version": item.version})
 
         @tool
         async def revise_project_workflow(
             workflow_id: str, name: str, graph_json: str, expected_version: int
         ) -> str:
-            """Revise a Workflow after approval; graph_json uses snake_case node and edge keys."""
-            graph = WorkflowGraph.from_json(graph_json)
-            item = await workflows.revise(
-                access,
-                project_id,
-                workflow_id,
-                name,
-                graph,
-                expected_version=expected_version,
-            )
+            """Revise a Workflow after approval; graph_json uses snake_case graph fields."""
+            try:
+                graph = WorkflowGraph.from_json(graph_json)
+                item = await workflows.revise(
+                    access,
+                    project_id,
+                    workflow_id,
+                    name,
+                    graph,
+                    expected_version=expected_version,
+                )
+            except WorkflowValidationError as error:
+                return (
+                    f"Workflow graph is invalid: {error} "
+                    "Correct graph_json and call this tool again."
+                )
             return json.dumps({"id": item.id, "name": item.name, "version": item.version})
 
         tools: list[BaseTool] = [
