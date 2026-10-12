@@ -32,6 +32,10 @@ _Avoid_: Agent Run, Batch Run, mutable result
 A reusable Project-owned Python function with reviewable purpose and named, schema-described inputs and outputs. Its authoring surface supports editing and testing code. The Function does not own data connections or invocation cardinality; a Workflow step configures those when it calls the Function.
 _Avoid_: Transform Definition, operation, workflow node, arbitrary untracked script
 
+**Function Preview**:
+A transient test of a Function using example input and optional saved preview defaults. Preview defaults never choose or change inputs for a Workflow Run.
+_Avoid_: Function Run, saved run
+
 **MCP Tool**:
 A Plugin-provided capability with a declared input and output contract. It remains distinct from a Python Function and can be selected as a Workflow step target; Agent Hub mediates authorization, approval, execution bounds, and provenance.
 _Avoid_: Python Function, user-authored Function
@@ -71,10 +75,6 @@ _Avoid_: Envelope, host metadata
 **Tool Result Snapshot**:
 The canonical, serializable inputs and structured output from one successful MCP tool invocation, saved as an Artifact Payload. It excludes transient MCP App UI state and unsuccessful tool calls.
 _Avoid_: MCP server state, tool transcript
-
-**Result Record**:
-One Result Set entry, retaining normalized input and complete structured output or failure for the captured Dataset Record.
-_Avoid_: Dataset Record, log line
 
 **Virtual Filesystem**:
 The project-shared hierarchical working state available to agents without providing access to the user's computer filesystem.

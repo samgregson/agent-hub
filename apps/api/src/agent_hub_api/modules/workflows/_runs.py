@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Protocol, cast
-from uuid import UUID, uuid4, uuid5
+from uuid import uuid4
 
 from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from jsonschema import ValidationError as JsonSchemaValidationError
@@ -26,7 +26,6 @@ from agent_hub_api.modules.project_files import ProjectFileError, ProjectFilesMo
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms import (
     TransformExecutionError,
-    TransformInitiation,
     TransformModule,
     TransformNotFound,
     TransformValidationError,
@@ -277,8 +276,6 @@ class WorkflowRunModule:
         access: ProjectAccess,
         project_id: str,
         run_id: str,
-        *,
-        initiation: TransformInitiation | None = None,
     ) -> WorkflowRun:
         """Execute or safely resume a Workflow DAG through its owning Modules."""
         run = await self.load(access, project_id, run_id)
@@ -366,8 +363,6 @@ class WorkflowRunModule:
                         execution_nodes,
                         checkpoint,
                         call_semaphore,
-                        run.id,
-                        initiation,
                     )
                     for node, inputs, edges in work
                 ),
@@ -408,8 +403,6 @@ class WorkflowRunModule:
         execution_nodes: dict[str, object],
         checkpoint: Callable[[], Awaitable[None]],
         call_semaphore: asyncio.Semaphore,
-        workflow_run_id: str,
-        initiation: TransformInitiation | None,
     ) -> tuple[object | None, str | None]:
         if node.kind == "mcp":
             return await self._execute_mcp_node(
@@ -432,7 +425,6 @@ class WorkflowRunModule:
         ):
             return None, "target_snapshot"
         previous = _mapping(execution_nodes.get(node.id))
-        call_context = initiation or TransformInitiation("workflowRun", "notRequired")
         if node.shape == "map":
             items = inputs.get("items")
             if (
@@ -477,15 +469,11 @@ class WorkflowRunModule:
                 await checkpoint()
                 try:
                     async with call_semaphore:
-                        child = await self._transforms.start_function_call(
+                        output = await self._transforms.execute_workflow_function(
                             access,
                             project_id,
-                            node.ref_id,
+                            target,
                             {input_names[0]: item},
-                            {},
-                            expected_revision=int(node.version),
-                            initiation=call_context,
-                            run_id=_child_run_id(workflow_run_id, node.id, index),
                         )
                 except (
                     TransformExecutionError,
@@ -519,26 +507,16 @@ class WorkflowRunModule:
                     "index": index,
                     "itemId": item_identity,
                     "input": item,
-                    "status": child.status,
-                    "transformRunId": child.id,
-                    **({"output": child.output} if child.status == "succeeded" else {}),
-                    **({"error": child.error} if child.error else {}),
+                    "status": "succeeded",
+                    "output": output,
                 }
-                if child.status != "succeeded":
-                    execution_nodes[node.id] = {
-                        "status": "failed",
-                        "inputs": inputs,
-                        "items": _ordered_items(item_results),
-                    }
-                    await checkpoint()
-                    return index, None, "child_call_failed"
                 execution_nodes[node.id] = {
                     "status": "running",
                     "inputs": inputs,
                     "items": _ordered_items(item_results),
                 }
                 await checkpoint()
-                return index, child.output, None
+                return index, output, None
 
             item_results_by_index = await asyncio.gather(
                 *(execute_item(index, item) for index, item in pending_items),
@@ -577,15 +555,11 @@ class WorkflowRunModule:
         await checkpoint()
         try:
             async with call_semaphore:
-                child = await self._transforms.start_function_call(
+                output = await self._transforms.execute_workflow_function(
                     access,
                     project_id,
-                    node.ref_id,
+                    target,
                     inputs,
-                    {},
-                    expected_revision=int(node.version),
-                    initiation=call_context,
-                    run_id=_child_run_id(workflow_run_id, node.id),
                 )
         except (TransformExecutionError, TransformNotFound, TransformValidationError) as error:
             execution_nodes[node.id] = {
@@ -598,16 +572,12 @@ class WorkflowRunModule:
                 error.code if isinstance(error, TransformExecutionError) else "stale_target"
             )
         execution_nodes[node.id] = {
-            "status": child.status,
+            "status": "succeeded",
             "inputs": inputs,
-            "transformRunId": child.id,
-            **({"output": child.output} if child.status == "succeeded" else {}),
-            **({"error": child.error} if child.error else {}),
+            "output": output,
         }
         await checkpoint()
-        if child.status != "succeeded":
-            return None, "child_call_failed"
-        return child.output, None
+        return output, None
 
     async def _execute_mcp_node(
         self,
@@ -953,11 +923,6 @@ def _indexed_progress(value: object) -> dict[int, dict[str, object]]:
 
 def _ordered_items(value: Mapping[int, dict[str, object]]) -> list[dict[str, object]]:
     return [value[index] for index in sorted(value)]
-
-
-def _child_run_id(workflow_run_id: str, node_id: str, item_index: int | None = None) -> str:
-    identity = node_id if item_index is None else f"{node_id}:{item_index}"
-    return str(uuid5(UUID(workflow_run_id), identity))
 
 
 def _topological_nodes(graph: WorkflowGraph) -> tuple[WorkflowNode, ...]:

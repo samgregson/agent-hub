@@ -44,7 +44,6 @@ from agent_hub_api.modules.plugin_gateway import (
 from agent_hub_api.modules.project_files import ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.transforms import (
-    TransformInitiation,
     TransformModule,
     TransformValidationError,
 )
@@ -635,7 +634,6 @@ class PostgresDeepAgentRunner:
                     access,
                     project_id,
                     run_id,
-                    initiation=TransformInitiation("agent", "approved"),
                 )
                 return json.dumps({"id": run.id, "status": run.status, "execution": run.execution})
 

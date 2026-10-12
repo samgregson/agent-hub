@@ -9,11 +9,8 @@ from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginTool
 from agent_hub_api.modules.project_files import create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.transforms import (
-    MemoryTransformRunStore,
     MemoryTransformStore,
-    TransformInitiation,
     TransformModule,
-    TransformRun,
     TransformRuntimeIdentity,
 )
 from agent_hub_api.modules.workflows import (
@@ -91,9 +88,7 @@ async def test_workflow_captures_project_file_content_before_execution() -> None
     project_files = create_memory_project_files(projects)
     file = await project_files.write(project.id, "/calculations/check.py", "template-v1")
     runner = _Runner()
-    transforms = TransformModule(
-        projects, MemoryTransformStore(), runner, MemoryTransformRunStore()
-    )
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
     function = await transforms.define(
         access,
         project.id,
@@ -163,8 +158,7 @@ async def test_execute_runs_branching_python_map_dag_and_is_idempotent() -> None
         [DatasetRecordInput({"value": 2}), DatasetRecordInput({"value": 4})],
     )
     runner = _Runner()
-    transform_runs = MemoryTransformRunStore()
-    transforms = TransformModule(projects, MemoryTransformStore(), runner, transform_runs)
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
     double = await transforms.define(
         access,
         project.id,
@@ -235,7 +229,7 @@ async def test_execute_runs_branching_python_map_dag_and_is_idempotent() -> None
 
 
 @pytest.mark.asyncio
-async def test_recovery_reuses_completed_function_call_after_checkpoint_gap(
+async def test_recovery_reexecutes_function_when_workflow_checkpoint_was_not_saved(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     projects = create_memory_project_module()
@@ -249,9 +243,7 @@ async def test_recovery_reuses_completed_function_call_after_checkpoint_gap(
         [DatasetRecordInput({"value": 2}), DatasetRecordInput({"value": 4})],
     )
     runner = _Runner()
-    transforms = TransformModule(
-        projects, MemoryTransformStore(), runner, MemoryTransformRunStore()
-    )
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
     function = await transforms.define(
         access,
         project.id,
@@ -277,38 +269,24 @@ async def test_recovery_reuses_completed_function_call_after_checkpoint_gap(
     prepared = await workflows.prepare(
         access, project.id, definition.id, "request-1", expected_version=1
     )
-    start_function_call = transforms.start_function_call
+    execute_function = transforms.execute_workflow_function
     crashed = False
 
-    async def crash_after_function_call(
+    async def crash_after_function_execution(
         call_access: ProjectAccess,
         call_project_id: str,
-        definition_id: str,
+        snapshot: Mapping[str, object],
         inputs: Mapping[str, object],
-        parameters: Mapping[str, object],
-        *,
-        expected_revision: int,
-        initiation: TransformInitiation | None = None,
-        run_id: str | None = None,
-    ) -> TransformRun:
+    ) -> object:
         nonlocal crashed
-        child = await start_function_call(
-            call_access,
-            call_project_id,
-            definition_id,
-            inputs,
-            parameters,
-            expected_revision=expected_revision,
-            initiation=initiation,
-            run_id=run_id,
-        )
+        output = await execute_function(call_access, call_project_id, snapshot, inputs)
         if not crashed:
             crashed = True
-            raise RuntimeError("simulated interruption after child completion")
-        return child
+            raise RuntimeError("simulated interruption before workflow checkpoint")
+        return output
 
-    monkeypatch.setattr(transforms, "start_function_call", crash_after_function_call)
-    with pytest.raises(RuntimeError, match="after child completion"):
+    monkeypatch.setattr(transforms, "execute_workflow_function", crash_after_function_execution)
+    with pytest.raises(RuntimeError, match="before workflow checkpoint"):
         await workflows.execute(access, project.id, prepared.id)
     assert len(runner.calls) == 2
 
@@ -317,7 +295,7 @@ async def test_recovery_reuses_completed_function_call_after_checkpoint_gap(
 
     assert completed.status == "succeeded"
     assert completed.execution["outputs"] == {"results": [{"value": 4}, {"value": 8}]}
-    assert len(runner.calls) == 2
+    assert len(runner.calls) == 3
 
 
 @pytest.mark.asyncio
@@ -761,7 +739,7 @@ async def test_mcp_map_merges_captured_project_file_input_into_each_dataset_reco
 
 
 @pytest.mark.asyncio
-async def test_changed_python_target_fails_explicitly_after_snapshot_preparation() -> None:
+async def test_workflow_uses_captured_python_target_after_definition_changes() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
@@ -769,9 +747,8 @@ async def test_changed_python_target_fails_explicitly_after_snapshot_preparation
     dataset = await datasets.create_dataset(
         access, project.id, "Inputs", [DatasetRecordInput({"value": 1})]
     )
-    transforms = TransformModule(
-        projects, MemoryTransformStore(), _Runner(), MemoryTransformRunStore()
-    )
+    runner = _Runner()
+    transforms = TransformModule(projects, MemoryTransformStore(), runner)
     function = await transforms.define(
         access,
         project.id,
@@ -786,9 +763,9 @@ async def test_changed_python_target_fails_explicitly_after_snapshot_preparation
     graph = WorkflowGraph(
         (
             WorkflowNode("source", "dataset", dataset.id, dataset.version),
-            WorkflowNode("double", "python", function.id, function.revision),
+            WorkflowNode("double", "python", function.id, function.revision, shape="map"),
         ),
-        (WorkflowEdge("source", "records", "double", "record"),),
+        (WorkflowEdge("source", "records", "double", "items"),),
         (WorkflowOutput("result", "double", "result"),),
     )
     definition = await definitions.create(access, project.id, "Double records", graph)
@@ -808,5 +785,5 @@ async def test_changed_python_target_fails_explicitly_after_snapshot_preparation
 
     completed = await workflows.execute(access, project.id, prepared.id)
 
-    assert completed.status == "failed"
-    assert completed.execution["error"] == {"nodeId": "double", "code": "stale_target"}
+    assert completed.status == "succeeded"
+    assert completed.execution["outputs"] == {"result": [{"value": 2}]}

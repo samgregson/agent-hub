@@ -41,10 +41,6 @@ from agent_hub_api.modules.projects import (
     create_project_router,
 )
 from agent_hub_api.modules.request_limits import RequestBodyLimitMiddleware
-from agent_hub_api.modules.transform_inputs import (
-    TransformInputModule,
-    create_transform_input_router,
-)
 from agent_hub_api.modules.transforms import (
     create_function_router,
     create_postgres_transform_module,
@@ -95,9 +91,6 @@ def create_app(
         resolved_datasets,
         resolved_plugin_gateway,
         transforms=resolved_transforms,
-    )
-    resolved_transform_inputs = TransformInputModule(
-        resolved_batches, resolved_transforms, resolved_artifacts, resolved_datasets
     )
     resolved_workflows = create_postgres_workflow_module(
         resolved_settings,
@@ -175,10 +168,6 @@ def create_app(
     )
     application.include_router(
         create_function_router(resolved_identity, resolved_transforms), prefix="/api"
-    )
-    application.include_router(
-        create_transform_input_router(resolved_identity, resolved_transform_inputs),
-        prefix="/api",
     )
     application.include_router(
         create_workflow_router(resolved_identity, resolved_workflows, resolved_workflow_runs),

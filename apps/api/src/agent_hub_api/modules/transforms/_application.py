@@ -413,6 +413,60 @@ class TransformModule:
             raise TransformValidationError("Transform output does not match its output schema.")
         return TransformPreview(output, runtime, definition.source_hash)
 
+    async def execute_workflow_function(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        snapshot: Mapping[str, object],
+        inputs: Mapping[str, object],
+    ) -> object:
+        """Execute a captured Function for a Workflow without creating a child Run."""
+        await self._authorize(access, project_id)
+        if self._runner is None:
+            raise TransformExecutionError("runner_unavailable")
+        try:
+            runtime = snapshot["runtime"]
+            package_hash = snapshot["packageHash"]
+            source = snapshot["source"]
+            input_schema = snapshot["inputSchema"]
+            output_schema = snapshot["outputSchema"]
+            input_names = snapshot["inputNames"]
+        except KeyError as error:
+            raise TransformValidationError("Function snapshot is incomplete.") from error
+        if (
+            not isinstance(runtime, str)
+            or not isinstance(package_hash, str)
+            or not isinstance(source, str)
+            or not isinstance(input_schema, Mapping)
+            or not isinstance(output_schema, Mapping)
+            or not isinstance(input_names, list)
+            or not all(isinstance(name, str) for name in input_names)
+        ):
+            raise TransformValidationError("Function snapshot is invalid.")
+        if not set(inputs).issubset(input_names):
+            raise TransformValidationError("Function input names must be declared inputs.")
+        identity = await self._runner.identity()
+        if runtime != identity.runtime or package_hash != identity.package_hash:
+            raise TransformExecutionError("runtime_mismatch")
+        try:
+            input_values = cast(dict[str, object], _snapshot_value(dict(inputs)))
+            _validate_function_values(input_schema, input_values)
+            if len(_canonical({"inputs": input_values, "parameters": {}})) > 64_000:
+                raise TransformValidationError("Function inputs exceed 64000 bytes.")
+        except (TypeError, ValueError) as error:
+            raise TransformValidationError("Function inputs must be JSON values.") from error
+        output, executed_runtime = await self._runner.execute(source, input_values, {})
+        if executed_runtime != runtime:
+            raise TransformExecutionError("runtime_mismatch")
+        if not Draft202012Validator(output_schema).is_valid(output):
+            raise TransformValidationError("Function output does not match its output schema.")
+        try:
+            if len(_canonical(output)) > 128_000:
+                raise TransformExecutionError("output_limit")
+        except (TypeError, ValueError) as error:
+            raise TransformValidationError("Function output must be a JSON value.") from error
+        return output
+
     async def batch_snapshot(
         self, access: ProjectAccess, project_id: str, definition_id: str
     ) -> Mapping[str, object]:
