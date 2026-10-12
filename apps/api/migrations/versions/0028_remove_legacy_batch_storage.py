@@ -15,6 +15,9 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Older local databases may retain this abandoned table, which still points at
+    # Batch Definitions even though no current migration or Module owns it.
+    op.execute("DROP TABLE IF EXISTS file_bindings")
     op.drop_table("batch_result_records")
     op.drop_table("batch_runs")
     op.drop_table("batch_definitions")
