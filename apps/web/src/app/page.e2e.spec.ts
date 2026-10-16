@@ -1868,7 +1868,7 @@ test("approving a tool call resumes through the AG-UI transport contract", async
   });
 
   await page.goto("/");
-  await page.getByLabel("Message Agent Hub").fill("Create the file");
+  await page.getByLabel("Message").fill("Create the file");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Approve Project File change")).toBeVisible();
   await expect(page.getByText("write_file", { exact: true })).toBeHidden();
@@ -1888,6 +1888,380 @@ test("approving a tool call resumes through the AG-UI transport contract", async
     ]);
   await page.getByRole("button", { name: "the file" }).click();
   await expect(page.getByText("# Example")).toBeVisible();
+});
+
+test("process stays expanded while work streams and collapses when the turn ends", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "project-process-progress",
+    name: "Progress review",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "thread-process-progress",
+    projectId: project.id,
+    title: "Check progress UI",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : input.href;
+      if (!url.endsWith("/agent") || init?.method !== "POST") {
+        return nativeFetch(input, init);
+      }
+
+      const body = JSON.parse(String(init.body)) as {
+        runId: string;
+        threadId: string;
+      };
+      const events = [
+        { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
+        {
+          type: "TOOL_CALL_START",
+          toolCallId: "call-read-project-file",
+          toolCallName: "read_project_file",
+          parentMessageId: "message-progress-tool",
+        },
+        {
+          type: "TOOL_CALL_ARGS",
+          toolCallId: "call-read-project-file",
+          delta: JSON.stringify({ path: "/project/brief.md" }),
+        },
+      ];
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = (event: object) =>
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+            );
+          const pause = (duration: number) =>
+            new Promise((resolve) => setTimeout(resolve, duration));
+          for (const event of events) send(event);
+          await pause(700);
+          send({
+            type: "TOOL_CALL_END",
+            toolCallId: "call-read-project-file",
+          });
+          send({
+            type: "TOOL_CALL_RESULT",
+            messageId: "message-progress-result",
+            toolCallId: "call-read-project-file",
+            content: "Project brief loaded",
+          });
+          await pause(700);
+          send({
+            type: "TEXT_MESSAGE_START",
+            messageId: "message-progress-answer",
+            role: "assistant",
+          });
+          send({
+            type: "TEXT_MESSAGE_CONTENT",
+            messageId: "message-progress-answer",
+            delta: "I checked the brief and found the requested details.",
+          });
+          send({
+            type: "TEXT_MESSAGE_END",
+            messageId: "message-progress-answer",
+          });
+          await pause(500);
+          send({
+            type: "RUN_FINISHED",
+            threadId: body.threadId,
+            runId: body.runId,
+            outcome: { type: "success" },
+          });
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+  });
+
+  await page.route("**/api/projects", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: [] })
+      : route.fulfill({ json: project, status: 201 }),
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history")) {
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    }
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  const selectedProject = page.getByLabel("Selected Project");
+  await selectedProject.selectOption({ label: "New Project…" });
+  const projectDialog = page.getByRole("dialog", { name: "New Project" });
+  await projectDialog.getByLabel("Project name").fill(project.name);
+  await projectDialog.getByRole("button", { name: "Create Project" }).click();
+  await expect(selectedProject).toHaveValue(project.id);
+  await page.getByLabel("Message").fill("Check the project brief");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const process = page.locator("details").first();
+  await expect(process).toHaveAttribute("open", "");
+  await expect(process.locator(":scope > summary")).toContainText("Thinking");
+  await expect(process.locator(":scope > summary")).toContainText(
+    "Using tools",
+  );
+  const toolCall = process.getByText("Read Project File");
+  await expect(toolCall).toBeVisible();
+  await expect(process.getByText("Running")).toBeVisible();
+  const toolDetails = toolCall.locator("xpath=../..");
+  await expect(toolDetails).not.toHaveAttribute("open", "");
+  await toolCall.click();
+  await expect(toolDetails.getByText("Input", { exact: true })).toBeVisible();
+  await expect(toolDetails.getByText("Output", { exact: true })).toBeVisible();
+  await expect(toolDetails.getByText("/project/brief.md")).toBeVisible();
+
+  await expect(page.getByText("Thinking", { exact: true })).toBeVisible();
+  await expect(process).toHaveAttribute("open", "");
+  await expect(
+    page.getByText("I checked the brief and found the requested details."),
+  ).toBeVisible();
+  await expect(toolDetails.getByText("Project brief loaded")).toBeVisible();
+
+  await expect(page.getByText("Process", { exact: true })).toBeVisible();
+  await expect(process).not.toHaveAttribute("open", "");
+});
+
+test("approving an interrupt after a LangGraph message snapshot resumes", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "project-function-approval",
+    name: "Workflow creation",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "thread-function-approval",
+    projectId: project.id,
+    title: "Create a workflow",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+  const resumeRequests: unknown[] = [];
+  const failureMessages: string[] = [];
+
+  page.on("console", (message) => {
+    if (message.type() === "error") failureMessages.push(message.text());
+  });
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      if (input.resume) {
+        resumeRequests.push(input.resume);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: "assistant-function-approved",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: "assistant-function-approved",
+              delta: "Created the proposed Function.",
+            },
+            {
+              type: "TEXT_MESSAGE_END",
+              messageId: "assistant-function-approved",
+            },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "call-discover-functions",
+            toolCallName: "discover_project_functions",
+            parentMessageId: "message-discover-functions",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "call-discover-functions",
+            delta: "{}",
+          },
+          {
+            type: "TOOL_CALL_END",
+            toolCallId: "call-discover-functions",
+          },
+          {
+            type: "TOOL_CALL_RESULT",
+            messageId: "message-result-functions",
+            toolCallId: "call-discover-functions",
+            content: "[]",
+          },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "call-create-function",
+            toolCallName: "create_project_function",
+            parentMessageId: "message-create-function",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "call-create-function",
+            delta: JSON.stringify({
+              input_schema_json: "{}",
+              name: "Workflow step",
+              output_schema_json: "{}",
+              source: "def run(inputs): return inputs",
+            }),
+          },
+          { type: "TOOL_CALL_END", toolCallId: "call-create-function" },
+          {
+            type: "MESSAGES_SNAPSHOT",
+            messages: [
+              {
+                id: "message-discover-functions",
+                role: "assistant",
+                content: "",
+                toolCalls: [
+                  {
+                    id: "call-discover-functions",
+                    type: "function",
+                    function: {
+                      name: "discover_project_functions",
+                      arguments: "{}",
+                    },
+                  },
+                ],
+              },
+              {
+                id: "message-result-functions",
+                role: "tool",
+                toolCallId: "call-discover-functions",
+                content: "[]",
+              },
+              {
+                id: "message-create-function",
+                role: "assistant",
+                content: "",
+                toolCalls: [
+                  {
+                    id: "call-create-function",
+                    type: "function",
+                    function: {
+                      name: "create_project_function",
+                      arguments: JSON.stringify({
+                        input_schema_json: "{}",
+                        name: "Workflow step",
+                        output_schema_json: "{}",
+                        source: "def run(inputs): return inputs",
+                      }),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-create-function",
+                  reason: "tool_call",
+                  message: "Create the proposed Python Function?",
+                  toolCallId: "call-create-function",
+                  metadata: {
+                    agentHubLangChainHITL: {
+                      rawInterruptId: "interrupt-create-function",
+                      actionIndex: 0,
+                      allowedDecisions: ["approve", "reject"],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message").fill("Create a workflow");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByRole("region", { name: "Approve protected action" });
+  await expect(card).toContainText("Create the proposed Python Function?");
+  await card.getByRole("button", { name: "Approve" }).click();
+
+  await expect
+    .poll(() => resumeRequests)
+    .toEqual([
+      [
+        {
+          interruptId: "interrupt-create-function",
+          payload: { approved: true },
+          status: "resolved",
+        },
+      ],
+    ]);
+  await expect(page.getByText("Created the proposed Function.")).toBeVisible();
+  await expect(
+    page.getByText("The agent run failed. You can try sending again."),
+  ).toBeHidden();
+  expect(
+    failureMessages.some((message) =>
+      message.includes("respondToToolApproval: no pending interrupts"),
+    ),
+  ).toBe(false);
 });
 
 test("pending edit_file shows a diff and proposed file in the right preview", async ({
@@ -1972,7 +2346,7 @@ test("pending edit_file shows a diff and proposed file in the right preview", as
   });
 
   await page.goto("/");
-  await page.getByLabel("Message Agent Hub").fill("Revise the check");
+  await page.getByLabel("Message").fill("Revise the check");
   await page.getByRole("button", { name: "Send" }).click();
   const card = page.getByRole("region", {
     name: "Approve Project File change",

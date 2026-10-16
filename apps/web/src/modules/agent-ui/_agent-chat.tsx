@@ -1,6 +1,5 @@
 "use client";
 
-import { HttpAgent } from "@ag-ui/client";
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -8,6 +7,7 @@ import {
   generateId,
   MessagePrimitive,
   ThreadPrimitive,
+  useAui,
   type ThreadHistoryAdapter,
   type TextMessagePartProps,
   type ToolCallMessagePartProps,
@@ -45,6 +45,7 @@ import {
   type ProposedFileReview,
 } from "./_approval";
 import { shouldClearTransientRunError } from "./_run-state";
+import { InterruptSafeHttpAgent } from "./_interrupt-safe-agent";
 import styles from "./agent-ui.module.css";
 
 const OpenVirtualFileContext = createContext<(path: string) => void>(() => {});
@@ -218,7 +219,9 @@ function ToolCall({
                 disabled={submitting || !respondToApproval}
                 onClick={() => {
                   setSubmitting(true);
-                  respondToApproval?.({ approved: true });
+                  void respondToApproval?.({ approved: true }).catch(() =>
+                    setSubmitting(false),
+                  );
                 }}
                 type="button"
               >
@@ -228,10 +231,10 @@ function ToolCall({
                 disabled={submitting || !respondToApproval}
                 onClick={() => {
                   setSubmitting(true);
-                  respondToApproval?.({
+                  void respondToApproval?.({
                     approved: false,
                     reason: "Rejected by the user",
-                  });
+                  }).catch(() => setSubmitting(false));
                 }}
                 type="button"
               >
@@ -289,14 +292,124 @@ function ToolCall({
     );
   }
 
-  if (isApprovalOnlyTool(toolName)) return null;
+  return null;
+}
+
+type ProcessCall = {
+  args: unknown;
+  argsText: string;
+  approval?: ToolCallMessagePartProps["approval"];
+  isError?: boolean;
+  result?: unknown;
+  status?: ToolCallMessagePartProps["status"];
+  toolCallId: string;
+  toolName: string;
+};
+
+function formatToolName(name: string) {
+  return name
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatProcessValue(value: unknown) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function ProcessEntry({ call }: { call: ProcessCall }) {
+  const status = call.isError
+    ? "Failed"
+    : call.approval?.approved === false
+      ? "Rejected"
+      : call.approval?.approved === true
+        ? "Approved"
+        : call.result !== undefined
+          ? "Completed"
+          : call.status?.type === "running"
+            ? "Running"
+            : "Waiting";
+  if (call.approval && call.approval.approved === undefined) return null;
+  if (isApprovalOnlyTool(call.toolName)) return null;
 
   return (
-    <section className={styles.toolCall}>
-      <strong>{toolName}</strong>
-      <pre>{JSON.stringify(args, null, 2)}</pre>
-      {result !== undefined ? <p>{String(result)}</p> : null}
-    </section>
+    <details className={styles.processEntry}>
+      <summary>
+        <span>{formatToolName(call.toolName)}</span>
+        <span className={styles.processEntryStatus}>{status}</span>
+      </summary>
+      <div className={styles.processEntryDetails}>
+        {call.argsText ? (
+          <div>
+            <span className={styles.processFieldLabel}>Input</span>
+            <pre>{call.argsText}</pre>
+          </div>
+        ) : null}
+        {call.result !== undefined || call.status?.type === "running" ? (
+          <div>
+            <span className={styles.processFieldLabel}>
+              {call.isError ? "Error" : "Output"}
+            </span>
+            <pre>
+              {call.result === undefined
+                ? "Waiting for output…"
+                : formatProcessValue(call.result)}
+            </pre>
+          </div>
+        ) : null}
+        {call.approval?.reason ? <p>{call.approval.reason}</p> : null}
+      </div>
+    </details>
+  );
+}
+
+function ProcessDisclosure({
+  calls,
+  running,
+}: {
+  calls: ProcessCall[];
+  running: boolean;
+}) {
+  const visibleCalls = calls.filter(
+    (call) =>
+      !isApprovalOnlyTool(call.toolName) &&
+      !(call.approval && call.approval.approved === undefined),
+  );
+  if (visibleCalls.length === 0 && !running) return null;
+  const activeTool = visibleCalls.some(
+    (call) => call.status?.type === "running",
+  );
+
+  return (
+    <details className={styles.process} open={running}>
+      <summary>
+        <span className={running ? styles.processPulse : styles.processMark} />
+        <span>{running ? "Thinking" : "Process"}</span>
+        {running && activeTool ? (
+          <span className={styles.processActivity}>Using tools</span>
+        ) : null}
+        {visibleCalls.length > 0 ? (
+          <span className={styles.processCount}>
+            {visibleCalls.length} {visibleCalls.length === 1 ? "step" : "steps"}
+          </span>
+        ) : null}
+      </summary>
+      {visibleCalls.length > 0 ? (
+        <div className={styles.processEntries}>
+          {visibleCalls.map((call) => (
+            <ProcessEntry call={call} key={call.toolCallId} />
+          ))}
+        </div>
+      ) : (
+        <p className={styles.processWaiting}>
+          The model is preparing its response.
+        </p>
+      )}
+    </details>
   );
 }
 
@@ -306,20 +419,134 @@ function Message() {
 
   return (
     <MessagePrimitive.Root
-      aria-label={isUser ? "You" : "Agent Hub"}
       className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}
       data-role={role}
     >
-      <span className={styles.messageAuthor}>
-        {isUser ? "You" : "Agent Hub"}
-      </span>
       <MessagePrimitive.Parts
-        components={{ Text: TextPart, tools: { Fallback: ToolCall } }}
+        components={{ Text: TextPart, tools: { Fallback: () => null } }}
       />
       <span className={styles.messageError}>
         <MessagePrimitive.Error />
       </span>
     </MessagePrimitive.Root>
+  );
+}
+
+function ConversationMessages() {
+  const messages = useAuiState((state) => state.thread.messages);
+  const isRunning = useAuiState((state) => state.thread.isRunning);
+  const turns = useMemo(() => {
+    const result: Array<{
+      indices: number[];
+      calls: ProcessCall[];
+      role: string;
+    }> = [];
+    let index = 0;
+    while (index < messages.length) {
+      const first = messages[index];
+      const indices = [index];
+      const calls: ProcessCall[] = [];
+      if (first.role === "assistant") {
+        let cursor = index;
+        while (
+          cursor < messages.length &&
+          messages[cursor].role === "assistant"
+        ) {
+          indices.push(...(cursor === index ? [] : [cursor]));
+          for (const part of messages[cursor].parts) {
+            if (part.type === "tool-call") calls.push(part);
+          }
+          cursor += 1;
+        }
+        result.push({ indices, calls, role: "assistant" });
+        index = cursor;
+      } else {
+        result.push({ indices, calls, role: first.role });
+        index += 1;
+      }
+    }
+    return result;
+  }, [messages]);
+
+  const visibleTurns =
+    isRunning && turns.at(-1)?.role !== "assistant"
+      ? [...turns, { indices: [], calls: [], role: "assistant" }]
+      : turns;
+
+  return (
+    <>
+      {visibleTurns.map((turn, turnIndex) => (
+        <div
+          className={styles.turn}
+          key={messages[turn.indices[0]]?.id ?? "active-process"}
+        >
+          {turn.role === "assistant" ? (
+            <ProcessDisclosure
+              calls={turn.calls}
+              running={isRunning && turnIndex === visibleTurns.length - 1}
+            />
+          ) : null}
+          {turn.indices.map((messageIndex) => (
+            <ThreadPrimitive.MessageByIndex
+              components={{ Message }}
+              index={messageIndex}
+              key={messages[messageIndex]?.id}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ApprovalDock() {
+  const aui = useAui();
+  const messages = useAuiState((state) => state.thread.messages);
+  const approvals = useMemo(
+    () =>
+      messages.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          if (
+            part.type !== "tool-call" ||
+            !part.approval ||
+            part.approval.approved !== undefined
+          ) {
+            return [];
+          }
+          return [{ messageId: message.id, part }];
+        }),
+      ),
+    [messages],
+  );
+  if (approvals.length === 0) return null;
+
+  return (
+    <section aria-label="Pending approvals" className={styles.approvalDock}>
+      {approvals.map(({ messageId, part }) => (
+        <ToolCall
+          {...part}
+          key={part.toolCallId}
+          addResult={(result) =>
+            aui.thread
+              .message({ id: messageId })
+              .part({ toolCallId: part.toolCallId })
+              .addToolResult(result)
+          }
+          resume={(payload) =>
+            aui.thread
+              .message({ id: messageId })
+              .part({ toolCallId: part.toolCallId })
+              .resumeToolCall(payload)
+          }
+          respondToApproval={(response) =>
+            aui.thread
+              .message({ id: messageId })
+              .part({ toolCallId: part.toolCallId })
+              .respondToToolApproval(response)
+          }
+        />
+      ))}
+    </section>
   );
 }
 
@@ -458,7 +685,7 @@ export function AgentChat({
   >({});
   const agent = useMemo(
     () =>
-      new HttpAgent({
+      new InterruptSafeHttpAgent({
         threadId,
         url: `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/agent`,
       }),
@@ -499,7 +726,6 @@ export function AgentChat({
                   <ThreadPrimitive.Viewport className={styles.viewport}>
                     <ThreadPrimitive.Empty>
                       <div className={styles.empty}>
-                        <p className={styles.eyebrow}>Agent Hub</p>
                         <h1>What are we working on?</h1>
                         <p>
                           This Thread keeps its own conversation state within
@@ -507,21 +733,22 @@ export function AgentChat({
                         </p>
                       </div>
                     </ThreadPrimitive.Empty>
-                    <ThreadPrimitive.Messages components={{ Message }} />
+                    <ConversationMessages />
                     <RunStatus
                       onSuccessfulRun={() => setError(null)}
                       runsUrl={runsUrl}
                     />
                     {error ? <p className={styles.runError}>{error}</p> : null}
                     <ThreadPrimitive.ViewportFooter className={styles.footer}>
+                      <ApprovalDock />
                       <ComposerPrimitive.Root
                         className={styles.composer}
                         onSubmit={captureUserMessage}
                       >
                         <ComposerPrimitive.Input
-                          aria-label="Message Agent Hub"
+                          aria-label="Message"
                           className={styles.input}
-                          placeholder="Ask Agent Hub…"
+                          placeholder="Ask a question or describe a task…"
                           rows={2}
                         />
                         <div className={styles.actions}>
