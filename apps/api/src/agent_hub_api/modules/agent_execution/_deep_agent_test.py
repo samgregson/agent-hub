@@ -303,13 +303,11 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             "workflow_id": created["id"],
             "name": "Invalid revision",
             "expected_version": 1,
-            "graph_json": json.dumps(
-                {
-                    "nodes": {"input": {"type": "input"}},
-                    "edges": [],
-                    "outputs": {"result": "input"},
-                }
-            ),
+            "graph_json": {
+                "nodes": {"input": {"type": "input"}},
+                "edges": [],
+                "outputs": {"result": "input"},
+            },
         }
     )
     assert "Workflow graph is invalid" in invalid_revision
