@@ -299,7 +299,7 @@ test("two Threads complete the foundation Artifact flow", async ({
   await expect(
     page.getByRole("region", { name: "Approve Project File change" }),
   ).toContainText("Approved");
-  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: "Library", exact: true }).click();
   await page
     .getByRole("button", { exact: true, name: "Bridge status" })
     .click();
@@ -308,7 +308,7 @@ test("two Threads complete the foundation Artifact flow", async ({
   ).toHaveText("unavailable");
   await page.reload();
   await page.getByLabel("Selected Project").selectOption(project.id);
-  await page.getByRole("button", { name: "Work" }).click();
+  await page.getByRole("button", { name: "Library", exact: true }).click();
   await page
     .getByRole("button", { exact: true, name: "Bridge status" })
     .click();

@@ -24,7 +24,7 @@ apps/web/src/
     workspace/                 # Project selection, navigation and panel state
     agent-ui/                  # assistant-ui composition and AG-UI adapter
     artifact-view-host/        # trusted chrome, sandbox host and fallback view
-    operation-calls/           # review/start and result inspection for Python and MCP calls
+    functions/                 # Python Function authoring and transient preview
     workflows/                 # Workflow route forwarding, Definition editing, overview, and Run inspection
   shared/
     config/                    # validated browser/server configuration
@@ -40,15 +40,13 @@ apps/api/src/agent_hub_api/
     agent_transport/           # Project-authorized AG-UI orchestration and transport
     project_files/             # project-scoped Deep Agents filesystem
     call_review/               # common review shape for Python and MCP call plans
-    input_selection/           # bounded source-neutral value selection rules
-    transform_inputs/          # coordinates retained Result Set and MCP output into Transform Runs
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
-    transforms/                # Project Transform Definitions, previews, and durable Runs
+    functions/                 # Python Function authoring, contracts, previews and Workflow execution
     workflows/                 # versioned Definitions, graph validation, Run snapshots and orchestration
     persistence/               # shared transaction and database facilities
 
-apps/transform-runner/         # isolated Deno/Pyodide execution service
+apps/python-runner/         # isolated Deno/Pyodide execution service
 ```
 
 Only directories needed by the current slice are created. Calculation, diagram, unit, and structural-engineering Modules remain Plugin work after the foundation.
@@ -100,17 +98,17 @@ Additionally:
 
 These directions should be enforced by TypeScript restricted-import rules, Python import checks, and contract tests as the corresponding Modules appear.
 
-`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Input Selection is a lower Module containing only source-neutral selection rules and value identities. Dataset, Transform, Batch Execution, Workflow, and Artifact keep authority over their own records, authorization, and durable Runs. Transform Inputs coordinates the two Dataset execution modes and retained Batch Result Set and MCP Tool Result Snapshot values through the Dataset, Batch Execution, Artifact, and Transform Interfaces; it owns cross-source review and provenance without moving those decisions into `main.py`.
+`pnpm architecture:check` checks package-root imports and both API and web Module graphs for cycles. Tests and composition roots may import multiple Module Interfaces; their edges do not define production Module dependencies. Batch Execution, Batch Definition APIs, Input Selection, Transform Runs, and selector-based Function inputs have been removed. The ownership model has Dataset for records, Function for Python source and transient previews, Workflow for bindings and durable execution, and Plugin Gateway for MCP calls.
 
 ## Frontend ownership
 
 The Workspace Module owns selected Project, activity view, selected Thread, selected Artifact or Source, and panel state. Project-scoped state is keyed by Project so switching Projects clears the visible selection and switching back can restore that Project's state.
 
-The Operation Calls web Module owns the shared review/start presentation for direct Python Function and MCP tool calls, including explicit Map calls. It consumes the owning backend Modules' plans and displays their retained Run results; it does not authorize or execute a call itself.
+The Workspace renders the Functions destination and the Workflow surface. Functions owns authoring and transient preview; MCP call setup and Map policy belong in Workflow. The separate Operation Calls catalog and direct Function Run routes have been removed.
 
-The Call Review API Module defines the common read-only review envelope for those four call shapes. Transform and Batch Execution still own planning, submission, authorization, and execution; the envelope captures their target, source, named ports, exact inputs, invocation bound, output kind, and agent approval rule.
+The Call Review API Module defines a shared read-only review envelope used by Workflow preparation. Workflow owns graph call planning and invocation policy while Functions stays focused on authoring and testing.
 
-The Workflow Module owns saved Project graph definitions, version checks, and static port/cardinality/cycle validation. It resolves Project File and Dataset inputs, Function targets, and MCP targets through those Modules' Interfaces. A prepared Workflow Run pins the exact graph, Project File text and version, Dataset Record IDs and values, Function source and runtime identity, MCP schema and version, initiator, and request key. DAG execution schedules up to four dependency-ready nodes concurrently and applies one four-call limit across Map items and single calls. Checkpoint writes are serialized while node inputs, outputs, MCP target identities, and child Python Run IDs are retained. MCP Map dispatch validates its first item before fanning out. Startup marks active Runs interrupted; resumption reuses completed node and Map-item checkpoints, with deterministic child Run IDs for Python calls. A single MCP call with an unknown outcome is terminal and is never replayed automatically; repeat-safe MCP Map items may resume. Call execution remains with Transform and Plugin Gateway.
+The Workflow Module owns saved Project graph definitions, version checks, and static port/cardinality/cycle validation. It resolves Project File and Dataset inputs, Function targets, and MCP targets through those Modules' Interfaces. A prepared Workflow Run pins the exact graph, Project File text and version, Dataset Record IDs and values, Function source and runtime identity, MCP schema and version, initiator, and request key. DAG execution schedules up to four dependency-ready nodes concurrently and applies one four-call limit across Map items and single calls. Checkpoint writes are serialized while step inputs, outputs, MCP target identities, and Function failures are retained. Python Functions execute as captured Workflow steps without child Run records. MCP Map dispatch validates its first item before fanning out. Startup marks active Runs interrupted; resumption reuses completed step and Map-item checkpoints. A single MCP call with an unknown outcome is terminal and is never replayed automatically; repeat-safe MCP Map items may resume. Function execution remains with the Function Module and MCP calls with Plugin Gateway.
 
 Next.js pages render the Workspace Interface. They do not accumulate fetching, selection state, panel coordination, or assistant-ui behaviour. Views, state transitions, hooks, and tests stay beside the Module that owns them. `shared/ui` contains only presentation primitives with no product vocabulary.
 

@@ -85,13 +85,6 @@ function checkPythonModulePath(path, moduleName, importedPath) {
   if (!path.endsWith("_test.py")) {
     addDependency(apiDependencies, moduleName, importedModule);
   }
-  if (
-    moduleName === "input_selection" &&
-    importedModule !== moduleName &&
-    !path.endsWith("_test.py")
-  ) {
-    report(path, "Input Selection must not import source or execution Modules");
-  }
   if (importedModule === moduleName || !subpath.length) return;
 
   const kind = subpath[0].startsWith("_")

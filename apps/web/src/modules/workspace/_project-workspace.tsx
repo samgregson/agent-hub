@@ -17,9 +17,8 @@ import {
   ScratchFilePreview,
 } from "@/modules/agent-ui";
 import { ArtifactDocumentPreview } from "@/modules/artifact-view-host";
-import { DatasetCatalog, DatasetFilePreview } from "@/modules/datasets";
-import { OperationCallCatalog } from "@/modules/operation-calls";
-import { TransformCatalog } from "@/modules/transforms";
+import { DatasetFilePreview } from "@/modules/datasets";
+import { FunctionCatalog } from "@/modules/functions";
 import { ProjectFilePreview } from "@/modules/project-files";
 import { PluginCatalog } from "@/modules/plugin-gateway";
 import { Menu, MenuItem } from "@/shared/ui";
@@ -42,7 +41,6 @@ import {
 } from "./_thread-title";
 import {
   type ActivityView,
-  type OperationKind,
   activityViews,
   createWorkspaceState,
   workspaceReducer,
@@ -54,7 +52,7 @@ const activityLabels = {
   workflows: "Workflow",
   artifacts: "Library",
   chats: "Chats",
-  operations: "Operations",
+  functions: "Functions",
   plugins: "Plugins",
   sources: "Sources",
 } as const;
@@ -78,14 +76,9 @@ export function ProjectWorkspace() {
     undefined,
     createWorkspaceState,
   );
-  const selectTransformDefinition = useCallback(
-    (definitionId: string | null) =>
-      dispatch({ definitionId, type: "selectTransformDefinition" }),
-    [],
-  );
-  const selectTransformRunScope = useCallback(
-    (runScope: string) =>
-      dispatch({ runScope, type: "selectTransformRunScope" }),
+  const selectFunction = useCallback(
+    (functionId: string | null) =>
+      dispatch({ functionId, type: "selectFunction" }),
     [],
   );
   const [threadsByProject, setThreadsByProject] = useState<
@@ -98,6 +91,9 @@ export function ProjectWorkspace() {
   );
   const [isCreating, setIsCreating] = useState(false);
   const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
+  const [projectCreationError, setProjectCreationError] = useState<
+    string | null
+  >(null);
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [navigatorWidth, setNavigatorWidth] = useState(256);
   const isResizingNavigator = useRef(false);
@@ -139,7 +135,7 @@ export function ProjectWorkspace() {
     ? workspace.projects[workspace.selectedProjectId]
     : undefined;
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
-  const isExplorerActivity = ["operations", "plugins", "sources"].includes(
+  const isExplorerActivity = ["functions", "plugins", "sources"].includes(
     selectedActivity,
   );
   const isWorkflowActivity = selectedActivity === "workflows";
@@ -226,17 +222,25 @@ export function ProjectWorkspace() {
     const name = typeof submittedName === "string" ? submittedName.trim() : "";
     if (!name) return;
 
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     setIsCreating(true);
     setError(null);
+    setProjectCreationError(null);
     try {
-      const project = await createProject(name);
+      const project = await createProject(name, controller.signal);
       setProjects((current) => [project, ...current]);
       dispatch({ projectId: project.id, type: "selectProject" });
       form.reset();
       setIsNewProjectDialogOpen(false);
     } catch {
-      setError("The Project could not be created.");
+      setProjectCreationError(
+        controller.signal.aborted
+          ? "Project creation timed out. Check your Projects list before trying again."
+          : "The Project could not be created. Try again.",
+      );
     } finally {
+      window.clearTimeout(timeout);
       setIsCreating(false);
     }
   }
@@ -385,6 +389,7 @@ export function ProjectWorkspace() {
               disabled={!isInteractive}
               onChange={(event) => {
                 if (event.target.value === "new-project") {
+                  setProjectCreationError(null);
                   setIsNewProjectDialogOpen(true);
                   return;
                 }
@@ -458,6 +463,11 @@ export function ProjectWorkspace() {
                 required
               />
             </label>
+            {projectCreationError ? (
+              <p className={styles.error} role="alert">
+                {projectCreationError}
+              </p>
+            ) : null}
             <div className={styles.newProjectDialogActions}>
               <button
                 className={styles.newProjectCancel}
@@ -499,7 +509,6 @@ export function ProjectWorkspace() {
       <aside className={styles.navigator} ref={navigatorRef}>
         <ProjectNavigator
           libraryRefreshKey={libraryRefreshKey}
-          operationKind={selectedWorkspace?.operationKind ?? "batchDefinitions"}
           onCreateThread={() => void handleCreateThread()}
           onDeleteThread={(thread) => void handleDeleteThread(thread)}
           onOpenArtifact={(artifactId) =>
@@ -509,22 +518,15 @@ export function ProjectWorkspace() {
           onOpenProjectFile={(path) =>
             dispatch({ path, type: "openProjectFile" })
           }
-          onSelectOperationKind={(operationKind) =>
-            dispatch({ operationKind, type: "selectOperationKind" })
-          }
-          onSelectTransformDefinition={selectTransformDefinition}
-          onSelectTransformRunScope={selectTransformRunScope}
+          onSelectFunction={selectFunction}
           onSelectThread={(threadId) =>
             dispatch({ threadId, type: "selectThread" })
           }
           project={selectedProject}
           selectedActivity={selectedActivity}
           selectedThreadId={selectedThread?.id}
-          selectedTransformDefinitionId={
-            selectedWorkspace?.selectedTransformDefinitionId ?? null
-          }
+          selectedFunctionId={selectedWorkspace?.selectedFunctionId ?? null}
           threads={selectedThreads}
-          transformRunScope={selectedWorkspace?.transformRunScope ?? null}
         />
         <div
           aria-label="Resize Project navigator"
@@ -565,7 +567,7 @@ export function ProjectWorkspace() {
           />
           <aside
             aria-label="Project navigation"
-            className={`${styles.mobileNavigationDrawer} ${selectedActivity === "operations" && (selectedWorkspace?.operationKind === "transforms" || selectedWorkspace?.operationKind === "calls") ? styles.mobileNavigationDrawerWide : ""}`}
+            className={`${styles.mobileNavigationDrawer} ${selectedActivity === "functions" ? styles.mobileNavigationDrawerWide : ""}`}
             id="mobile-project-navigation"
             role="dialog"
           >
@@ -597,9 +599,6 @@ export function ProjectWorkspace() {
             <div className={styles.mobileNavigatorContent}>
               <ProjectNavigator
                 libraryRefreshKey={libraryRefreshKey}
-                operationKind={
-                  selectedWorkspace?.operationKind ?? "batchDefinitions"
-                }
                 onCreateThread={() => void handleCreateThread()}
                 onDeleteThread={(thread) => void handleDeleteThread(thread)}
                 onOpenArtifact={(artifactId) => {
@@ -611,11 +610,7 @@ export function ProjectWorkspace() {
                   dispatch({ path, type: "openProjectFile" });
                   setIsMobileNavigationOpen(false);
                 }}
-                onSelectOperationKind={(operationKind) =>
-                  dispatch({ operationKind, type: "selectOperationKind" })
-                }
-                onSelectTransformDefinition={selectTransformDefinition}
-                onSelectTransformRunScope={selectTransformRunScope}
+                onSelectFunction={selectFunction}
                 onSelectThread={(threadId) => {
                   dispatch({ threadId, type: "selectThread" });
                   setIsMobileNavigationOpen(false);
@@ -623,11 +618,10 @@ export function ProjectWorkspace() {
                 project={selectedProject}
                 selectedActivity={selectedActivity}
                 selectedThreadId={selectedThread?.id}
-                selectedTransformDefinitionId={
-                  selectedWorkspace?.selectedTransformDefinitionId ?? null
+                selectedFunctionId={
+                  selectedWorkspace?.selectedFunctionId ?? null
                 }
                 threads={selectedThreads}
-                transformRunScope={selectedWorkspace?.transformRunScope ?? null}
               />
             </div>
           </aside>
@@ -639,17 +633,12 @@ export function ProjectWorkspace() {
           <WorkflowOverview
             onOpenChats={() => handleSelectActivity("chats")}
             onOpenLibrary={() => handleSelectActivity("artifacts")}
-            onOpenOperations={(node) => {
-              const operationKind =
-                node.kind === "python" ? "transforms" : "calls";
-              dispatch({ operationKind, type: "selectOperationKind" });
-              if (node.kind === "python") {
-                dispatch({
-                  definitionId: node.refId,
-                  type: "selectTransformDefinition",
-                });
-              }
-              handleSelectActivity("operations");
+            onOpenFunction={(node) => {
+              dispatch({
+                functionId: node.refId,
+                type: "selectFunction",
+              });
+              handleSelectActivity("functions");
             }}
             projectId={selectedProject.id}
           />
@@ -758,42 +747,34 @@ export function ProjectWorkspace() {
 
 interface ProjectNavigatorProps {
   libraryRefreshKey: number;
-  operationKind: OperationKind;
   onCreateThread: () => void;
   onDeleteThread: (thread: Thread) => void;
   onOpenArtifact: (artifactId: string) => void;
   onOpenProjectFile: (path: string) => void;
-  onSelectOperationKind: (operationKind: OperationKind) => void;
-  onSelectTransformDefinition: (definitionId: string | null) => void;
-  onSelectTransformRunScope: (runScope: string) => void;
+  onSelectFunction: (definitionId: string | null) => void;
   onRenameThread: (thread: Thread) => void;
   onSelectThread: (threadId: string) => void;
   project: Project | undefined;
   selectedActivity: ActivityView;
   selectedThreadId: string | undefined;
-  selectedTransformDefinitionId: string | null;
+  selectedFunctionId: string | null;
   threads: Thread[];
-  transformRunScope: string | null;
 }
 
 function ProjectNavigator({
   libraryRefreshKey,
-  operationKind,
   onCreateThread,
   onDeleteThread,
   onOpenArtifact,
   onOpenProjectFile,
-  onSelectOperationKind,
-  onSelectTransformDefinition,
-  onSelectTransformRunScope,
+  onSelectFunction,
   onRenameThread,
   onSelectThread,
   project,
   selectedActivity,
   selectedThreadId,
-  selectedTransformDefinitionId,
+  selectedFunctionId,
   threads,
-  transformRunScope,
 }: ProjectNavigatorProps) {
   return (
     <>
@@ -842,15 +823,12 @@ function ProjectNavigator({
           projectId={project.id}
           refreshKey={libraryRefreshKey}
         />
-      ) : selectedActivity === "operations" && project ? (
-        <OperationsCatalog
-          onSelectKind={onSelectOperationKind}
-          onSelectTransformDefinition={onSelectTransformDefinition}
-          onSelectTransformRunScope={onSelectTransformRunScope}
-          operationKind={operationKind}
+      ) : selectedActivity === "functions" && project ? (
+        <FunctionCatalog
+          key={project.id}
+          onSelectFunction={onSelectFunction}
           projectId={project.id}
-          selectedTransformDefinitionId={selectedTransformDefinitionId}
-          transformRunScope={transformRunScope}
+          selectedFunctionId={selectedFunctionId}
         />
       ) : selectedActivity === "plugins" && project ? (
         <PluginCatalog projectId={project.id} />
@@ -860,70 +838,6 @@ function ProjectNavigator({
             ? `${activityLabels[selectedActivity]} in ${project.name}`
             : "Create or select a Project to begin."}
         </p>
-      )}
-    </>
-  );
-}
-
-function OperationsCatalog({
-  onSelectKind,
-  onSelectTransformDefinition,
-  onSelectTransformRunScope,
-  operationKind,
-  projectId,
-  selectedTransformDefinitionId,
-  transformRunScope,
-}: {
-  onSelectKind: (operationKind: OperationKind) => void;
-  onSelectTransformDefinition: (definitionId: string | null) => void;
-  onSelectTransformRunScope: (runScope: string) => void;
-  operationKind: OperationKind;
-  projectId: string;
-  selectedTransformDefinitionId: string | null;
-  transformRunScope: string | null;
-}) {
-  return (
-    <>
-      <nav aria-label="Operation types" className={styles.operationTypes}>
-        <button
-          aria-pressed={operationKind === "calls"}
-          onClick={() => onSelectKind("calls")}
-          type="button"
-        >
-          Calls
-        </button>
-        <button
-          aria-pressed={operationKind === "batchDefinitions"}
-          onClick={() => onSelectKind("batchDefinitions")}
-          type="button"
-        >
-          Batch Definitions
-        </button>
-        <button
-          aria-pressed={operationKind === "transforms"}
-          onClick={() => onSelectKind("transforms")}
-          type="button"
-        >
-          Functions
-        </button>
-      </nav>
-      {operationKind === "calls" ? (
-        <OperationCallCatalog key={projectId} projectId={projectId} />
-      ) : operationKind === "batchDefinitions" ? (
-        <DatasetCatalog
-          key={projectId}
-          mode="definitions"
-          projectId={projectId}
-        />
-      ) : (
-        <TransformCatalog
-          key={projectId}
-          onSelectDefinition={onSelectTransformDefinition}
-          onSelectRunScope={onSelectTransformRunScope}
-          projectId={projectId}
-          runScope={transformRunScope}
-          selectedDefinitionId={selectedTransformDefinitionId}
-        />
       )}
     </>
   );

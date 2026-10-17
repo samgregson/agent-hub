@@ -4,7 +4,7 @@
 
 This is the decision-complete architecture for the general-purpose Agent Hub foundation. It reconciles the domain model, ADRs, research, security model, and validated workspace prototype. The foundation deliberately excludes production calculation, unit, diagram, and structural-engineering logic.
 
-ADR 0013 sets the execution model: Workflow steps call reusable Python Functions or permitted MCP tools, and an explicit Map policy repeats an item-input target over a collection. Workflows connect versioned Project Files, Datasets, Functions, and MCP tools through named graph edges. A Function owns its code and contracts; each Workflow step owns its input connections and invocation policy. The former Binding Module and file-to-argument records were retired when Workflow edges covered the shared-file-input use case; do not reintroduce a parallel binding graph.
+ADR 0013 sets the execution model: Workflow steps call reusable Python Functions or permitted MCP tools, and an explicit Map policy repeats an item-input target over a collection. Workflow graph bindings connect versioned Project Files, Datasets, upstream outputs, per-run Workflow Inputs, literals, Functions, and MCP tools. Bindings can select fields with RFC 6901 JSON Pointers and assemble nested inputs. A Function owns its code and contracts; each Workflow step owns its input bindings and invocation policy. Do not add a separate Binding Module or adapter Functions for routine field alignment.
 
 The word **Module** means a cohesive capability behind one small Interface. Internal classes and packages are implementation details unless they cross a seam described below.
 
@@ -70,11 +70,8 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Project Virtual Filesystem | Agent Hub                                       | Project-scoped PostgreSQL records exposed through a Deep Agents backend              |
 | Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
 | Dataset                    | Agent Hub Dataset Module                        | Registered typed Project VFS document plus query projection                          |
-| Batch Definition           | Agent Hub                                       | Project-scoped PostgreSQL records                                                     |
 | Workflow Definition / Run  | Agent Hub Workflow Module                       | Project-scoped graph and immutable execution snapshots                                |
-| Batch Run / Result Set     | Agent Hub                                       | PostgreSQL execution and result records                                               |
-| Transform Definition       | Agent Hub                                       | Project-scoped PostgreSQL definition record                                           |
-| Transform Run              | Agent Hub                                       | Project-scoped PostgreSQL snapshot and outcome record                                 |
+| Function                   | Agent Hub Function Module                       | Project-scoped Python source and contracts                                            |
 | Plugin definition          | Deployment-controlled catalog                   | Version-controlled manifest                                                          |
 | Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
 | Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
@@ -85,7 +82,7 @@ The Artifact catalog projection may repeat queryable envelope fields, but it is 
 
 ### Workspace Module — web
 
-Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The navigation target is Workflow, Chats, Library, Functions, Sources, and Plugins. Workflow is the primary task surface: users inspect and run the project DAG, follow data lineage, and open step inputs or outputs when needed. Its graph owns bindings and Map policy. Functions is the Python authoring and testing surface; enabled MCP tools remain distinct call targets available to Workflow steps. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers. The current Operations catalog and separate Transform/Batch Definition flows are transitional surfaces to consolidate under this model; the cleanup is tracked separately. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
+Owns the selected Project, activity view, selected Thread, selected Library item or Source, and panel layout. Project selection sits above the workspace. The navigation is Workflow, Chats, Library, Functions, Sources, and Plugins. Workflow is the primary task surface: users inspect and run the project DAG, follow data lineage, and open step inputs or outputs when needed. Its graph owns bindings and Map policy. Functions is for Python authoring and transient testing; enabled MCP tools remain distinct call targets available to Workflow steps. Library groups ordinary Project Files, registered Datasets, and Artifacts with distinct viewers. A Plugin may contribute a reviewed rail view, but installation alone does not create one.
 
 Its Interface is application state plus navigation commands. It does not know how the agent runs or how a Plugin validates an Artifact.
 
@@ -147,47 +144,17 @@ apply(context, artifact_id | new, semantic_operation, expected_version?) -> save
 
 `apply` resolves the responsible Plugin, sends the complete portable document and semantic operation, rejects malformed or invalid replacements, restores host-controlled envelope fields, and commits the updated current document atomically. `documentVersion` is an internal concurrency token; it does not imply retained revisions or a user-facing version browser.
 
-### Dataset and Batch Execution Modules — API
+### Dataset Module — API
 
-The Dataset Module owns Dataset files and Batch Definition persistence. The Batch Execution Module owns immutable Batch Run snapshots, bounded dispatch, Result Set persistence, progress, and result queries. Their Interfaces stay host-oriented and compact:
+Owns registered Dataset files, stable Record IDs and order, validation, and edits. A Workflow captures the selected Dataset version and exact ordered Record values before execution. Workflow execution never edits its input Dataset. Batch Definition routes and Batch Execution have been removed; migration 0028 drops their legacy tables.
 
-```text
-save_dataset(context, draft) -> Dataset
-save_definition(context, draft) -> Batch Definition
-start(context, definition, selection, initiator, idempotency_key) -> Batch Run
-inspect(context, batch_run_id, query?) -> Batch Run summary / Result page
-archive(context, batch_run_id) -> archived Batch Run summary
-```
+### Function Module — API
 
-`start` captures the Dataset file path and version, selected Record IDs and complete values, the Batch Definition or direct Transform target, its MCP tool/schema or Transform source/runtime/package identity, policy, and initiator before execution. MCP Batch starts invoke one real selected record first; a failure or schema-invalid response stops fan-out, while later failures produce an explicitly partial Result Set. Direct per-Record Transform starts execute every Record independently and retain partial or failed outcomes as appropriate. MCP targets accept only catalogued repeat-safe tools; Transform targets use the same isolated runner as previews and single Runs. Execution uses host-configured bounded concurrency and does not provide cancellation or retry in the first pass. A Result Set retains normalized inputs and complete structured outputs within explicit limits, but is not an Artifact unless a user or approved agent explicitly saves a curated conclusion. Completed Batch Runs are immutable; `archive` hides a run from normal workspace views without deleting its Result Set or provenance.
-
-The first ADR 0013 Map slice also reviews and starts a direct permitted MCP tool over tool-ready Dataset Records without persisting a Batch Definition. Batch Execution captures the exact ordered Records, Dataset version, MCP target and schemas, validates each input, and reuses its bounded executor and Result Set store. This is an execution entry point for the same Batch Run owner, not a second batch engine or a new Dataset-owned mapping rule.
-
-A direct single MCP call also uses Batch Execution's durable Run store with one captured input and result. Its review plan validates ordinary JSON arguments against the enabled tool's schema, shows the catalogued Plugin version, and checks that version again at start. The executor invokes Plugin Gateway's ordinary call path, so single calls do not require the tool's repeat-safe batch permission. Agent starts require approval and retain Agent Run provenance; the existing Run and Result inspection Interface exposes the one output or error.
-
-An explicit Python Function Map over Dataset Records uses the same bounded Batch executor and Result Set store. The Function must declare one named input; each ordered Record's whole value is supplied at that input without applying legacy JSON Pointer selectors. The review plan shows exact Record values and identities, Dataset version, Function revision and runtime, invocation count, and output kind. Start rechecks both versions and captures source, parameters, limits, initiator, and approval. Each output or error remains linked to its Dataset Record ID. Workflow edges can later provide other bounded collections without changing the Function runner.
-
-Agent-proposed Dataset saves, definition changes, and `start` calls pause at the existing LangGraph approval interrupt. An approved Batch start uses the Thread and tool-call identities as its idempotency key, so replay across Agent Runs returns the original Batch Run. Runs retain whether a direct user or approved agent started them, with the Agent Run and approval context when applicable; historical Runs have an explicit unknown marker. The Agent Run may await a short bounded completion window; otherwise it receives a Batch Run reference and ends normally. The executor outlives the AG-UI stream, and later runs discover compact summaries and inspect bounded Result Set pages through host tools.
-
-### Input Selection Module — API
-
-Owns source-neutral bounded filter, sort, and limit rules over ordered JSON values. Its Interface accepts source values with stable identities and positions and returns the exact selected members or an explicit validation error. It does not load Dataset, Result Set, or operation records, authorize Project access, choose invocation cardinality, or persist Runs. Source owners provide values and provenance through their own package-root Interfaces; the Run owner captures both before execution. This dependency direction is recorded in [ADR 0011](../adr/0011-keep-input-selection-source-neutral.md).
-
-### Transform Module — API
-
-The Transform Inputs Module coordinates retained Batch Result Sets and MCP Tool Result Snapshot Artifacts with a downstream Transform through their owning Interfaces. It projects structured outputs, applies a bounded Input Selection rule, and reviews one collection-to-one Transform invocation. For Result Sets, the Transform can select values or row envelopes containing stable Result Record identity, Dataset Record ID, source key, original input, and position. For MCP output, the plan requires a reviewed Artifact version and captures its ID, producer, output path, selected positions, values, and rule. The durable Transform Run captures the selected input and source derivation. Batch Execution and Artifact retain source ownership; Transform retains validation and Run execution. Agent starts use the existing approval interrupt.
-
-Owns Project-scoped Python Function Definitions and Transform Runs. Its Interface validates, creates, lists, loads, revises, and deletes definitions; previews a definition against explicit JSON input; plans a versioned Dataset Record or retained Transform output selection; starts a durable Run; and loads or pages retained Runs. It uses the Input Selection Module for shared bounded rules while retaining source lookup, Project authorization, snapshots, input and output contracts, and Run execution. A definition stores source, declared JSON input selectors, a JSON Schema for its named `inputs` object, output schema, source hash, and revision. The same input schema validates selector-resolved Transform inputs and direct Function calls. FastAPI routes translate requests only.
-
-The same Module also plans and starts a direct Python Function call with named JSON inputs. The names currently come from a Function Definition's declared input schema; direct calls supply already resolved values and do not apply the selectors. Planning exposes the exact inputs and Definition revision; starting checks that revision and input contract, uses the pinned runner and existing Transform Run store, and captures the call kind and inputs. The agent's durable start crosses an approval interrupt. The Workflow Module resolves the same versioned contract and checks each edge against its destination input schema before saving or running a graph.
-
-The Dataset-facing Transform run Interface is one reviewed action with Dataset-wide and per-Record execution modes (ADR 0012). Transform Inputs coordinates the Dataset, Transform, and Batch Execution Interfaces. Its plan captures the Dataset version, ordered Record IDs, Transform revision, invocation count, and output kind. Dataset-wide execution invokes Pyodide once and retains a Transform Run; per-Record execution invokes each Record independently and retains a Batch Result Set without requiring a separate Batch Definition. Parameters apply in both modes. Source-neutral Input Selection also serves retained operation outputs.
-
-Both previews and durable Runs execute through the same internal Deno-hosted Pyodide service. Each invocation starts a fresh restricted child process inside an offline, read-only container with CPU, memory, timeout, input, output, and concurrency limits. The Python API has no Python-source execution path. Definitions pin the runner's Deno/Pyodide identity and package-lock hash when saved; a Run captures and checks them before execution. Durable Runs retain the source/definition and selected input snapshots, their hashes, initiator and approval context, enforced request limits, runtime identity, outcome, and output manifest. A startup reconciliation marks interrupted Runs failed; terminal Runs remain inspectable after a Definition changes or is deleted. Separate explicit commands can copy a successful Run output into a Dataset or a host-owned Artifact; Run completion itself makes no Project data changes. The workspace inspects retained input, Transform, and output edges. Input selection and invocation cardinality are independent. A selection may contain Dataset Records, filtered or ordered values, selected Result Set values, or a retained MCP/Transform output; a Run must capture the actual bounded input and its derivation before execution. A Transform can consume the selected value or collection in one invocation, while repeated invocation over selected members is Batch execution. The direct Transform API accepts one explicit JSON input. A Dataset-wide Transform receives all captured Records in source order and can filter or sort them in Python; its review plan reports Record IDs, source version, and one invocation. Existing Batch Definitions can also target Transforms, while the direct per-Record action needs no separate Batch Definition. Completed Transform Run output also supplies a reviewed list of JSON objects for one downstream Transform invocation. Its captured selection includes the upstream Run ID, output path and hash, selected positions and values, and rule. Retained MCP Tool Result Snapshot Artifacts supply reviewed structured output values with a version check. Completed Batch Result Sets supply selected successful structured outputs through the Transform Inputs Module; failed rows are reported in the review and omitted from the input. Repeated Transform invocation over Dataset Records is delivered as the per-Record mode; applying it to selected retained outputs remains a later slice. Saved filter, sort, and limit defaults affect previews only; they do not select durable inputs. Workflow edges connect declared inputs and captured upstream outputs. These are execution details rather than top-level explorer categories. Transform previews and Transform-backed Batch invocations use the same host-side Deno/Pyodide runner. Neither a Transform Run nor a Batch Run automatically creates a Dataset or Artifact. Agents use the same commands through approval-gated tools, with Agent Run provenance on Artifact saves.
+Owns Project-scoped Python Function source and contracts, authoring, and transient previews. A Function declares named inputs and an output schema. Preview invokes the shared host-side Deno/Pyodide runner using explicit test inputs and optional saved preview defaults. It does not create durable execution history. The Function Module also executes captured Function snapshots for Workflow steps, validating named inputs and outputs and enforcing the pinned runner identity. It does not create child Run records: the enclosing Workflow Run checkpoints the call's input, output, failure, and lineage. Agent Hub's Python runner cannot call MCP tools directly.
 
 ### Workflow Module — API
 
-Owns versioned, Project-scoped Workflow Definitions. Its Interface validates a bounded DAG of Project File and Dataset inputs with versioned Python Function or permitted MCP call nodes. Named edges must connect declared ports, every required input must be connected once, and the graph must be acyclic. An MCP Map accepts one collection edge at `items` plus shared named inputs such as Project File content; validation checks the merged per-item call against the full MCP schema and rejects collisions between Dataset fields and shared inputs. The prepared Run captures exact Project File text and version and Dataset Record IDs and values, so later source edits cannot change call inputs. Create, list, load, and optimistic revise are available to direct users and agents; agent mutations cross approval interrupts. The Workflow Module stores graph intent and resolves references through Project Files, Dataset, Transform, and Plugin Gateway Interfaces. Prepared Workflow Runs also retain the checked Definition version, Python Function source and runtime identity, MCP target metadata, and initiator. Request keys prevent duplicate preparation. DAG execution schedules up to four dependency-ready nodes concurrently, waiting at joins, and applies a shared maximum of four active Function/MCP calls across Map items and single calls. Serialized checkpoint writes retain each node's inputs and outputs, MCP target identities, and child Python Run IDs. MCP Map dispatch validates the first item before fanning out. Startup marks active Runs interrupted; resumption reuses completed node and Map-item checkpoints, with deterministic child Run IDs for Python calls. A single MCP call with an unknown outcome is terminal and is never replayed automatically; repeat-safe MCP Map items may resume. Direct users have Project routes; agent preparation and execution are approval gated.
+Owns versioned, Project-scoped Workflow Definitions and immutable Workflow Runs. Its Interface validates a bounded acyclic DAG of Project File and Dataset inputs with versioned Python Function or permitted MCP Tool steps. Bindings connect node outputs, declared Workflow Inputs, and literal values to named target ports. JSON Pointer field paths support selection and non-overlapping nested assembly; required target inputs must be bound, and source/target schemas are checked before execution. Workflow Inputs are validated and captured when a Run is prepared. Each step owns its input bindings and whether the target is called once or mapped over a bounded collection. The prepared Run captures exact source versions and values, the checked Definition version, Function source and runtime identity, MCP target metadata, initiator, and idempotency key. Request keys prevent duplicate preparation. Agent mutations and execution are approval gated. DAG execution schedules up to four dependency-ready steps concurrently and applies one shared four-call limit across Function and MCP calls. Checkpoint writes are serialized and retain step inputs, outputs, failures, and lineage; no child Function Run is created. MCP Map dispatch validates arguments before fanning out. Startup marks active Runs interrupted; resumption reuses completed step and Map-item checkpoints. A single MCP call with an unknown outcome is terminal and is never replayed automatically; repeat-safe MCP Map items may resume. Workflow outputs are the primary durable results; intermediate step values remain available for inspection.
 
 ### Plugin Gateway Module — API
 
@@ -235,13 +202,12 @@ The application does not claim a cross-library transaction spanning a Run and ev
 5. The current VFS document, index projection, provenance, concurrency token, and compact Project change record commit atomically.
 6. The open Artifact view refreshes after the in-Thread result or on focus/reopen. Other Threads receive only a compact later-run change notice.
 
-### Dataset batch execution
+### Workflow execution
 
-1. A user directly starts a saved Batch Definition, or an agent proposes the same action and pauses for approval.
-2. Batch Execution captures Dataset-record IDs and values, the Batch Definition, its MCP tool/schema or Transform source/runtime/package identity, initiator provenance, and an idempotency key in a new Batch Run. Workflow Runs that connect a Project File to an MCP Map capture its exact path, version, and content alongside the Dataset Records; the Workflow validates merged inputs and rejects key collisions. A missing or stale file blocks preparation, and ordinary Project File edits never trigger automatic execution.
-3. The executor invokes the first real MCP tool or isolated Transform and validates its structured output before bounded fan-out. Transform-backed definitions use the same Result Set and retain the captured source even if the Transform Definition changes later.
-4. It persists Result Records and compact progress independently of the initiating browser or Agent Run.
-5. The workspace and later agent tools inspect native summaries or paginated/filterable results; an explicit save may create a curated Artifact.
+1. A user or approved agent prepares a Workflow Run from a saved Workflow Definition.
+2. Workflow captures source versions and exact input values, the Function source/runtime identity, and MCP target metadata before dispatch.
+3. It executes ready steps under shared concurrency bounds. Map applies to a bounded collection; repeat-safe MCP policy is checked by Plugin Gateway.
+4. The Workflow Run checkpoints step inputs, outputs, failures, and lineage. Its named outputs are the primary results; intermediate values remain available for inspection.
 
 ### Calculation-to-diagram later
 
@@ -272,22 +238,22 @@ The agent discovers a calculation Artifact summary, loads it on demand, and pass
 - Validate tool arguments, structured results, schema bindings, resource URIs, MIME types, origins, and sizes.
 - Intersect app-declared CSP and capabilities with catalog policy.
 - Require policy/approval for consequential actions; the model cannot grant authority. Agent and user actions share capabilities, while approval changes authorization for consequential agent actions.
-- Permit batch dispatch only for catalogued repeat-safe tools and validate ordinary MCP input/output schemas at the Batch Execution Module Interface.
+- Permit MCP Map dispatch only for catalogued repeat-safe tools and validate ordinary MCP input/output schemas at the Workflow and Plugin Gateway Interfaces.
 - Redact payloads by default and record identities, correlation IDs, policy decisions, timing, outcome, and provenance.
 - Do not add arbitrary code execution or host filesystem access to the foundation.
 
 ## Observability
 
-Use structured logs, metrics, and OpenTelemetry-compatible traces with the same correlation fields: request, user subject hash, Project, Thread, Agent Run, Batch Run, Plugin, tool call, Artifact, and approval IDs where applicable. Record state transitions and durations, not secret values or full Artifact/tool payloads by default.
+Use structured logs, metrics, and OpenTelemetry-compatible traces with the same correlation fields: request, user subject hash, Project, Thread, Agent Run, Workflow Run, Plugin, tool call, Artifact, and approval IDs where applicable. Record state transitions and durations, not secret values or full Artifact/tool payloads by default.
 
 Minimum operational signals are Run counts/duration/outcome, active and interrupted Runs, stream disconnects, checkpoint and reconciliation failures, MCP latency/errors/timeouts, approval latency, Artifact validation/conflicts, iframe/resource failures, and database latency/errors. Health checks distinguish process liveness from readiness of PostgreSQL and required configuration; remote Plugin failure does not make the core API unready.
 
 ## Verification strategy
 
 - Schema/contract tests generate Python and TypeScript consumers from the same language-neutral sources.
-- Module tests use deterministic model, checkpointer, persistence, batch-executor, and MCP adapters through the same Interfaces as production.
+- Module tests use deterministic model, checkpointer, persistence, Workflow execution, and MCP adapters through the same Interfaces as production.
 - AG-UI compatibility tests pin streaming, tool, error, cancellation, state, and interrupt/resume mappings.
-- PostgreSQL integration tests cover project scoping, checkpoint recovery, VFS sharing, Artifact atomicity, stale writes, Batch Run snapshots, and Result Set queries.
+- PostgreSQL integration tests cover project scoping, checkpoint recovery, VFS sharing, Artifact atomicity, and stale writes.
 - Plugin conformance tests run the fixture in MCP-only, standard MCP Apps, and Agent Hub-enhanced modes.
 - Browser tests cover workspace navigation, reload, approval, iframe isolation/fallback, and cross-Thread Artifact discovery.
 - Security tests cover forged identity/project scope, SSRF redirects/DNS results, hostile resource metadata, bridge capability denial, malformed results, and secret redaction.
@@ -298,7 +264,7 @@ Minimum operational signals are Run counts/duration/outcome, active and interrup
 - Team/multi-user Project collaboration and Agent Hub sign-in.
 - Arbitrary user-supplied MCP servers.
 - Artifact revision browsing, merging, and live cross-Thread synchronization.
-- Batch cancellation, automatic retry, bulk-to-bulk Map composition, and automatic agent wake-up after Batch completion.
+- Workflow cancellation, automatic retry, bulk-to-bulk Map composition, and unattended resumption.
 - User-level VFS layers, object storage, and large binary Artifacts.
 - Multiple simultaneous Artifact panes and finalized small-screen interaction.
 - A workflow/event engine for unattended cross-Plugin pipelines.

@@ -3,8 +3,8 @@ from psycopg import AsyncConnection, OperationalError
 from pydantic import PostgresDsn
 
 from agent_hub_api.modules.datasets import DatasetRecordInput, create_postgres_dataset_module
+from agent_hub_api.modules.functions import create_postgres_function_module
 from agent_hub_api.modules.projects import ProjectAccess, create_postgres_project_module
-from agent_hub_api.modules.transforms import create_postgres_transform_module
 from agent_hub_api.modules.workflows import (
     WorkflowGraph,
     WorkflowNode,
@@ -27,16 +27,12 @@ async def test_workflow_definition_round_trips_through_postgres() -> None:
         pytest.skip("Local PostgreSQL is unavailable")
     await connection.close()
 
-    class Schemas:
-        async def input_schema(self, *_: object) -> dict[str, object]:
-            return {"type": "object"}
-
     access = ProjectAccess(subject="workflow-postgres-integration")
     projects = create_postgres_project_module(settings)
-    datasets = create_postgres_dataset_module(settings, projects, Schemas())
-    transforms = create_postgres_transform_module(settings, projects)
-    workflows = create_postgres_workflow_module(settings, projects, datasets, transforms, None)
-    runs = create_postgres_workflow_run_module(settings, workflows, datasets, transforms, None)
+    datasets = create_postgres_dataset_module(settings, projects)
+    functions = create_postgres_function_module(settings, projects)
+    workflows = create_postgres_workflow_module(settings, projects, datasets, functions, None)
+    runs = create_postgres_workflow_run_module(settings, workflows, datasets, functions, None)
     project = await projects.create(access, "Workflow integration")
     try:
         dataset = await datasets.create_dataset(

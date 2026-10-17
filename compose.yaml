@@ -26,7 +26,7 @@ services:
       AGENT_HUB_IDENTITY_MODE: fixed
       AGENT_HUB_OPENAI_API_KEY: ${AGENT_HUB_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
       AGENT_HUB_OPENAI_MODEL: ${AGENT_HUB_OPENAI_MODEL:-gpt-5.1}
-      AGENT_HUB_TRANSFORM_RUNNER_URL: http://transform-runner:8000
+      AGENT_HUB_FUNCTION_RUNNER_URL: http://python-runner:8000
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,12 +45,12 @@ services:
       - "8000:8000"
     networks:
       - default
-      - transform_internal
+      - python_internal
 
-  transform-runner:
+  python-runner:
     build:
       context: .
-      dockerfile: apps/transform-runner/Dockerfile
+      dockerfile: apps/python-runner/Dockerfile
     read_only: true
     user: "65534:65534"
     cap_drop: [ALL]
@@ -59,7 +59,7 @@ services:
     mem_limit: 512m
     cpus: 1
     networks:
-      - transform_internal
+      - python_internal
 
   foundation-fixture:
     build:
@@ -77,6 +77,24 @@ services:
     ports:
       - "8002:8000"
 
+  calculation-source-object:
+    build:
+      context: ./plugins/calculation-source-object
+      dockerfile: Dockerfile
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    networks:
+      - python_internal
+    ports:
+      - "8003:8000"
+
   web:
     build:
       context: .
@@ -93,5 +111,5 @@ volumes:
   agent-hub-postgres:
 
 networks:
-  transform_internal:
+  python_internal:
     internal: true

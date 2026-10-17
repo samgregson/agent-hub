@@ -1,6 +1,5 @@
 "use client";
 
-import { HttpAgent } from "@ag-ui/client";
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -8,27 +7,29 @@ import {
   generateId,
   MessagePrimitive,
   ThreadPrimitive,
+  useAui,
   type ThreadHistoryAdapter,
-  type TextMessagePartProps,
   type ToolCallMessagePartProps,
   useAuiState,
 } from "@assistant-ui/react";
+import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import {
   fromAgUiMessages,
   useAgUiRuntime,
   type AgUiInterrupt,
 } from "@assistant-ui/react-ag-ui";
+import remarkGfm from "remark-gfm";
 import {
   createContext,
   useContext,
   useEffect,
   useMemo,
   useState,
+  type ComponentProps,
   type FormEvent,
 } from "react";
 
 import type { AgentRun } from "@/contracts";
-import { Markdown } from "@/shared/ui";
 
 import {
   restoreInterruptMetadata,
@@ -45,6 +46,7 @@ import {
   type ProposedFileReview,
 } from "./_approval";
 import { shouldClearTransientRunError } from "./_run-state";
+import { InterruptSafeHttpAgent } from "./_interrupt-safe-agent";
 import styles from "./agent-ui.module.css";
 
 const OpenVirtualFileContext = createContext<(path: string) => void>(() => {});
@@ -59,21 +61,94 @@ const ApprovalHistoryContext = createContext<Record<string, ResolvedApproval>>(
   {},
 );
 
-function TextPart({ text }: TextMessagePartProps) {
+function virtualFilePath(url: string): string | null {
+  const path = url.startsWith("sandbox:/") ? url.replace(/^sandbox:/, "") : url;
+  return /^\/(?:project|scratch)\//.test(path) &&
+    !path.split("/").includes("..")
+    ? path
+    : null;
+}
+
+function safeMarkdownUrl(url: string): string {
+  if (virtualFilePath(url)) return url;
+  return safeExternalMarkdownUrl(url) ?? "";
+}
+
+function safeExternalMarkdownUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? url
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function MarkdownAnchor({ children, href, ...props }: ComponentProps<"a">) {
   const openVirtualFile = useContext(OpenVirtualFileContext);
-  return <Markdown onOpenVirtualFile={openVirtualFile} text={text} />;
+  const path = href ? virtualFilePath(href) : null;
+  if (path) {
+    return (
+      <button
+        className={styles.markdownLinkButton}
+        onClick={() => openVirtualFile(path)}
+        type="button"
+      >
+        {children}
+      </button>
+    );
+  }
+
+  const safeHref = href ? safeExternalMarkdownUrl(href) : null;
+  if (safeHref) {
+    return (
+      <a {...props} href={safeHref} rel="noreferrer" target="_blank">
+        {children}
+      </a>
+    );
+  }
+  return <>{children}</>;
+}
+
+function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
+  return (
+    <div
+      aria-label="Message table"
+      className={styles.markdownTable}
+      role="region"
+      tabIndex={0}
+    >
+      <table {...props}>{children}</table>
+    </div>
+  );
+}
+
+const markdownComponents = { a: MarkdownAnchor, table: MarkdownTable };
+const markdownPlugins = [remarkGfm];
+
+function TextPart() {
+  return (
+    <MarkdownTextPrimitive
+      className={styles.messageMarkdown}
+      components={markdownComponents}
+      remarkPlugins={markdownPlugins}
+      urlTransform={safeMarkdownUrl}
+    />
+  );
 }
 
 function ToolCall({
   args,
   argsText,
   approval,
+  dock = false,
   isError,
   result,
   respondToApproval,
   toolCallId,
   toolName,
-}: ToolCallMessagePartProps) {
+}: ToolCallMessagePartProps & { dock?: boolean }) {
   const projectId = useContext(ProjectIdContext);
   const openVirtualFile = useContext(OpenVirtualFileContext);
   const openArtifact = useContext(OpenArtifactContext);
@@ -92,8 +167,8 @@ function ToolCall({
     approval.resolution === undefined;
 
   useEffect(() => {
-    const target = approvalTarget(args, toolName);
-    if (!waitingForDecision || !target.path || !projectId) return;
+    const target = approvalTarget(args);
+    if (!dock || !waitingForDecision || !target.path || !projectId) return;
     const path = target.path;
     const controller = new AbortController();
     let active = true;
@@ -149,11 +224,12 @@ function ToolCall({
       active = false;
       controller.abort();
     };
-  }, [args, argsText, projectId, toolName, waitingForDecision]);
+  }, [args, argsText, dock, projectId, toolName, waitingForDecision]);
 
   if (approval) {
+    if (waitingForDecision && !dock) return null;
     const label = approvalLabel(toolName);
-    const target = approvalTarget(args, toolName);
+    const target = approvalTarget(args);
     const outcome = waitingForDecision
       ? "Needs approval"
       : approval.resolution === "cancelled"
@@ -218,7 +294,9 @@ function ToolCall({
                 disabled={submitting || !respondToApproval}
                 onClick={() => {
                   setSubmitting(true);
-                  respondToApproval?.({ approved: true });
+                  void respondToApproval?.({ approved: true }).catch(() =>
+                    setSubmitting(false),
+                  );
                 }}
                 type="button"
               >
@@ -228,10 +306,10 @@ function ToolCall({
                 disabled={submitting || !respondToApproval}
                 onClick={() => {
                   setSubmitting(true);
-                  respondToApproval?.({
+                  void respondToApproval?.({
                     approved: false,
                     reason: "Rejected by the user",
-                  });
+                  }).catch(() => setSubmitting(false));
                 }}
                 type="button"
               >
@@ -289,14 +367,124 @@ function ToolCall({
     );
   }
 
-  if (isApprovalOnlyTool(toolName)) return null;
+  return null;
+}
+
+type ProcessCall = {
+  args: unknown;
+  argsText: string;
+  approval?: ToolCallMessagePartProps["approval"];
+  isError?: boolean;
+  result?: unknown;
+  status?: ToolCallMessagePartProps["status"];
+  toolCallId: string;
+  toolName: string;
+};
+
+function formatToolName(name: string) {
+  return name
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatProcessValue(value: unknown) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function ProcessEntry({ call }: { call: ProcessCall }) {
+  const status = call.isError
+    ? "Failed"
+    : call.approval?.approved === false
+      ? "Rejected"
+      : call.approval?.approved === true
+        ? "Approved"
+        : call.result !== undefined
+          ? "Completed"
+          : call.status?.type === "running"
+            ? "Running"
+            : "Waiting";
+  if (call.approval && call.approval.approved === undefined) return null;
+  if (isApprovalOnlyTool(call.toolName)) return null;
 
   return (
-    <section className={styles.toolCall}>
-      <strong>{toolName}</strong>
-      <pre>{JSON.stringify(args, null, 2)}</pre>
-      {result !== undefined ? <p>{String(result)}</p> : null}
-    </section>
+    <details className={styles.processEntry}>
+      <summary>
+        <span>{formatToolName(call.toolName)}</span>
+        <span className={styles.processEntryStatus}>{status}</span>
+      </summary>
+      <div className={styles.processEntryDetails}>
+        {call.argsText ? (
+          <div>
+            <span className={styles.processFieldLabel}>Input</span>
+            <pre>{call.argsText}</pre>
+          </div>
+        ) : null}
+        {call.result !== undefined || call.status?.type === "running" ? (
+          <div>
+            <span className={styles.processFieldLabel}>
+              {call.isError ? "Error" : "Output"}
+            </span>
+            <pre>
+              {call.result === undefined
+                ? "Waiting for output…"
+                : formatProcessValue(call.result)}
+            </pre>
+          </div>
+        ) : null}
+        {call.approval?.reason ? <p>{call.approval.reason}</p> : null}
+      </div>
+    </details>
+  );
+}
+
+function ProcessDisclosure({
+  calls,
+  running,
+}: {
+  calls: ProcessCall[];
+  running: boolean;
+}) {
+  const visibleCalls = calls.filter(
+    (call) =>
+      !isApprovalOnlyTool(call.toolName) &&
+      !(call.approval && call.approval.approved === undefined),
+  );
+  if (visibleCalls.length === 0 && !running) return null;
+  const activeTool = visibleCalls.some(
+    (call) => call.status?.type === "running",
+  );
+
+  return (
+    <details className={styles.process} open={running}>
+      <summary>
+        <span className={running ? styles.processPulse : styles.processMark} />
+        <span>{running ? "Thinking" : "Process"}</span>
+        {running && activeTool ? (
+          <span className={styles.processActivity}>Using tools</span>
+        ) : null}
+        {visibleCalls.length > 0 ? (
+          <span className={styles.processCount}>
+            {visibleCalls.length} {visibleCalls.length === 1 ? "step" : "steps"}
+          </span>
+        ) : null}
+      </summary>
+      {visibleCalls.length > 0 ? (
+        <div className={styles.processEntries}>
+          {visibleCalls.map((call) => (
+            <ProcessEntry call={call} key={call.toolCallId} />
+          ))}
+        </div>
+      ) : (
+        <p className={styles.processWaiting}>
+          The model is preparing its response.
+        </p>
+      )}
+    </details>
   );
 }
 
@@ -306,13 +494,9 @@ function Message() {
 
   return (
     <MessagePrimitive.Root
-      aria-label={isUser ? "You" : "Agent Hub"}
       className={`${styles.message} ${isUser ? styles.userMessage : styles.assistantMessage}`}
       data-role={role}
     >
-      <span className={styles.messageAuthor}>
-        {isUser ? "You" : "Agent Hub"}
-      </span>
       <MessagePrimitive.Parts
         components={{ Text: TextPart, tools: { Fallback: ToolCall } }}
       />
@@ -320,6 +504,185 @@ function Message() {
         <MessagePrimitive.Error />
       </span>
     </MessagePrimitive.Root>
+  );
+}
+
+function ConversationMessages() {
+  const messages = useAuiState((state) => state.thread.messages);
+  const isRunning = useAuiState((state) => state.thread.isRunning);
+  const turns = useMemo(() => {
+    const result: Array<{
+      indices: number[];
+      calls: ProcessCall[];
+      role: string;
+    }> = [];
+    let index = 0;
+    while (index < messages.length) {
+      const first = messages[index];
+      const indices = [index];
+      const calls: ProcessCall[] = [];
+      if (first.role === "assistant") {
+        let cursor = index;
+        while (
+          cursor < messages.length &&
+          messages[cursor].role === "assistant"
+        ) {
+          indices.push(...(cursor === index ? [] : [cursor]));
+          for (const part of messages[cursor].parts) {
+            if (part.type === "tool-call") calls.push(part);
+          }
+          cursor += 1;
+        }
+        result.push({ indices, calls, role: "assistant" });
+        index = cursor;
+      } else {
+        result.push({ indices, calls, role: first.role });
+        index += 1;
+      }
+    }
+    return result;
+  }, [messages]);
+
+  const visibleTurns =
+    isRunning && turns.at(-1)?.role !== "assistant"
+      ? [...turns, { indices: [], calls: [], role: "assistant" }]
+      : turns;
+
+  return (
+    <>
+      {visibleTurns.map((turn, turnIndex) => (
+        <div
+          className={styles.turn}
+          key={messages[turn.indices[0]]?.id ?? "active-process"}
+        >
+          {turn.role === "assistant" ? (
+            <ProcessDisclosure
+              calls={turn.calls}
+              running={isRunning && turnIndex === visibleTurns.length - 1}
+            />
+          ) : null}
+          {turn.indices.map((messageIndex) => (
+            <ThreadPrimitive.MessageByIndex
+              components={{ Message }}
+              index={messageIndex}
+              key={messages[messageIndex]?.id}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ApprovalDock() {
+  const aui = useAui();
+  const messages = useAuiState((state) => state.thread.messages);
+  const approvals = useMemo(
+    () =>
+      messages.flatMap((message) =>
+        message.parts.flatMap((part) => {
+          if (
+            part.type !== "tool-call" ||
+            !part.approval ||
+            part.approval.approved !== undefined
+          ) {
+            return [];
+          }
+          return [{ messageId: message.id, part }];
+        }),
+      ),
+    [messages],
+  );
+  if (approvals.length === 0) return null;
+
+  return (
+    <section aria-label="Pending approvals" className={styles.approvalDock}>
+      {approvals.map(({ messageId, part }) => (
+        <ToolCall
+          {...part}
+          dock
+          key={part.toolCallId}
+          addResult={(result) =>
+            aui.thread
+              .message({ id: messageId })
+              .part({ toolCallId: part.toolCallId })
+              .addToolResult(result)
+          }
+          resume={(payload) =>
+            aui.thread
+              .message({ id: messageId })
+              .part({ toolCallId: part.toolCallId })
+              .resumeToolCall(payload)
+          }
+          respondToApproval={(response) =>
+            aui.thread
+              .message({ id: messageId })
+              .part({ toolCallId: part.toolCallId })
+              .respondToToolApproval(response)
+          }
+        />
+      ))}
+    </section>
+  );
+}
+
+function ComposerArea({
+  onSubmit,
+}: {
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const messages = useAuiState((state) => state.thread.messages);
+  const hasPendingApproval = messages.some((message) =>
+    message.parts.some(
+      (part) =>
+        part.type === "tool-call" &&
+        part.approval !== undefined &&
+        part.approval.approved === undefined &&
+        part.approval.resolution === undefined,
+    ),
+  );
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    if (hasPendingApproval) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    onSubmit(event);
+  }
+
+  return (
+    <>
+      <ApprovalDock />
+      {hasPendingApproval ? (
+        <p className={styles.approvalHold} role="status">
+          Respond to the pending approval before sending another message.
+        </p>
+      ) : null}
+      <ComposerPrimitive.Root
+        className={styles.composer}
+        onSubmit={handleSubmit}
+      >
+        <ComposerPrimitive.Input
+          aria-label="Message"
+          className={styles.input}
+          placeholder="Ask a question or describe a task…"
+          rows={2}
+        />
+        <div className={styles.actions}>
+          <ComposerPrimitive.Cancel className={styles.cancel}>
+            Stop
+          </ComposerPrimitive.Cancel>
+          <ComposerPrimitive.Send
+            className={styles.send}
+            data-pending-approval={hasPendingApproval || undefined}
+            disabled={hasPendingApproval}
+          >
+            Send
+          </ComposerPrimitive.Send>
+        </div>
+      </ComposerPrimitive.Root>
+    </>
   );
 }
 
@@ -331,6 +694,16 @@ function RunStatus({
   runsUrl: string;
 }) {
   const isRunning = useAuiState((state) => state.thread.isRunning);
+  const messages = useAuiState((state) => state.thread.messages);
+  const hasPendingApproval = messages.some((message) =>
+    message.parts.some(
+      (part) =>
+        part.type === "tool-call" &&
+        part.approval !== undefined &&
+        part.approval.approved === undefined &&
+        part.approval.resolution === undefined,
+    ),
+  );
   const [latestRun, setLatestRun] = useState<AgentRun | null>(null);
 
   useEffect(() => {
@@ -374,7 +747,11 @@ function RunStatus({
     if (shouldClearTransientRunError(latestRun?.status)) onSuccessfulRun();
   }, [latestRun?.status, onSuccessfulRun]);
 
-  const status = isRunning ? "running" : latestRun?.status;
+  const status = isRunning
+    ? "running"
+    : hasPendingApproval
+      ? "Awaiting approval"
+      : latestRun?.status;
   if (!status) return null;
 
   return (
@@ -458,7 +835,7 @@ export function AgentChat({
   >({});
   const agent = useMemo(
     () =>
-      new HttpAgent({
+      new InterruptSafeHttpAgent({
         threadId,
         url: `/api/projects/${encodeURIComponent(projectId)}/threads/${encodeURIComponent(threadId)}/agent`,
       }),
@@ -499,7 +876,6 @@ export function AgentChat({
                   <ThreadPrimitive.Viewport className={styles.viewport}>
                     <ThreadPrimitive.Empty>
                       <div className={styles.empty}>
-                        <p className={styles.eyebrow}>Agent Hub</p>
                         <h1>What are we working on?</h1>
                         <p>
                           This Thread keeps its own conversation state within
@@ -507,32 +883,14 @@ export function AgentChat({
                         </p>
                       </div>
                     </ThreadPrimitive.Empty>
-                    <ThreadPrimitive.Messages components={{ Message }} />
+                    <ConversationMessages />
                     <RunStatus
                       onSuccessfulRun={() => setError(null)}
                       runsUrl={runsUrl}
                     />
                     {error ? <p className={styles.runError}>{error}</p> : null}
                     <ThreadPrimitive.ViewportFooter className={styles.footer}>
-                      <ComposerPrimitive.Root
-                        className={styles.composer}
-                        onSubmit={captureUserMessage}
-                      >
-                        <ComposerPrimitive.Input
-                          aria-label="Message Agent Hub"
-                          className={styles.input}
-                          placeholder="Ask Agent Hub…"
-                          rows={2}
-                        />
-                        <div className={styles.actions}>
-                          <ComposerPrimitive.Cancel className={styles.cancel}>
-                            Stop
-                          </ComposerPrimitive.Cancel>
-                          <ComposerPrimitive.Send className={styles.send}>
-                            Send
-                          </ComposerPrimitive.Send>
-                        </div>
-                      </ComposerPrimitive.Root>
+                      <ComposerArea onSubmit={captureUserMessage} />
                     </ThreadPrimitive.ViewportFooter>
                   </ThreadPrimitive.Viewport>
                 </ThreadPrimitive.Root>

@@ -9,17 +9,15 @@ export const activityViews = [
   "workflows",
   "chats",
   "artifacts",
-  "operations",
+  "functions",
   "sources",
   "plugins",
 ] as const;
 
 export type ActivityView = (typeof activityViews)[number];
-export type OperationKind = "batchDefinitions" | "transforms" | "calls";
 
 export interface ProjectWorkspaceState {
   activity: ActivityView;
-  operationKind: OperationKind;
   mobileSurface: "artifact" | "chat";
   selectedArtifactId: string | null;
   selectedFilePath: string | null;
@@ -27,8 +25,7 @@ export interface ProjectWorkspaceState {
   selectedScratchThreadId: string | null;
   selectedSourceId: string | null;
   selectedThreadId: string | null;
-  selectedTransformDefinitionId: string | null;
-  transformRunScope: string | null;
+  selectedFunctionId: string | null;
 }
 
 export interface WorkspaceState {
@@ -39,9 +36,7 @@ export interface WorkspaceState {
 export type WorkspaceAction =
   | { projectId: string | null; type: "selectProject" }
   | { activity: ActivityView; type: "selectActivity" }
-  | { operationKind: OperationKind; type: "selectOperationKind" }
-  | { definitionId: string | null; type: "selectTransformDefinition" }
-  | { runScope: string; type: "selectTransformRunScope" }
+  | { functionId: string | null; type: "selectFunction" }
   | { artifactId: string | null; type: "openArtifact" }
   | { path: string | null; type: "openProjectFile" }
   | { proposal: FileProposal; type: "openFileProposal" }
@@ -52,7 +47,6 @@ export type WorkspaceAction =
 function initialProjectState(): ProjectWorkspaceState {
   return {
     activity: "chats",
-    operationKind: "batchDefinitions",
     mobileSurface: "chat",
     selectedArtifactId: null,
     selectedFilePath: null,
@@ -60,8 +54,7 @@ function initialProjectState(): ProjectWorkspaceState {
     selectedScratchThreadId: null,
     selectedSourceId: null,
     selectedThreadId: null,
-    selectedTransformDefinitionId: null,
-    transformRunScope: null,
+    selectedFunctionId: null,
   };
 }
 
@@ -177,44 +170,14 @@ export function workspaceReducer(
       },
     };
   }
-  if (action.type === "selectOperationKind") {
+  if (action.type === "selectFunction") {
     return {
       ...state,
       projects: {
         ...state.projects,
         [state.selectedProjectId]: {
           ...state.projects[state.selectedProjectId],
-          operationKind: action.operationKind,
-        },
-      },
-    };
-  }
-  if (action.type === "selectTransformDefinition") {
-    return {
-      ...state,
-      projects: {
-        ...state.projects,
-        [state.selectedProjectId]: {
-          ...state.projects[state.selectedProjectId],
-          selectedTransformDefinitionId: action.definitionId,
-          transformRunScope: action.definitionId ?? "all",
-        },
-      },
-    };
-  }
-  if (action.type === "selectTransformRunScope") {
-    return {
-      ...state,
-      projects: {
-        ...state.projects,
-        [state.selectedProjectId]: {
-          ...state.projects[state.selectedProjectId],
-          selectedTransformDefinitionId:
-            action.runScope === "all"
-              ? state.projects[state.selectedProjectId]
-                  .selectedTransformDefinitionId
-              : action.runScope,
-          transformRunScope: action.runScope,
+          selectedFunctionId: action.functionId,
         },
       },
     };

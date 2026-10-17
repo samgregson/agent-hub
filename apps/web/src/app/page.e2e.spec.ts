@@ -35,7 +35,12 @@ test("Plugins are available through the browser-facing Project API", async ({
         enabled: false,
         id: "reference-calculation",
         name: "Reference calculation",
-        tools: [{ name: "calculate_cantilever_tip_load", readOnly: false }],
+        tools: [
+          { name: "calculate_cantilever_tip_load", readOnly: false },
+          { name: "check_uniform_beam_deflection", readOnly: false },
+          { name: "size_for_deflection", readOnly: false },
+          { name: "draft_beam_review_note", readOnly: false },
+        ],
         version: "0.1.0",
       },
     ]),
@@ -113,10 +118,41 @@ test("user can create a Project", async ({ page }) => {
   const name = dialog.getByLabel("Project name");
   await expect(name).toBeFocused();
   await name.fill(project.name);
-  await name.press("Enter");
+  await dialog.getByRole("button", { name: "Create Project" }).click();
 
   await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
   await expect(dialog).toBeHidden();
+});
+
+test("a stalled Project request releases the form and explains the timeout", async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.route("**/api/projects", async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ json: [] });
+      return;
+    }
+    await new Promise(() => {});
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Selected Project").selectOption({
+    label: "New Project…",
+  });
+  const dialog = page.getByRole("dialog", { name: "New Project" });
+  await dialog.getByLabel("Project name").fill("Slow project request");
+  await dialog.getByLabel("Project name").press("Enter");
+  await expect(dialog.getByText("Creating…")).toBeVisible();
+
+  await page.clock.fastForward(15_000);
+
+  await expect(dialog.getByRole("alert")).toHaveText(
+    "Project creation timed out. Check your Projects list before trying again.",
+  );
+  await expect(
+    dialog.getByRole("button", { name: "Create Project" }),
+  ).toBeEnabled();
 });
 
 test("project creation is unavailable before the workspace hydrates", async ({
@@ -277,27 +313,23 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
       await route.fulfill({ json: { files: [] } });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({
-        json: [
-          {
-            id: "summary-function",
-            name: "Summarize loads",
-            revision: 1,
-            inputSelectors: { records: "$" },
-            inputSchema: {
-              type: "object",
-              properties: { records: {} },
-              required: ["records"],
-              additionalProperties: false,
-            },
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "summary-function",
+          name: "Summarize loads",
+          revision: 1,
+          inputSchema: {
+            type: "object",
+            properties: { records: {} },
+            required: ["records"],
+            additionalProperties: false,
           },
-        ],
-      });
-    },
-  );
+        },
+      ],
+    });
+  });
   await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
     await route.fulfill({
       json: [
@@ -429,11 +461,16 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   ).toBeVisible();
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await page.getByRole("button", { name: "Inspect calculate" }).click();
-  await page.getByRole("button", { name: "Open Operations" }).click();
+  await expect(page.getByRole("button", { name: "Open Function" })).toHaveCount(
+    0,
+  );
+  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page.getByRole("button", { name: "Inspect screen" }).click();
+  await page.getByRole("button", { name: "Open Function" }).click();
   await expect(
     page
       .getByRole("navigation", { name: "Project views" })
-      .getByRole("button", { name: "Operations" }),
+      .getByRole("button", { name: "Functions" }),
   ).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await page.getByRole("button", { name: "Inspect screen" }).click();
@@ -446,16 +483,16 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(
     page.getByRole("region", { name: "Workflow nodes" }),
   ).toContainText("call-6");
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("To node")
       .last(),
   ).toHaveValue("call-6");
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("Input port")
       .last(),
   ).toHaveValue("items");
@@ -464,16 +501,16 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     .selectOption("MCP · Calculator / calculate");
   await page.getByLabel("Call shape").selectOption("single");
   await page.getByRole("button", { name: "Add node" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("To node")
       .last(),
   ).toHaveValue("call-7");
   await expect(
     page
-      .getByRole("region", { name: "Workflow connections" })
+      .getByRole("region", { name: "Workflow bindings" })
       .getByLabel("Input port")
       .last(),
   ).toHaveValue("record");
@@ -521,7 +558,7 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     .toBe(true);
 });
 
-test("a Project Workflow can be created from Library and Operations", async ({
+test("a Project Workflow can be created from Library and Functions", async ({
   page,
 }) => {
   const project = {
@@ -531,6 +568,8 @@ test("a Project Workflow can be created from Library and Operations", async ({
     updatedAt: "2026-10-01T00:00:00.000Z",
   };
   let createRequest: Record<string, unknown> | undefined;
+  let runRequest: Record<string, unknown> | undefined;
+  let savedGraph: unknown;
 
   await page.route("**/api/projects", async (route) => {
     await route.fulfill({ json: [project] });
@@ -541,12 +580,13 @@ test("a Project Workflow can be created from Library and Operations", async ({
   await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
     if (route.request().method() === "POST") {
       createRequest = route.request().postDataJSON() as Record<string, unknown>;
+      savedGraph = createRequest.graph;
       await route.fulfill({
         json: {
           id: "workflow-new",
           name: createRequest.name,
           version: 1,
-          graph: createRequest.graph,
+          graph: savedGraph,
         },
         status: 201,
       });
@@ -565,30 +605,72 @@ test("a Project Workflow can be created from Library and Operations", async ({
       await route.fulfill({ json: { files: [] } });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({
-        json: [
-          {
-            id: "calculate",
-            name: "Calculate loads",
-            revision: 2,
-            inputSelectors: { records: "$" },
-            inputSchema: {
-              type: "object",
-              properties: { records: {} },
-              required: ["records"],
-              additionalProperties: false,
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "calculate",
+          name: "Calculate loads",
+          revision: 2,
+          inputSchema: {
+            type: "object",
+            properties: {
+              records: {},
+              label: { type: "string" },
+              factor: { type: "number" },
             },
+            required: ["records", "label", "factor"],
+            additionalProperties: false,
           },
-        ],
-      });
-    },
-  );
+        },
+      ],
+    });
+  });
   await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
     await route.fulfill({ json: [] });
   });
+  await page.route(
+    `**/api/projects/${project.id}/workflows/workflow-new/runs/prepare`,
+    async (route) => {
+      runRequest = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        json: {
+          id: "workflow-run-prepared",
+          workflowId: "workflow-new",
+          definitionVersion: 1,
+          status: "prepared",
+          snapshot: {
+            graph: savedGraph,
+            workflowInputs: runRequest.workflowInputs,
+          },
+          execution: {},
+          initiatorSubject: "owner",
+          createdAt: "2026-10-12T09:00:00.000Z",
+        },
+        status: 201,
+      });
+    },
+  );
+  await page.route(
+    `**/api/projects/${project.id}/workflows/workflow-new/runs/workflow-run-prepared/execute`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          id: "workflow-run-prepared",
+          workflowId: "workflow-new",
+          definitionVersion: 1,
+          status: "succeeded",
+          snapshot: {
+            graph: savedGraph,
+            workflowInputs: runRequest?.workflowInputs,
+          },
+          execution: { nodes: {}, outputs: { result: [1] } },
+          initiatorSubject: "owner",
+          createdAt: "2026-10-12T09:00:00.000Z",
+        },
+      });
+    },
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -599,6 +681,7 @@ test("a Project Workflow can be created from Library and Operations", async ({
     .last()
     .click();
   await page.getByRole("button", { name: "Create Workflow" }).click();
+  await page.getByRole("button", { name: "Add Workflow Input" }).click();
   await page.getByLabel("Library item or call").selectOption("Dataset · Loads");
   await page.getByRole("button", { name: "Add node" }).click();
   await page
@@ -606,7 +689,20 @@ test("a Project Workflow can be created from Library and Operations", async ({
     .selectOption("Function · Calculate loads");
   await page.getByLabel("Call shape").selectOption("map");
   await page.getByRole("button", { name: "Add node" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page
+    .getByLabel("Value comes from")
+    .nth(1)
+    .selectOption("workflowInput");
+  await page
+    .getByRole("combobox", { name: "Workflow Input", exact: true })
+    .selectOption("input1");
+  await page.getByLabel("Input port").nth(1).fill("label");
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page.getByLabel("Value comes from").nth(2).selectOption("literal");
+  await page.getByLabel("Input port").nth(2).fill("factor");
+  await page.getByLabel("Literal for binding 3").fill("2");
   await page
     .getByRole("region", { name: "Workflow outputs editor" })
     .getByLabel("From node")
@@ -618,7 +714,8 @@ test("a Project Workflow can be created from Library and Operations", async ({
   expect(createRequest?.name).toBe("Load check");
   const graph = createRequest?.graph as {
     nodes: Array<{ kind: string; shape: string }>;
-    edges: Array<{ sourcePort: string; targetPort: string }>;
+    edges: Array<Record<string, unknown>>;
+    inputs: Array<Record<string, unknown>>;
     outputs: Array<{ node: string; port: string }>;
   };
   expect(graph.nodes.map((node) => node.kind)).toEqual(["dataset", "python"]);
@@ -627,7 +724,31 @@ test("a Project Workflow can be created from Library and Operations", async ({
     sourcePort: "records",
     targetPort: "items",
   });
+  expect(graph.inputs).toEqual([
+    { name: "input1", required: true, schema: { type: "string" } },
+  ]);
+  expect(graph.edges[1]).toMatchObject({
+    sourceKind: "workflowInput",
+    sourceInput: "input1",
+    targetPort: "label",
+  });
+  expect(graph.edges[2]).toMatchObject({
+    sourceKind: "literal",
+    literal: 2,
+    targetPort: "factor",
+  });
   expect(graph.outputs[0]).toMatchObject({ node: "call-2", port: "result" });
+  await expect(
+    page.getByRole("list", { name: "Workflow dependencies" }),
+  ).toContainText("Workflow Input · input1");
+  await expect(
+    page.getByRole("list", { name: "Workflow dependencies" }),
+  ).toContainText("Literal · 2");
+  await page.getByLabel("Workflow Input input1").fill("test label");
+  await page.getByRole("button", { name: "Run Workflow" }).click();
+  await expect
+    .poll(() => runRequest?.workflowInputs)
+    .toEqual({ input1: "test label" });
   await expect
     .poll(() =>
       page.evaluate(
@@ -683,12 +804,9 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
       });
     },
   );
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
   await page.route(`**/api/projects/${project.id}/plugins`, async (route) => {
     await route.fulfill({
       json: [
@@ -740,10 +858,10 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
     .selectOption("MCP · Calculator / check");
   await page.getByLabel("Call shape").selectOption("map");
   await page.getByRole("button", { name: "Add node" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
-  await page.getByRole("button", { name: "Add connection" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
+  await page.getByRole("button", { name: "Add binding" }).click();
   const secondConnection = page
-    .getByRole("region", { name: "Workflow connections" })
+    .getByRole("region", { name: "Workflow bindings" })
     .locator('[class*="editorRow"]')
     .nth(1);
   await secondConnection.getByLabel("From node").selectOption("input-2");
@@ -758,6 +876,7 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
 
   const graph = createRequest?.graph as {
     edges: Array<{
+      sourceKind: string;
       sourceNode: string;
       sourcePort: string;
       targetNode: string;
@@ -766,12 +885,14 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
   };
   expect(graph.edges).toEqual([
     {
+      sourceKind: "node",
       sourceNode: "input-1",
       sourcePort: "records",
       targetNode: "call-3",
       targetPort: "items",
     },
     {
+      sourceKind: "node",
       sourceNode: "input-2",
       sourcePort: "content",
       targetNode: "call-3",
@@ -814,12 +935,6 @@ test("Datasets are created and deleted through Library commands", async ({
     `**/api/projects/${project.id}/files/index`,
     async (route) => {
       await route.fulfill({ json: { files: [] } });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-definitions`,
-    async (route) => {
-      await route.fulfill({ json: [] });
     },
   );
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
@@ -1111,12 +1226,12 @@ test("Library identifies Artifacts, Datasets, and Project Files without duplicat
   ).toHaveCount(0);
 });
 
-test("Operations keeps Batch and Transform actions under one Project destination", async ({
+test("Functions is a dedicated Project destination and survives navigation", async ({
   page,
 }) => {
   const project = {
     createdAt: "2026-09-18T00:00:00.000Z",
-    id: "project-operations",
+    id: "project-functions",
     name: "Design review",
     updatedAt: "2026-09-18T00:00:00.000Z",
   };
@@ -1138,380 +1253,27 @@ test("Operations keeps Batch and Transform actions under one Project destination
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) => {
     await route.fulfill({ json: [] });
   });
-  await page.route(
-    `**/api/projects/${project.id}/batch-definitions`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs?**`,
-    async (route) => {
-      await route.fulfill({ json: { items: [], nextOffset: null } });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms`,
-    async (route) => {
-      await route.fulfill({ json: [] });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs?**`,
-    async (route) => {
-      await route.fulfill({ json: { items: [], nextOffset: null } });
-    },
-  );
+  await page.route(`**/api/projects/${project.id}/functions`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
 
   await page.goto("/");
   const projectViews = page.getByRole("navigation", { name: "Project views" });
   await expect(
-    projectViews.getByRole("button", { name: "Operations" }),
-  ).toBeVisible();
-  await expect(
     projectViews.getByRole("button", { name: "Functions" }),
-  ).toHaveCount(0);
-  await expect(
-    projectViews.getByRole("button", { name: "Batch Definitions" }),
-  ).toHaveCount(0);
-
-  await projectViews.getByRole("button", { name: "Operations" }).click();
-  const operationTypes = page.getByRole("navigation", {
-    name: "Operation types",
-  });
-  await expect(
-    page.getByRole("button", { name: "+ New Batch Definition" }),
   ).toBeVisible();
-  await operationTypes.getByRole("button", { name: "Functions" }).click();
+  await expect(
+    projectViews.getByRole("button", { name: "Operations" }),
+  ).toHaveCount(0);
+  await projectViews.getByRole("button", { name: "Functions" }).click();
   await expect(
     page.getByRole("button", { name: "New Function" }),
   ).toBeVisible();
   await projectViews.getByRole("button", { name: "Library" }).click();
-  await projectViews.getByRole("button", { name: "Operations" }).click();
+  await projectViews.getByRole("button", { name: "Functions" }).click();
   await expect(
-    operationTypes.getByRole("button", { name: "Functions" }),
-  ).toHaveAttribute("aria-pressed", "true");
-});
-
-test("Batch Runs retain their Definition context and can be opened from it", async ({
-  page,
-}) => {
-  const project = {
-    createdAt: "2026-10-10T00:00:00.000Z",
-    id: "project-batch-context",
-    name: "Design review",
-    updatedAt: "2026-10-10T00:00:00.000Z",
-  };
-  const definitions = [
-    {
-      id: "definition-a",
-      name: "Load check",
-      datasetId: "dataset-a",
-      datasetAvailable: true,
-      pluginId: "calculator",
-      toolName: "calculate",
-      transformDefinitionId: null,
-    },
-    {
-      id: "definition-b",
-      name: "Stress check",
-      datasetId: "dataset-a",
-      datasetAvailable: true,
-      pluginId: "calculator",
-      toolName: "calculate",
-      transformDefinitionId: null,
-    },
-  ];
-  const runs = definitions.map((definition, index) => ({
-    archivedAt: null,
-    createdAt: "2026-10-10T00:00:00.000Z",
-    definitionId: definition.id,
-    definitionName: definition.name,
-    id: `run-${index}`,
-    initiatorSubject: "sam",
-    initiation: { kind: "directUser", approval: "notRequired" },
-    status: index === 1 ? "partial" : "succeeded",
-    recordCount: index === 1 ? 2 : 1,
-    succeededCount: 1,
-    failedCount: index === 1 ? 1 : 0,
-    updatedAt: "2026-10-10T00:00:00.000Z",
-  }));
-  await page.route("**/api/projects", (route) =>
-    route.fulfill({ json: [project] }),
-  );
-  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/batch-definitions`, (route) =>
-    route.fulfill({ json: definitions }),
-  );
-  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/batch-runs?**`, (route) => {
-    const definitionId = new URL(route.request().url()).searchParams.get(
-      "definition_id",
-    );
-    return route.fulfill({
-      json: {
-        items: runs.filter(
-          (run) => !definitionId || run.definitionId === definitionId,
-        ),
-        nextOffset: null,
-      },
-    });
-  });
-  await page.route(
-    `**/api/projects/${project.id}/batch-runs/*/results?**`,
-    (route) => {
-      const query = new URL(route.request().url()).searchParams;
-      const filtered =
-        query.get("filter_path") === "/structuredOutput/score" &&
-        query.get("equals") === "0.8" &&
-        query.get("aggregate_path") === "/structuredOutput/score";
-      const secondPage = query.get("offset") === "20";
-      return route.fulfill({
-        json: {
-          items: filtered
-            ? [
-                {
-                  datasetRecordId: secondPage ? "record-2" : "record-1",
-                  error: null,
-                  input: { load: 3 },
-                  structuredOutput: { score: 0.8 },
-                },
-              ]
-            : [
-                {
-                  datasetRecordId: "record-1",
-                  error: null,
-                  input: { load: 3 },
-                  structuredOutput: { score: 0.8 },
-                },
-                {
-                  datasetRecordId: "record-error",
-                  error: "Tool timed out",
-                  input: { load: 4 },
-                  structuredOutput: null,
-                },
-              ],
-          nextOffset: filtered && !secondPage ? 20 : null,
-          summary: {
-            totalCount: 2,
-            succeededCount: filtered ? 2 : 1,
-            failedCount: filtered ? 0 : 1,
-            numericCount: 2,
-            numericSum: 1.6,
-            numericMin: 0.8,
-            numericMax: 0.8,
-            numericAverage: 0.8,
-          },
-        },
-      });
-    },
-  );
-
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  const runsSection = page.getByRole("region", { name: "Recent Batch Runs" });
-  await expect(runsSection).toContainText("Load check");
-  await expect(runsSection).toContainText("Stress check");
-  await page
-    .getByRole("button", { name: "Inspect Batch Definition Stress check" })
-    .click();
-  await expect(page.getByLabel("Batch Run definition")).toHaveValue(
-    "definition-b",
-  );
-  await expect(
-    runsSection.getByRole("button", { name: "View Batch Run run-1" }),
+    page.getByRole("button", { name: "New Function" }),
   ).toBeVisible();
-  await expect(
-    runsSection.getByRole("button", { name: "View Batch Run run-0" }),
-  ).toHaveCount(0);
-  await expect(page.getByLabel("Batch Run results")).toContainText(
-    "Stress check",
-  );
-  const resultView = page.getByLabel("Batch Run results");
-  await expect(resultView).toContainText(
-    "partial · 2 records · 1 succeeded · 1 failed",
-  );
-  await expect(resultView).toContainText("Tool timed out");
-  await resultView
-    .getByLabel("Filter field (JSON Pointer)")
-    .fill("/structuredOutput/score");
-  await resultView.getByLabel("Exact JSON value").fill("0.8");
-  await resultView
-    .getByLabel("Aggregate numeric field (JSON Pointer)")
-    .fill("/structuredOutput/score");
-  await resultView.getByRole("button", { name: "Apply result query" }).click();
-  await expect(resultView).toContainText("2 results · 2 succeeded · 0 failed");
-  await expect(resultView).toContainText("Average: 0.8");
-  await expect(resultView).toContainText("Record record-1");
-  await resultView.getByRole("button", { name: "Load more results" }).click();
-  await expect(resultView).toContainText("Record record-2");
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole("button", { name: "Open Project navigation" }).click();
-  const mobileNavigation = page.getByRole("dialog", {
-    name: "Project navigation",
-  });
-  await mobileNavigation.getByRole("button", { name: "Operations" }).click();
-  const mobileResultView = mobileNavigation.getByLabel("Batch Run results");
-  await expect(mobileResultView.getByLabel("Result Set query")).toBeVisible();
-  expect(
-    await page.evaluate(
-      () =>
-        document.documentElement.scrollWidth >
-        document.documentElement.clientWidth,
-    ),
-  ).toBe(false);
-});
-
-test("Transform Definition selection scopes retained Runs while historical Runs remain reachable", async ({
-  page,
-}) => {
-  const project = {
-    createdAt: "2026-10-10T00:00:00.000Z",
-    id: "project-transform-context",
-    name: "Transform review",
-    updatedAt: "2026-10-10T00:00:00.000Z",
-  };
-  const definitions = ["First transform", "Second transform"].map(
-    (name, index) => ({
-      id: `definition-${index}`,
-      name,
-      source: "def transform(inputs, parameters): return inputs",
-      inputSelectors: {},
-      inputSchema: {
-        type: "object",
-        properties: {},
-        required: [],
-        additionalProperties: false,
-      },
-      outputSchema: { type: "object" },
-      runtime: "pyodide",
-      packageHash: null,
-      revision: 1,
-    }),
-  );
-  const runs = [
-    ...definitions.map((definition, index) => ({
-      id: `run-${index}`,
-      definitionId: definition.id,
-      definitionSnapshot: {
-        name: definition.name,
-        source: definition.source,
-        revision: 1,
-      },
-    })),
-    {
-      id: "run-deleted",
-      definitionId: "deleted-definition",
-      definitionSnapshot: {
-        name: "Deleted transform",
-        source: "",
-        revision: 1,
-      },
-    },
-  ].map((run) => ({
-    ...run,
-    status: "succeeded",
-    inputs: { load: 3 },
-    parameters: {},
-    inputHash: "12345678",
-    sourceHash: "12345678",
-    packageHash: null,
-    runtime: "pyodide",
-    output: { value: 3 },
-    outputManifest: {},
-    error: null,
-    initiation: { kind: "directUser", approval: "notRequired" },
-    limits: {},
-    createdAt: "2026-10-10T00:00:00.000Z",
-  }));
-  await page.route("**/api/projects", (route) =>
-    route.fulfill({ json: [project] }),
-  );
-  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
-    route.fulfill({ json: definitions }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs?**`,
-    (route) => {
-      const definitionId = new URL(route.request().url()).searchParams.get(
-        "definitionId",
-      );
-      return route.fulfill({
-        json: {
-          items: runs.filter(
-            (run) => !definitionId || run.definitionId === definitionId,
-          ),
-          nextOffset: null,
-        },
-      });
-    },
-  );
-
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Functions" })
-    .click();
-  const retained = page.getByRole("region", { name: "Retained Runs" });
-  const runList = retained.locator("ul").first();
-  await expect(runList).toContainText("First transform");
-  await expect(runList).not.toContainText("Deleted transform");
-  await page
-    .getByRole("button", { name: /Second transform Revision 1/ })
-    .click();
-  await expect(page.getByLabel("Function Run scope")).toHaveValue(
-    "definition-1",
-  );
-  await expect(runList).toContainText("Second transform");
-  await expect(runList).not.toContainText("First transform");
-  await expect(runList).not.toContainText("Deleted transform");
-  await expect(page.getByLabel("Run dataflow")).toContainText(
-    "Second transform",
-  );
-  await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByLabel("Function Run scope")).toHaveValue(
-    "definition-1",
-  );
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= window.innerWidth,
-    ),
-  ).toBe(true);
-  await page.getByRole("button", { name: "Open Project navigation" }).click();
-  const phoneDrawer = page.getByRole("dialog", { name: "Project navigation" });
-  await phoneDrawer
-    .getByRole("button", { name: /Second transform Revision 1/ })
-    .click();
-  const phoneScope = phoneDrawer.getByLabel("Function Run scope");
-  await expect(phoneScope).toHaveValue("definition-1");
-  await phoneDrawer
-    .getByRole("button", { name: "Close Project navigation" })
-    .click();
-  await page.getByRole("button", { name: "Open Project navigation" }).click();
-  await expect(phoneDrawer.getByLabel("Function Run scope")).toHaveValue(
-    "definition-1",
-  );
-  await phoneScope.selectOption("all");
-  await expect(
-    phoneDrawer.getByRole("region", { name: "Retained Runs" }),
-  ).toContainText("Deleted transform");
 });
 
 test("Library opens a registered Dataset in its table viewer and saves through Dataset commands", async ({
@@ -1713,7 +1475,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
     updatedAt: "2026-09-21T00:00:00.000Z",
   };
   const artifactId = "artifact-123";
-  let documentRequests = 0;
+  let exposeUpdatedVersion = false;
   const artifactDocument = (documentVersion: number, threadId: string) => ({
     artifact: {
       documentVersion,
@@ -1762,12 +1524,10 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   await page.route(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
     async (route) => {
-      documentRequests += 1;
       await route.fulfill({
-        json:
-          documentRequests <= 2
-            ? artifactDocument(1, "thread-a")
-            : artifactDocument(2, "thread-b"),
+        json: exposeUpdatedVersion
+          ? artifactDocument(2, "thread-b")
+          : artifactDocument(1, "thread-a"),
       });
     },
   );
@@ -1789,6 +1549,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
   const changedDocumentResponse = page.waitForResponse(
     `**/api/projects/${project.id}/artifacts/${artifactId}`,
   );
+  exposeUpdatedVersion = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await changedDocumentResponse;
 
@@ -1982,866 +1743,6 @@ test("the foundation fixture App renders a portable status Artifact", async ({
   ).toHaveText("available");
 });
 
-test("selection planning and runs reach the Project API through the browser", async ({
-  request,
-}) => {
-  for (const endpoint of [
-    "output-selection-plan",
-    "output-selection-runs",
-    "result-set-selection-plan",
-    "result-set-selection-runs",
-  ]) {
-    const response = await request.post(
-      `/api/projects/missing/transforms/missing/${endpoint}`,
-      { data: {} },
-    );
-    expect(response.status()).toBe(422);
-    expect(response.headers()["content-type"]).toContain("application/json");
-  }
-});
-
-test("a Dataset Transform runs once over ordered Records", async ({ page }) => {
-  const project = {
-    id: "project-selection",
-    name: "Selection review",
-    createdAt: "2026-10-08T00:00:00Z",
-    updatedAt: "2026-10-08T00:00:00Z",
-  };
-  const definition = {
-    id: "transform-1",
-    name: "Aggregate values",
-    source: "def transform(inputs, parameters): pass",
-    inputSelectors: { items: "/selection/values" },
-    inputSchema: {
-      type: "object",
-      properties: { items: {} },
-      required: ["items"],
-      additionalProperties: false,
-    },
-    outputSchema: { type: "object" },
-    runtime: "pyodide",
-    packageHash: "abc",
-    revision: 3,
-  };
-  const selection = {
-    sourceKind: "dataset",
-    datasetId: "dataset-1",
-    datasetVersion: 2,
-    datasetPath: "/.datasets/dataset-1.json",
-    recordIds: ["record-1", "record-2"],
-    records: [
-      { id: "record-1", value: { score: 1 } },
-      { id: "record-2", value: { score: 3 } },
-    ],
-    rule: {},
-    selectedCount: 2,
-    invocationCount: 1,
-  };
-  const writes: Array<Record<string, unknown>> = [];
-  await page.route("**/api/projects", (route) =>
-    route.fulfill({ json: [project] }),
-  );
-  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
-    route.fulfill({
-      json: [{ id: "dataset-1", name: "Measurements", version: 2 }],
-    }),
-  );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
-    route.fulfill({ json: [definition] }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs?**`,
-    (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/dataset-runs/plan`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        json: {
-          datasetId: "dataset-1",
-          datasetVersion: 2,
-          transformDefinitionId: definition.id,
-          transformRevision: 3,
-          recordIds: selection.recordIds,
-          mode: (route.request().postDataJSON() as { mode: string }).mode,
-          invocationCount: 1,
-          outputKind: "transformRun",
-        },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/dataset-runs`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        status: 201,
-        json: {
-          id: "run-selection",
-          status: "succeeded",
-          outputKind: "transformRun",
-        },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs/run-selection`,
-    (route) =>
-      route.fulfill({
-        json: {
-          id: "run-selection",
-          definitionId: definition.id,
-          status: "succeeded",
-          definitionSnapshot: {
-            name: definition.name,
-            source: definition.source,
-            input_selectors: definition.inputSelectors,
-            revision: 3,
-            selection,
-          },
-          inputs: { items: [{ score: 1 }, { score: 3 }] },
-          parameters: {},
-          inputHash: "inputhash",
-          sourceHash: "sourcehash",
-          packageHash: "abc",
-          runtime: "pyodide",
-          output: { total: 4 },
-          outputManifest: {},
-          error: null,
-          initiation: {
-            kind: "directUser",
-            approval: "notRequired",
-            threadId: null,
-            agentRunId: null,
-          },
-          limits: {},
-          createdAt: "2026-10-08T00:00:00Z",
-        },
-      }),
-  );
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Functions" })
-    .click();
-  await page.getByLabel("Input source").selectOption("dataset");
-  await page
-    .getByRole("combobox", { name: "Dataset", exact: true })
-    .selectOption("dataset-1");
-  await page.getByRole("button", { name: "Review Run" }).click();
-  await expect(
-    page.getByRole("region", { name: "Dataset Run plan" }),
-  ).toContainText("2 Records · 1 invocation");
-  await page.getByRole("button", { name: "Start Run" }).click();
-  await expect(
-    page.getByRole("article", { name: "Run dataflow" }),
-  ).toContainText("Dataset dataset- · v2 · 2 Records");
-  expect(writes).toHaveLength(2);
-  expect(writes[0]).toMatchObject({
-    datasetId: "dataset-1",
-    mode: "dataset",
-    parameters: {},
-  });
-  expect(writes[1]).toMatchObject({
-    datasetId: "dataset-1",
-    mode: "dataset",
-    expectedDatasetVersion: 2,
-    expectedTransformRevision: 3,
-  });
-});
-
-test("a retained Transform output selection shows its source and selected values", async ({
-  page,
-}) => {
-  const project = {
-    id: "project-output-selection",
-    name: "Output selection",
-    createdAt: "2026-10-08T00:00:00Z",
-    updatedAt: "2026-10-08T00:00:00Z",
-  };
-  const definition = {
-    id: "transform-consumer",
-    name: "Consume values",
-    source: "def transform(inputs, parameters): pass",
-    inputSelectors: { items: "/selection/values" },
-    inputSchema: {
-      type: "object",
-      properties: { items: {} },
-      required: ["items"],
-      additionalProperties: false,
-    },
-    outputSchema: { type: "object" },
-    runtime: "pyodide",
-    packageHash: "abc",
-    revision: 3,
-  };
-  const upstream = {
-    id: "transform-source-run",
-    definitionId: "transform-producer",
-    status: "succeeded",
-    definitionSnapshot: { name: "Produce values", source: "", revision: 1 },
-    inputs: {},
-    parameters: {},
-    inputHash: "inputhash",
-    sourceHash: "sourcehash",
-    packageHash: "abc",
-    runtime: "pyodide",
-    output: { items: [{ score: 1 }, { score: 3 }] },
-    outputManifest: {},
-    error: null,
-    initiation: { kind: "directUser", approval: "notRequired" },
-    limits: {},
-    createdAt: "2026-10-08T00:00:00Z",
-  };
-  const selection = {
-    sourceKind: "transformRun",
-    sourceRunId: upstream.id,
-    outputPath: "/items",
-    outputHash: "outputhash",
-    positions: [1],
-    values: [{ score: 3 }],
-    rule: { sortPath: "/score", limit: 1 },
-    selectedCount: 1,
-  };
-  const writes: Array<Record<string, unknown>> = [];
-  await page.route("**/api/projects", (route) =>
-    route.fulfill({ json: [project] }),
-  );
-  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
-    route.fulfill({ json: [definition] }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs?**`,
-    (route) => route.fulfill({ json: { items: [upstream], nextOffset: null } }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/output-selection-plan`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        json: {
-          selection,
-          selectedCount: 1,
-          invocationCount: 1,
-          outputLocation: "Function Run output",
-        },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/output-selection-runs`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        status: 201,
-        json: {
-          ...upstream,
-          id: "transform-downstream-run",
-          definitionId: definition.id,
-          definitionSnapshot: { ...definition, selection },
-          inputs: { items: [{ score: 3 }] },
-          output: { total: 3 },
-        },
-      });
-    },
-  );
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Functions" })
-    .click();
-  await page.getByLabel("Input source").selectOption("output");
-  await page
-    .getByRole("combobox", { name: "Function Run", exact: true })
-    .selectOption(upstream.id);
-  await page.getByLabel("Output path (JSON Pointer)").fill("/items");
-  await page.getByLabel("Sort path (JSON Pointer, optional)").fill("/score");
-  await page.getByLabel("Maximum records (optional)").fill("1");
-  await page.getByRole("button", { name: "Review selection" }).click();
-  await expect(
-    page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText("Function Run transfor → Function Run output");
-  await page.getByRole("button", { name: "Start selected Run" }).click();
-  await expect(
-    page.getByRole("article", { name: "Run dataflow" }),
-  ).toContainText("Function Run transfor · 1 values");
-  expect(writes).toHaveLength(2);
-  expect(writes[0]).toMatchObject({
-    sourceRunId: upstream.id,
-    outputPath: "/items",
-    expectedDefinitionRevision: 3,
-    sortPath: "/score",
-    limit: 1,
-  });
-  expect(writes[1]).toEqual(writes[0]);
-});
-
-test("a Batch Result Set selection keeps row lineage in the Function Run", async ({
-  page,
-}) => {
-  const project = {
-    id: "project-result-selection",
-    name: "Result selection",
-    createdAt: "2026-10-08T00:00:00Z",
-    updatedAt: "2026-10-08T00:00:00Z",
-  };
-  const definition = {
-    id: "transform-consumer",
-    name: "Consume results",
-    source: "def transform(inputs, parameters): pass",
-    inputSelectors: { rows: "/selection/rows" },
-    inputSchema: {
-      type: "object",
-      properties: { rows: {} },
-      required: ["rows"],
-      additionalProperties: false,
-    },
-    outputSchema: { type: "object" },
-    runtime: "pyodide",
-    packageHash: "abc",
-    revision: 3,
-  };
-  const selection = {
-    sourceKind: "resultSet",
-    batchRunId: "batch-source-run",
-    outputPath: "/score",
-    selectedCount: 1,
-    selectedRecords: [
-      {
-        resultRecordId: "batch-source-run:row-1",
-        datasetRecordId: "row-1",
-        sourceKey: "beam-A",
-        position: 0,
-        input: { beam: "A" },
-        value: 5,
-      },
-    ],
-    rule: { limit: 1 },
-  };
-  const retained = {
-    id: "transform-result-run",
-    definitionId: definition.id,
-    status: "succeeded",
-    definitionSnapshot: { ...definition, selection },
-    inputs: {
-      rows: [
-        {
-          resultRecordId: "batch-source-run:row-1",
-          datasetRecordId: "row-1",
-          sourceKey: "beam-A",
-          position: 0,
-          input: { beam: "A" },
-          value: 5,
-        },
-      ],
-    },
-    parameters: {},
-    inputHash: "inputhash",
-    sourceHash: "sourcehash",
-    packageHash: "abc",
-    runtime: "pyodide",
-    output: { total: 5 },
-    outputManifest: {},
-    error: null,
-    initiation: { kind: "directUser", approval: "notRequired" },
-    limits: {},
-    createdAt: "2026-10-08T00:00:00Z",
-  };
-  const writes: Array<Record<string, unknown>> = [];
-  await page.route("**/api/projects", (route) =>
-    route.fulfill({ json: [project] }),
-  );
-  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
-    route.fulfill({ json: [definition] }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs?**`,
-    (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
-  );
-  await page.route(`**/api/projects/${project.id}/batch-runs?**`, (route) =>
-    route.fulfill({
-      json: {
-        items: [
-          {
-            id: "batch-source-run",
-            definitionId: "batch-definition-1",
-            definitionName: "Source results",
-            status: "partial",
-            archivedAt: null,
-            createdAt: "2026-10-08T00:00:00Z",
-            updatedAt: "2026-10-08T00:00:00Z",
-            initiatorSubject: "sam",
-            initiation: { kind: "directUser", approval: "notRequired" },
-            recordCount: 2,
-            succeededCount: 1,
-            failedCount: 1,
-          },
-        ],
-        nextOffset: null,
-      },
-    }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/result-set-selection-plan`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        json: {
-          selection,
-          selectedCount: 1,
-          invocationCount: 1,
-          outputLocation: "Function Run output",
-        },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/result-set-selection-runs`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        status: 201,
-        json: { id: retained.id, status: "succeeded" },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs/${retained.id}`,
-    (route) => route.fulfill({ json: retained }),
-  );
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Functions" })
-    .click();
-  await page.getByLabel("Input source").selectOption("resultSet");
-  await page
-    .getByRole("combobox", { name: "Batch Run Result Set" })
-    .selectOption("batch-source-run");
-  await page.getByLabel(/Value path in each result/).fill("/score");
-  await page.getByLabel("Maximum records (optional)").fill("1");
-  await page.getByRole("button", { name: "Review selection" }).click();
-  await expect(
-    page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText("Batch Result Set batch-so → Function Run output");
-  await page.getByText("Selected source values").click();
-  await expect(
-    page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText('"resultRecordId": "batch-source-run:row-1"');
-  await expect(
-    page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText('"sourceKey": "beam-A"');
-  await page.getByRole("button", { name: "Start selected Run" }).click();
-  await expect(
-    page.getByRole("article", { name: "Run dataflow" }),
-  ).toContainText("Batch Result Set batch-so · 1 values");
-  expect(writes).toHaveLength(2);
-  expect(writes[0]).toMatchObject({
-    sourceRunId: "batch-source-run",
-    outputPath: "/score",
-    expectedDefinitionRevision: 3,
-    limit: 1,
-  });
-  expect(writes[1]).toEqual(writes[0]);
-});
-
-test("a retained MCP output selection is reviewable and traceable", async ({
-  page,
-}) => {
-  const project = {
-    id: "project-mcp-selection",
-    name: "MCP selection",
-    createdAt: "2026-10-08T00:00:00Z",
-    updatedAt: "2026-10-08T00:00:00Z",
-  };
-  const definition = {
-    id: "transform-mcp-consumer",
-    name: "Consume MCP output",
-    source: "def transform(inputs, parameters): pass",
-    inputSelectors: { items: "/selection/values" },
-    inputSchema: {
-      type: "object",
-      properties: { items: {} },
-      required: ["items"],
-      additionalProperties: false,
-    },
-    outputSchema: { type: "object" },
-    runtime: "pyodide",
-    packageHash: "abc",
-    revision: 3,
-  };
-  const selection = {
-    sourceKind: "mcpToolResult",
-    artifactId: "artifact-mcp-output",
-    artifactVersion: 2,
-    pluginId: "fixture",
-    toolName: "measure",
-    outputPath: "/measurements",
-    selectedValues: [{ position: 1, value: { name: "B", score: 4 } }],
-    rule: { limit: 1 },
-    selectedCount: 1,
-  };
-  const retained = {
-    id: "transform-mcp-run",
-    definitionId: definition.id,
-    status: "succeeded",
-    definitionSnapshot: { ...definition, selection },
-    inputs: { items: [{ name: "B", score: 4 }] },
-    parameters: {},
-    inputHash: "inputhash",
-    sourceHash: "sourcehash",
-    packageHash: "abc",
-    runtime: "pyodide",
-    output: { count: 1 },
-    outputManifest: {},
-    error: null,
-    initiation: { kind: "directUser", approval: "notRequired" },
-    limits: {},
-    createdAt: "2026-10-08T00:00:00Z",
-  };
-  const writes: Array<Record<string, unknown>> = [];
-  await page.route("**/api/projects", (route) =>
-    route.fulfill({ json: [project] }),
-  );
-  await page.route(`**/api/projects/${project.id}/threads`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/datasets`, (route) =>
-    route.fulfill({ json: [] }),
-  );
-  await page.route(`**/api/projects/${project.id}/transforms`, (route) =>
-    route.fulfill({ json: [definition] }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs?**`,
-    (route) => route.fulfill({ json: { items: [], nextOffset: null } }),
-  );
-  await page.route(`**/api/projects/${project.id}/artifacts`, (route) =>
-    route.fulfill({
-      json: {
-        artifacts: [
-          {
-            id: selection.artifactId,
-            title: "fixture: measure",
-            type: "fixture.measure",
-            schemaId: "agent-hub.tool-result-snapshot",
-            documentVersion: 2,
-          },
-          {
-            id: "unrelated-artifact",
-            title: "Project note",
-            type: "note",
-            schemaId: "agent-hub.note",
-            documentVersion: 1,
-          },
-        ],
-      },
-    }),
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/artifact-selection-plan`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        json: {
-          selection,
-          selectedCount: 1,
-          invocationCount: 1,
-          outputLocation: "Function Run output",
-        },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/${definition.id}/artifact-selection-runs`,
-    (route) => {
-      writes.push(route.request().postDataJSON() as Record<string, unknown>);
-      return route.fulfill({
-        status: 201,
-        json: { id: retained.id, status: "succeeded" },
-      });
-    },
-  );
-  await page.route(
-    `**/api/projects/${project.id}/transforms/runs/${retained.id}`,
-    (route) => route.fulfill({ json: retained }),
-  );
-  await page.goto("/");
-  await page
-    .getByRole("navigation", { name: "Project views" })
-    .getByRole("button", { name: "Operations" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Operation types" })
-    .getByRole("button", { name: "Functions" })
-    .click();
-  await page.getByLabel("Input source").selectOption("artifact");
-  await expect(
-    page.getByRole("combobox", { name: "MCP Tool Result Artifact" }),
-  ).not.toContainText("Project note");
-  await page
-    .getByRole("combobox", { name: "MCP Tool Result Artifact" })
-    .selectOption(selection.artifactId);
-  await page.getByLabel(/Values path in MCP output/).fill("/measurements");
-  await page.getByLabel("Maximum records (optional)").fill("1");
-  await page.getByRole("button", { name: "Review selection" }).click();
-  await expect(
-    page.getByRole("region", { name: "Selection plan" }),
-  ).toContainText("MCP Tool Result artifact · v2 → Function Run output");
-  await page.getByRole("button", { name: "Start selected Run" }).click();
-  await expect(
-    page.getByRole("article", { name: "Run dataflow" }),
-  ).toContainText("MCP Tool Result artifact · v2 · 1 values");
-  expect(writes).toHaveLength(2);
-  expect(writes[0]).toMatchObject({
-    artifactId: selection.artifactId,
-    expectedArtifactVersion: 2,
-    outputPath: "/measurements",
-    expectedDefinitionRevision: 3,
-    limit: 1,
-  });
-  expect(writes[1]).toEqual(writes[0]);
-});
-
-test.describe("at phone width", () => {
-  test.use({ viewport: { height: 844, width: 390 } });
-
-  test("Project controls fit without horizontal overflow", async ({ page }) => {
-    await page.goto("/");
-    await page.getByLabel("Selected Project").waitFor({ state: "visible" });
-
-    const headerWidth = await page.locator("header").evaluate((element) => ({
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-    }));
-    expect(headerWidth.scrollWidth).toBeLessThanOrEqual(
-      headerWidth.clientWidth,
-    );
-    await expect(page.getByLabel("Selected Project")).toBeInViewport();
-    await expect(
-      page.getByRole("button", { name: "Open Project navigation" }),
-    ).toBeInViewport();
-  });
-
-  test("Project navigation exposes Thread and activity controls", async ({
-    page,
-  }) => {
-    const project = {
-      createdAt: "2026-09-16T00:00:00.000Z",
-      id: "project-123",
-      name: "Design review",
-      updatedAt: "2026-09-16T00:00:00.000Z",
-    };
-    const thread = {
-      createdAt: "2026-09-16T00:00:00.000Z",
-      id: "thread-123",
-      projectId: project.id,
-      title: "New Thread 1",
-      updatedAt: "2026-09-16T00:00:00.000Z",
-    };
-
-    await page.route("**/api/projects", async (route) => {
-      await route.fulfill({ json: [project] });
-    });
-    await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
-      if (route.request().method() === "POST") {
-        await route.fulfill({ json: thread, status: 201 });
-        return;
-      }
-      await route.fulfill({ json: [] });
-    });
-    await page.route(
-      `**/api/projects/${project.id}/artifacts`,
-      async (route) => {
-        await route.fulfill({ json: { artifacts: [] } });
-      },
-    );
-    await page.route(
-      `**/api/projects/${project.id}/files/index`,
-      async (route) => {
-        await route.fulfill({
-          json: {
-            files: [
-              {
-                path: "/project/notes/check.md",
-                updatedAt: "2026-09-16T00:00:00.000Z",
-                version: 1,
-              },
-            ],
-          },
-        });
-      },
-    );
-    await page.route(
-      `**/api/projects/${project.id}/files?**`,
-      async (route) => {
-        await route.fulfill({
-          json: {
-            content: "# Preview\n",
-            path: "/project/notes/check.md",
-            version: 1,
-          },
-        });
-      },
-    );
-    await page.route(
-      `**/api/projects/${project.id}/datasets`,
-      async (route) => {
-        await route.fulfill({ json: [] });
-      },
-    );
-
-    await page.goto("/");
-    await expect(page.getByLabel("Selected Project")).toHaveValue(project.id);
-
-    await page.getByRole("button", { name: "Open Project navigation" }).click();
-    const drawer = page.getByRole("dialog", { name: "Project navigation" });
-    await expect(drawer).toBeVisible();
-    await drawer.getByRole("button", { name: "+ New Thread" }).click();
-    await expect(
-      drawer.getByRole("button", { name: "New Thread 1", exact: true }),
-    ).toBeVisible();
-
-    await drawer.getByRole("button", { name: "Library" }).click();
-    await drawer
-      .getByRole("button", {
-        exact: true,
-        name: "/project/notes/check.md",
-      })
-      .click();
-    await expect(drawer).toBeHidden();
-    await expect(page.getByText("# Preview")).toBeVisible();
-  });
-
-  test("Library Dataset and Batch Definition controls retain their dark, touch-ready treatment", async ({
-    page,
-  }) => {
-    const project = {
-      createdAt: "2026-09-16T00:00:00.000Z",
-      id: "project-123",
-      name: "Design review",
-      updatedAt: "2026-09-16T00:00:00.000Z",
-    };
-    const dataset = {
-      id: "dataset-123",
-      name: "Load cases",
-      version: 1,
-      filePath: "/project/.datasets/dataset-123.json",
-      records: [{ id: "record-123", sourceKey: "LC-1" }],
-    };
-    const definition = {
-      datasetAvailable: true,
-      datasetId: dataset.id,
-      id: "definition-123",
-      name: "Cantilever check",
-      pluginId: "reference-calculation",
-      toolName: "calculate_cantilever_tip_load",
-    };
-
-    await page.route("**/api/projects", async (route) => {
-      await route.fulfill({ json: [project] });
-    });
-    await page.route(`**/api/projects/${project.id}/threads`, async (route) => {
-      await route.fulfill({ json: [] });
-    });
-    await page.route(
-      `**/api/projects/${project.id}/artifacts`,
-      async (route) => {
-        await route.fulfill({ json: { artifacts: [] } });
-      },
-    );
-    await page.route(
-      `**/api/projects/${project.id}/files/index`,
-      async (route) => {
-        await route.fulfill({
-          json: {
-            files: [
-              {
-                path: dataset.filePath,
-                version: 1,
-                updatedAt: project.updatedAt,
-              },
-            ],
-          },
-        });
-      },
-    );
-    await page.route(
-      `**/api/projects/${project.id}/datasets`,
-      async (route) => {
-        await route.fulfill({ json: [dataset] });
-      },
-    );
-    await page.route(
-      `**/api/projects/${project.id}/batch-definitions`,
-      async (route) => {
-        await route.fulfill({ json: [definition] });
-      },
-    );
-
-    await page.goto("/");
-    await page.getByRole("button", { name: "Open Project navigation" }).click();
-    const drawer = page.getByRole("dialog", { name: "Project navigation" });
-
-    await drawer.getByRole("button", { name: "Library" }).click();
-    await expect(drawer.getByText("Load cases")).toBeVisible();
-    await expect(
-      drawer.getByRole("button", { name: "Load cases actions" }),
-    ).toBeVisible();
-
-    await drawer.getByRole("button", { name: "Operations" }).click();
-    await drawer
-      .getByRole("navigation", { name: "Operation types" })
-      .getByRole("button", { name: "Batch Definitions" })
-      .click();
-    const recordSelector = drawer.getByLabel("Cantilever check Dataset Record");
-    await expect(recordSelector).toBeVisible();
-    await expect(recordSelector).toHaveCSS(
-      "background-color",
-      "rgb(27, 33, 26)",
-    );
-    await expect(recordSelector).toHaveCSS("color", "rgb(251, 253, 246)");
-    const runAllBounds = await drawer
-      .getByRole("button", { name: "Run all records" })
-      .boundingBox();
-    const selectorBounds = await recordSelector.boundingBox();
-    expect(runAllBounds).not.toBeNull();
-    expect(selectorBounds).not.toBeNull();
-    expect(selectorBounds!.y).toBeGreaterThan(
-      runAllBounds!.y + runAllBounds!.height,
-    );
-    expect(selectorBounds!.width).toBeGreaterThan(200);
-  });
-});
-
 test("approving a tool call resumes through the AG-UI transport contract", async ({
   page,
 }) => {
@@ -2967,7 +1868,7 @@ test("approving a tool call resumes through the AG-UI transport contract", async
   });
 
   await page.goto("/");
-  await page.getByLabel("Message Agent Hub").fill("Create the file");
+  await page.getByLabel("Message").fill("Create the file");
   await page.getByRole("button", { name: "Send" }).click();
   await expect(page.getByText("Approve Project File change")).toBeVisible();
   await expect(page.getByText("write_file", { exact: true })).toBeHidden();
@@ -2987,6 +1888,654 @@ test("approving a tool call resumes through the AG-UI transport contract", async
     ]);
   await page.getByRole("button", { name: "the file" }).click();
   await expect(page.getByText("# Example")).toBeVisible();
+});
+
+test("a batch of approvals resumes only after every docked decision", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-16T00:00:00.000Z",
+    id: "project-approval-batch",
+    name: "Approval batch",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-16T00:00:00.000Z",
+    id: "thread-approval-batch",
+    projectId: project.id,
+    title: "Approval batch",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const actions = ["uppercase_text", "word_stats", "bullet_summary"].map(
+    (name, index) => ({
+      args: {
+        input_schema_json: "{}",
+        name,
+        output_schema_json: "{}",
+        source: "def run(inputs): return inputs",
+      },
+      interruptId: `interrupt-${index + 1}`,
+      toolCallId: `tool-${index + 1}`,
+    }),
+  );
+  const resumeRequests: unknown[] = [];
+
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      if (input.resume) {
+        resumeRequests.push(input.resume);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: "assistant-batch-complete",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: "assistant-batch-complete",
+              delta: "Approval batch completed.",
+            },
+            {
+              type: "TEXT_MESSAGE_END",
+              messageId: "assistant-batch-complete",
+            },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+        return;
+      }
+
+      const events = [
+        { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+        ...actions.flatMap(({ args, toolCallId }) => [
+          {
+            type: "TOOL_CALL_START",
+            toolCallId,
+            toolCallName: "create_project_function",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId,
+            delta: JSON.stringify(args),
+          },
+          { type: "TOOL_CALL_END", toolCallId },
+        ]),
+        {
+          type: "RUN_FINISHED",
+          threadId: thread.id,
+          runId: input.runId,
+          outcome: {
+            type: "interrupt",
+            interrupts: actions.map(({ interruptId, toolCallId }) => ({
+              id: interruptId,
+              reason: "tool_call",
+              toolCallId,
+            })),
+          },
+        },
+      ];
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse(events),
+      });
+    },
+  );
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history")) {
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    }
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message").fill("Create three Functions");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const dock = page.getByRole("region", { name: "Pending approvals" });
+  await expect(dock.getByRole("region")).toHaveCount(3);
+  await expect(page.getByText("Run: Awaiting approval")).toBeVisible();
+  await expect(
+    page.locator('[data-role="assistant"]').getByRole("region"),
+  ).toHaveCount(0);
+
+  await dock
+    .getByRole("region")
+    .nth(0)
+    .getByRole("button", { name: "Approve" })
+    .click();
+  await expect.poll(() => resumeRequests).toHaveLength(0);
+  await expect(dock.getByRole("region")).toHaveCount(2);
+
+  await dock
+    .getByRole("region")
+    .nth(0)
+    .getByRole("button", { name: "Reject" })
+    .click();
+  await expect.poll(() => resumeRequests).toHaveLength(0);
+  await expect(dock.getByRole("region")).toHaveCount(1);
+
+  await dock
+    .getByRole("region")
+    .getByRole("button", { name: "Approve" })
+    .click();
+  await expect
+    .poll(() => resumeRequests)
+    .toEqual([
+      [
+        {
+          interruptId: "interrupt-1",
+          payload: { approved: true },
+          status: "resolved",
+        },
+        {
+          interruptId: "interrupt-2",
+          payload: { approved: false, reason: "Rejected by the user" },
+          status: "resolved",
+        },
+        {
+          interruptId: "interrupt-3",
+          payload: { approved: true },
+          status: "resolved",
+        },
+      ],
+    ]);
+  await expect(page.getByText("Approval batch completed.")).toBeVisible();
+});
+
+test("composer blocks sending while an approval is pending", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-16T00:00:00.000Z",
+    id: "project-pending-approval",
+    name: "Approval review",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-16T00:00:00.000Z",
+    id: "thread-pending-approval",
+    projectId: project.id,
+    title: "Approval review",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const agentRequests: unknown[] = [];
+
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as { runId: string };
+      agentRequests.push(input);
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "tool-pending-approval",
+            toolCallName: "create_project_function",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "tool-pending-approval",
+            delta: JSON.stringify({ name: "Reviewed function" }),
+          },
+          { type: "TOOL_CALL_END", toolCallId: "tool-pending-approval" },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-pending-approval",
+                  reason: "tool_call",
+                  toolCallId: "tool-pending-approval",
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history")) {
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    }
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message").fill("Create a Function");
+  await page.getByRole("button", { name: "Send" }).click();
+  const approval = page.getByRole("region", {
+    name: "Approve protected action",
+  });
+  await expect(approval).toBeVisible();
+  await expect(
+    page.locator('[data-role="assistant"]').getByRole("region"),
+  ).toHaveCount(0);
+
+  const composer = page.getByLabel("Message");
+  const send = page.getByRole("button", { name: "Send" });
+  await composer.fill("Another request while approval is waiting");
+  await expect(send).toBeDisabled();
+  await expect(agentRequests).toHaveLength(1);
+  await expect(
+    page.getByText(
+      "Respond to the pending approval before sending another message.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText("The agent run failed. You can try sending again."),
+  ).toBeHidden();
+});
+
+test("process stays expanded while work streams and collapses when the turn ends", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "project-process-progress",
+    name: "Progress review",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "thread-process-progress",
+    projectId: project.id,
+    title: "Check progress UI",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : input.href;
+      if (!url.endsWith("/agent") || init?.method !== "POST") {
+        return nativeFetch(input, init);
+      }
+
+      const body = JSON.parse(String(init.body)) as {
+        runId: string;
+        threadId: string;
+      };
+      const events = [
+        { type: "RUN_STARTED", threadId: body.threadId, runId: body.runId },
+        {
+          type: "TOOL_CALL_START",
+          toolCallId: "call-read-project-file",
+          toolCallName: "read_project_file",
+          parentMessageId: "message-progress-tool",
+        },
+        {
+          type: "TOOL_CALL_ARGS",
+          toolCallId: "call-read-project-file",
+          delta: JSON.stringify({ path: "/project/brief.md" }),
+        },
+      ];
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = (event: object) =>
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
+            );
+          const pause = (duration: number) =>
+            new Promise((resolve) => setTimeout(resolve, duration));
+          for (const event of events) send(event);
+          await pause(700);
+          send({
+            type: "TOOL_CALL_END",
+            toolCallId: "call-read-project-file",
+          });
+          send({
+            type: "TOOL_CALL_RESULT",
+            messageId: "message-progress-result",
+            toolCallId: "call-read-project-file",
+            content: "Project brief loaded",
+          });
+          await pause(700);
+          send({
+            type: "TEXT_MESSAGE_START",
+            messageId: "message-progress-answer",
+            role: "assistant",
+          });
+          send({
+            type: "TEXT_MESSAGE_CONTENT",
+            messageId: "message-progress-answer",
+            delta: "I checked the brief and found the requested details.",
+          });
+          send({
+            type: "TEXT_MESSAGE_END",
+            messageId: "message-progress-answer",
+          });
+          await pause(500);
+          send({
+            type: "RUN_FINISHED",
+            threadId: body.threadId,
+            runId: body.runId,
+            outcome: { type: "success" },
+          });
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+  });
+
+  await page.route("**/api/projects", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: [] })
+      : route.fulfill({ json: project, status: 201 }),
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history")) {
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    }
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  const selectedProject = page.getByLabel("Selected Project");
+  await selectedProject.selectOption({ label: "New Project…" });
+  const projectDialog = page.getByRole("dialog", { name: "New Project" });
+  await projectDialog.getByLabel("Project name").fill(project.name);
+  await projectDialog.getByRole("button", { name: "Create Project" }).click();
+  await expect(selectedProject).toHaveValue(project.id);
+  await page.getByLabel("Message").fill("Check the project brief");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  const process = page.locator("details").first();
+  await expect(process).toHaveAttribute("open", "");
+  await expect(process.locator(":scope > summary")).toContainText("Thinking");
+  await expect(process.locator(":scope > summary")).toContainText(
+    "Using tools",
+  );
+  const toolCall = process.getByText("Read Project File");
+  await expect(toolCall).toBeVisible();
+  await expect(process.getByText("Running")).toBeVisible();
+  const toolDetails = toolCall.locator("xpath=../..");
+  await expect(toolDetails).not.toHaveAttribute("open", "");
+  await toolCall.click();
+  await expect(toolDetails.getByText("Input", { exact: true })).toBeVisible();
+  await expect(toolDetails.getByText("Output", { exact: true })).toBeVisible();
+  await expect(toolDetails.getByText("/project/brief.md")).toBeVisible();
+
+  await expect(page.getByText("Thinking", { exact: true })).toBeVisible();
+  await expect(process).toHaveAttribute("open", "");
+  await expect(
+    page.getByText("I checked the brief and found the requested details."),
+  ).toBeVisible();
+  await expect(page.getByText("Process", { exact: true })).toBeVisible();
+  await expect(process).not.toHaveAttribute("open", "");
+  await process.locator(":scope > summary").click();
+  await expect(process).toHaveAttribute("open", "");
+  await expect(toolDetails.getByText("Project brief loaded")).toBeVisible();
+});
+
+test("approving an interrupt after a LangGraph message snapshot resumes", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "project-function-approval",
+    name: "Workflow creation",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-13T00:00:00.000Z",
+    id: "thread-function-approval",
+    projectId: project.id,
+    title: "Create a workflow",
+    updatedAt: "2026-10-13T00:00:00.000Z",
+  };
+  const resumeRequests: unknown[] = [];
+  const failureMessages: string[] = [];
+
+  page.on("console", (message) => {
+    if (message.type() === "error") failureMessages.push(message.text());
+  });
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      if (input.resume) {
+        resumeRequests.push(input.resume);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: "assistant-function-approved",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: "assistant-function-approved",
+              delta: "Created the proposed Function.",
+            },
+            {
+              type: "TEXT_MESSAGE_END",
+              messageId: "assistant-function-approved",
+            },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "call-discover-functions",
+            toolCallName: "discover_project_functions",
+            parentMessageId: "message-discover-functions",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "call-discover-functions",
+            delta: "{}",
+          },
+          {
+            type: "TOOL_CALL_END",
+            toolCallId: "call-discover-functions",
+          },
+          {
+            type: "TOOL_CALL_RESULT",
+            messageId: "message-result-functions",
+            toolCallId: "call-discover-functions",
+            content: "[]",
+          },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "call-create-function",
+            toolCallName: "create_project_function",
+            parentMessageId: "message-create-function",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "call-create-function",
+            delta: JSON.stringify({
+              input_schema_json: "{}",
+              name: "Workflow step",
+              output_schema_json: "{}",
+              source: "def run(inputs): return inputs",
+            }),
+          },
+          { type: "TOOL_CALL_END", toolCallId: "call-create-function" },
+          {
+            type: "MESSAGES_SNAPSHOT",
+            messages: [
+              {
+                id: "message-discover-functions",
+                role: "assistant",
+                content: "",
+                toolCalls: [
+                  {
+                    id: "call-discover-functions",
+                    type: "function",
+                    function: {
+                      name: "discover_project_functions",
+                      arguments: "{}",
+                    },
+                  },
+                ],
+              },
+              {
+                id: "message-result-functions",
+                role: "tool",
+                toolCallId: "call-discover-functions",
+                content: "[]",
+              },
+              {
+                id: "message-create-function",
+                role: "assistant",
+                content: "",
+                toolCalls: [
+                  {
+                    id: "call-create-function",
+                    type: "function",
+                    function: {
+                      name: "create_project_function",
+                      arguments: JSON.stringify({
+                        input_schema_json: "{}",
+                        name: "Workflow step",
+                        output_schema_json: "{}",
+                        source: "def run(inputs): return inputs",
+                      }),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-create-function",
+                  reason: "tool_call",
+                  message: "Create the proposed Python Function?",
+                  toolCallId: "call-create-function",
+                  metadata: {
+                    agentHubLangChainHITL: {
+                      rawInterruptId: "interrupt-create-function",
+                      actionIndex: 0,
+                      allowedDecisions: ["approve", "reject"],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Message").fill("Create a workflow");
+  await page.getByRole("button", { name: "Send" }).click();
+  const card = page.getByRole("region", { name: "Approve protected action" });
+  await expect(card).toContainText("Create the proposed Python Function?");
+  await card.getByRole("button", { name: "Approve" }).click();
+
+  await expect
+    .poll(() => resumeRequests)
+    .toEqual([
+      [
+        {
+          interruptId: "interrupt-create-function",
+          payload: { approved: true },
+          status: "resolved",
+        },
+      ],
+    ]);
+  await expect(page.getByText("Created the proposed Function.")).toBeVisible();
+  await expect(
+    page.getByText("The agent run failed. You can try sending again."),
+  ).toBeHidden();
+  expect(
+    failureMessages.some((message) =>
+      message.includes("respondToToolApproval: no pending interrupts"),
+    ),
+  ).toBe(false);
 });
 
 test("pending edit_file shows a diff and proposed file in the right preview", async ({
@@ -3071,7 +2620,7 @@ test("pending edit_file shows a diff and proposed file in the right preview", as
   });
 
   await page.goto("/");
-  await page.getByLabel("Message Agent Hub").fill("Revise the check");
+  await page.getByLabel("Message").fill("Revise the check");
   await page.getByRole("button", { name: "Send" }).click();
   const card = page.getByRole("region", {
     name: "Approve Project File change",

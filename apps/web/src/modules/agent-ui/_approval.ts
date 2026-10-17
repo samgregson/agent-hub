@@ -5,11 +5,6 @@ const approvalOnlyTools = new Set([
   "create_project_dataset",
   "update_project_dataset",
   "delete_project_dataset",
-  "create_project_batch_definition",
-  "update_project_batch_definition",
-  "delete_project_batch_definition",
-  "start_project_batch_run",
-  "start_project_dataset_transform_run",
 ]);
 
 export interface ProposedFileReview {
@@ -29,12 +24,7 @@ export function approvalLabel(toolName: string): string {
       : "Approve Project Artifact change";
   }
   if (toolName === "delete_project_dataset") return "Approve Dataset deletion";
-  if (toolName === "start_project_dataset_transform_run")
-    return "Approve Transform Run";
   if (toolName.includes("dataset")) return "Approve Dataset change";
-  if (toolName.includes("batch_definition"))
-    return "Approve Batch Definition change";
-  if (toolName === "start_project_batch_run") return "Approve Batch Run";
   return "Approve protected action";
 }
 
@@ -42,10 +32,7 @@ export function isApprovalOnlyTool(toolName: string): boolean {
   return approvalOnlyTools.has(toolName);
 }
 
-export function approvalTarget(
-  args: unknown,
-  toolName?: string,
-): {
+export function approvalTarget(args: unknown): {
   artifactId?: string;
   path?: string;
   summary: string;
@@ -58,18 +45,6 @@ export function approvalTarget(
     typeof fields.file_path === "string" ? fields.file_path : undefined;
   if (path?.startsWith("/project/") && !path.split("/").includes("..")) {
     return { path, summary: path };
-  }
-  if (
-    toolName === "start_project_dataset_transform_run" &&
-    typeof fields.definition_id === "string" &&
-    typeof fields.dataset_id === "string"
-  ) {
-    const mode = fields.mode === "perRecord" ? "per-Record" : "Dataset-wide";
-    return {
-      summary:
-        `Transform ${fields.definition_id} · Dataset ${fields.dataset_id} ` +
-        `v${fields.expected_dataset_version} · ${mode} · revision ${fields.expected_transform_revision}`,
-    };
   }
   const artifactId =
     typeof fields.artifact_id === "string" ? fields.artifact_id : undefined;
@@ -96,13 +71,7 @@ export function approvalTarget(
   const definitionId =
     typeof fields.definition_id === "string" ? fields.definition_id : undefined;
   if (definitionId) {
-    const recordId =
-      typeof fields.record_id === "string" ? fields.record_id : undefined;
-    const scope =
-      toolName === "start_project_batch_run"
-        ? ` · ${recordId ? `record ${recordId}` : "all records"}`
-        : "";
-    return { summary: `Definition ${definitionId}${scope}` };
+    return { summary: `Definition ${definitionId}` };
   }
   if (action) return { summary: action };
   if (name) return { summary: name };

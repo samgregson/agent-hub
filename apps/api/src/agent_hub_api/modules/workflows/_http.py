@@ -2,7 +2,7 @@
 
 from dataclasses import asdict
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,8 +19,12 @@ from agent_hub_api.modules.projects import ProjectAccess
 from ._application import (
     WorkflowDefinition,
     WorkflowDefinitionModule,
+    WorkflowEdge,
     WorkflowGraph,
+    WorkflowInput,
+    WorkflowNode,
     WorkflowNotFound,
+    WorkflowOutput,
     WorkflowValidationError,
     WorkflowVersionConflict,
 )
@@ -38,13 +42,25 @@ class NodeModel(_Model):
     version: int | str
     shape: str = "single"
     tool_name: str | None = None
+    map_input: str | None = None
 
 
 class EdgeModel(_Model):
-    source_node: str
-    source_port: str
+    source_node: str | None = None
+    source_port: str | None = None
     target_node: str
     target_port: str
+    source_kind: str = "node"
+    source_input: str | None = None
+    source_path: str = ""
+    target_path: str = ""
+    literal: Any = None
+
+
+class WorkflowInputModel(_Model):
+    name: str
+    schema_: dict[str, Any] = Field(alias="schema")
+    required: bool = True
 
 
 class OutputModel(_Model):
@@ -57,6 +73,7 @@ class GraphModel(_Model):
     nodes: list[NodeModel]
     edges: list[EdgeModel]
     outputs: list[OutputModel]
+    inputs: list[WorkflowInputModel] = Field(default_factory=list)
 
 
 class WorkflowRequest(_Model):
@@ -77,6 +94,7 @@ class WorkflowResponse(_Model):
 class PrepareRunRequest(_Model):
     idempotency_key: str = Field(min_length=1, max_length=120)
     expected_version: int = Field(ge=1)
+    workflow_inputs: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowRunResponse(_Model):
@@ -91,7 +109,14 @@ class WorkflowRunResponse(_Model):
 
 
 def _graph(value: GraphModel) -> WorkflowGraph:
-    return WorkflowGraph.from_json(value.model_dump_json(by_alias=False))
+    return WorkflowGraph(
+        nodes=tuple(WorkflowNode(**node.model_dump(by_alias=False)) for node in value.nodes),
+        edges=tuple(WorkflowEdge(**edge.model_dump(by_alias=False)) for edge in value.edges),
+        outputs=tuple(
+            WorkflowOutput(**output.model_dump(by_alias=False)) for output in value.outputs
+        ),
+        inputs=tuple(WorkflowInput(**item.model_dump(by_alias=True)) for item in value.inputs),
+    )
 
 
 def _response(value: WorkflowDefinition) -> WorkflowResponse:
@@ -245,6 +270,7 @@ def create_workflow_router(
                     workflow_id,
                     body.idempotency_key,
                     expected_version=body.expected_version,
+                    workflow_inputs=body.workflow_inputs,
                 )
             except WorkflowNotFound as error:
                 raise HTTPException(status_code=404, detail="Workflow is unavailable.") from error

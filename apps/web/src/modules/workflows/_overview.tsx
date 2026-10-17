@@ -12,19 +12,32 @@ type WorkflowNode = {
   version: number | string;
   shape?: string;
   toolName?: string | null;
+  mapInput?: string | null;
 };
 
 type WorkflowEdge = {
-  sourceNode: string;
-  sourcePort: string;
+  sourceNode: string | null;
+  sourcePort: string | null;
   targetNode: string;
   targetPort: string;
+  sourceKind?: "node" | "workflowInput" | "literal";
+  sourceInput?: string | null;
+  sourcePath?: string;
+  targetPath?: string;
+  literal?: unknown;
+};
+
+type WorkflowInput = {
+  name: string;
+  schema: Record<string, unknown>;
+  required: boolean;
 };
 
 type WorkflowGraph = {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   outputs: { name: string; node: string; port: string }[];
+  inputs: WorkflowInput[];
 };
 
 export type WorkflowDefinition = {
@@ -77,6 +90,7 @@ function graphFrom(value: unknown): WorkflowGraph | null {
   const nodes = Array.isArray(value.nodes) ? value.nodes : [];
   const edges = Array.isArray(value.edges) ? value.edges : [];
   const outputs = Array.isArray(value.outputs) ? value.outputs : [];
+  const inputs = Array.isArray(value.inputs) ? value.inputs : [];
   const validNodes = nodes.every((node) => {
     if (!isRecord(node)) return false;
     return (
@@ -88,12 +102,21 @@ function graphFrom(value: unknown): WorkflowGraph | null {
   const validEdges = edges.every((edge) => {
     if (!isRecord(edge)) return false;
     return (
-      typeof (edge.sourceNode ?? edge.source_node) === "string" &&
-      typeof (edge.sourcePort ?? edge.source_port) === "string" &&
+      ((edge.sourceNode ?? edge.source_node) == null ||
+        typeof (edge.sourceNode ?? edge.source_node) === "string") &&
+      ((edge.sourcePort ?? edge.source_port) == null ||
+        typeof (edge.sourcePort ?? edge.source_port) === "string") &&
       typeof (edge.targetNode ?? edge.target_node) === "string" &&
       typeof (edge.targetPort ?? edge.target_port) === "string"
     );
   });
+  const validInputs = inputs.every(
+    (input) =>
+      isRecord(input) &&
+      typeof input.name === "string" &&
+      isRecord(input.schema) &&
+      (input.required === undefined || typeof input.required === "boolean"),
+  );
   const validOutputs = outputs.every(
     (output) =>
       isRecord(output) &&
@@ -101,7 +124,7 @@ function graphFrom(value: unknown): WorkflowGraph | null {
       typeof output.node === "string" &&
       typeof output.port === "string",
   );
-  if (!validNodes || !validEdges || !validOutputs) {
+  if (!validNodes || !validEdges || !validOutputs || !validInputs) {
     return null;
   }
   return {
@@ -117,15 +140,44 @@ function graphFrom(value: unknown): WorkflowGraph | null {
           typeof (item.toolName ?? item.tool_name) === "string"
             ? ((item.toolName ?? item.tool_name) as string)
             : null,
+        mapInput:
+          typeof (item.mapInput ?? item.map_input) === "string"
+            ? ((item.mapInput ?? item.map_input) as string)
+            : null,
       };
     }),
     edges: edges.map((edge) => {
       const item = edge as Record<string, unknown>;
       return {
-        sourceNode: (item.sourceNode ?? item.source_node) as string,
-        sourcePort: (item.sourcePort ?? item.source_port) as string,
+        sourceNode:
+          typeof (item.sourceNode ?? item.source_node) === "string"
+            ? ((item.sourceNode ?? item.source_node) as string)
+            : null,
+        sourcePort:
+          typeof (item.sourcePort ?? item.source_port) === "string"
+            ? ((item.sourcePort ?? item.source_port) as string)
+            : null,
         targetNode: (item.targetNode ?? item.target_node) as string,
         targetPort: (item.targetPort ?? item.target_port) as string,
+        sourceKind:
+          (item.sourceKind ?? item.source_kind) === "workflowInput" ||
+          (item.sourceKind ?? item.source_kind) === "literal"
+            ? ((item.sourceKind ?? item.source_kind) as
+                "workflowInput" | "literal")
+            : "node",
+        sourceInput:
+          typeof (item.sourceInput ?? item.source_input) === "string"
+            ? ((item.sourceInput ?? item.source_input) as string)
+            : null,
+        sourcePath:
+          typeof (item.sourcePath ?? item.source_path) === "string"
+            ? ((item.sourcePath ?? item.source_path) as string)
+            : "",
+        targetPath:
+          typeof (item.targetPath ?? item.target_path) === "string"
+            ? ((item.targetPath ?? item.target_path) as string)
+            : "",
+        literal: item.literal,
       };
     }),
     outputs: outputs.map((output) => {
@@ -134,6 +186,14 @@ function graphFrom(value: unknown): WorkflowGraph | null {
         name: item.name as string,
         node: item.node as string,
         port: item.port as string,
+      };
+    }),
+    inputs: inputs.map((input) => {
+      const item = input as Record<string, unknown>;
+      return {
+        name: item.name as string,
+        schema: item.schema as Record<string, unknown>,
+        required: typeof item.required === "boolean" ? item.required : true,
       };
     }),
   };
@@ -158,12 +218,18 @@ function graphLayers(graph: WorkflowGraph): WorkflowNode[][] {
     let changed = false;
     for (const node of graph.nodes) {
       const incoming = graph.edges.filter(
-        (edge) => edge.targetNode === node.id,
+        (edge) =>
+          edge.targetNode === node.id &&
+          edge.sourceKind === "node" &&
+          edge.sourceNode !== null,
       );
-      if (incoming.some((edge) => !layerByNode.has(edge.sourceNode))) continue;
+      if (incoming.some((edge) => !layerByNode.has(edge.sourceNode ?? "")))
+        continue;
       const layer = incoming.length
         ? Math.max(
-            ...incoming.map((edge) => layerByNode.get(edge.sourceNode) ?? 0),
+            ...incoming.map(
+              (edge) => layerByNode.get(edge.sourceNode ?? "") ?? 0,
+            ),
           ) + 1
         : 0;
       if (layerByNode.get(node.id) !== layer) {
@@ -195,12 +261,12 @@ function runLabel(run: WorkflowRun, index: number) {
 
 export function WorkflowOverview({
   onOpenLibrary,
-  onOpenOperations,
+  onOpenFunction,
   onOpenChats,
   projectId,
 }: {
   onOpenLibrary: () => void;
-  onOpenOperations: (node: WorkflowNode) => void;
+  onOpenFunction: (node: WorkflowNode) => void;
   onOpenChats: () => void;
   projectId: string;
 }) {
@@ -215,6 +281,9 @@ export function WorkflowOverview({
   );
   const [isRunning, setIsRunning] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [workflowInputText, setWorkflowInputText] = useState<
+    Record<string, string>
+  >({});
 
   useEffect(() => {
     let active = true;
@@ -324,11 +393,29 @@ export function WorkflowOverview({
     ? runExecution.outputs
     : {};
 
+  function workflowInputKey(name: string) {
+    return `${workflow?.id ?? ""}:${workflow?.version ?? 0}:${name}`;
+  }
+
   async function runWorkflow() {
     if (!workflow) return;
     setIsRunning(true);
     setActionError(null);
     try {
+      const workflowInputs: Record<string, unknown> = {};
+      for (const input of workflow.graph.inputs) {
+        const raw = workflowInputText[workflowInputKey(input.name)] ?? "";
+        if (raw.trim() === "" && !input.required) continue;
+        if (input.schema.type === "string") {
+          workflowInputs[input.name] = raw;
+        } else {
+          try {
+            workflowInputs[input.name] = JSON.parse(raw);
+          } catch {
+            throw new Error(`Workflow Input ${input.name} must be valid JSON.`);
+          }
+        }
+      }
       const base = `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow.id)}`;
       const preparedResponse = await fetch(`${base}/runs/prepare`, {
         method: "POST",
@@ -336,6 +423,7 @@ export function WorkflowOverview({
         body: JSON.stringify({
           idempotencyKey: crypto.randomUUID(),
           expectedVersion: workflow.version,
+          workflowInputs,
         }),
       });
       if (!preparedResponse.ok)
@@ -415,7 +503,7 @@ export function WorkflowOverview({
               id: "",
               name: "New Workflow",
               version: 0,
-              graph: { nodes: [], edges: [], outputs: [] },
+              graph: { nodes: [], edges: [], outputs: [], inputs: [] },
             }}
             onCancel={() => setEditingDefinitionId(null)}
             onSaved={acceptRevisedDefinition}
@@ -526,6 +614,56 @@ export function WorkflowOverview({
         </p>
       ) : null}
 
+      {graph.inputs.length > 0 ? (
+        <section aria-label="Workflow Inputs" className={styles.outputs}>
+          <div className={styles.sectionHeading}>
+            <h2>Inputs for the next Run</h2>
+            <span>Captured with the Run</span>
+          </div>
+          <div className={styles.outputList}>
+            {workflow.graph.inputs.map((input) => (
+              <label className={styles.output} key={input.name}>
+                <span>
+                  <strong>{input.name}</strong>
+                  <small>
+                    {input.required ? "Required" : "Optional"} ·{" "}
+                    {String(input.schema.type ?? "JSON value")}
+                  </small>
+                </span>
+                {input.schema.type === "string" ? (
+                  <input
+                    aria-label={`Workflow Input ${input.name}`}
+                    onChange={(event) =>
+                      setWorkflowInputText((current) => ({
+                        ...current,
+                        [workflowInputKey(input.name)]: event.target.value,
+                      }))
+                    }
+                    value={
+                      workflowInputText[workflowInputKey(input.name)] ?? ""
+                    }
+                  />
+                ) : (
+                  <textarea
+                    aria-label={`Workflow Input ${input.name}`}
+                    onChange={(event) =>
+                      setWorkflowInputText((current) => ({
+                        ...current,
+                        [workflowInputKey(input.name)]: event.target.value,
+                      }))
+                    }
+                    rows={3}
+                    value={
+                      workflowInputText[workflowInputKey(input.name)] ?? ""
+                    }
+                  />
+                )}
+              </label>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {editingDefinitionId === workflow.id ? (
         <WorkflowDefinitionEditor
           definition={workflow}
@@ -593,7 +731,10 @@ export function WorkflowOverview({
               </marker>
             </defs>
             {graph.edges.map((edge) => {
-              const source = graphPosition.get(edge.sourceNode);
+              const source =
+                edge.sourceKind === "node" && edge.sourceNode
+                  ? graphPosition.get(edge.sourceNode)
+                  : undefined;
               const target = graphPosition.get(edge.targetNode);
               if (!source || !target) return null;
               const startX = source.x + 196;
@@ -651,14 +792,23 @@ export function WorkflowOverview({
                 key={`${edge.sourceNode}:${edge.sourcePort}:${edge.targetNode}:${edge.targetPort}`}
               >
                 <span>
-                  {graphNodes.get(edge.sourceNode)?.id ?? edge.sourceNode}
+                  {edge.sourceKind === "workflowInput"
+                    ? `Workflow Input · ${edge.sourceInput ?? "missing"}`
+                    : edge.sourceKind === "literal"
+                      ? `Literal · ${jsonText(edge.literal)}`
+                      : (graphNodes.get(edge.sourceNode ?? "")?.id ??
+                        edge.sourceNode)}
                 </span>
-                <code>{edge.sourcePort}</code>
+                {edge.sourceKind === "node" ? (
+                  <code>{edge.sourcePort}</code>
+                ) : null}
                 <span aria-hidden="true" className={styles.edgeArrow} />
                 <span>
                   {graphNodes.get(edge.targetNode)?.id ?? edge.targetNode}
                 </span>
                 <code>{edge.targetPort}</code>
+                {edge.sourcePath ? <code>{edge.sourcePath}</code> : null}
+                {edge.targetPath ? <code>{edge.targetPath}</code> : null}
               </li>
             ))}
           </ul>
@@ -675,14 +825,14 @@ export function WorkflowOverview({
                 <button onClick={onOpenLibrary} type="button">
                   Open Library
                 </button>
-              ) : (
+              ) : selectedNode.kind === "python" ? (
                 <button
-                  onClick={() => onOpenOperations(selectedNode)}
+                  onClick={() => onOpenFunction(selectedNode)}
                   type="button"
                 >
-                  Open Operations
+                  Open Function
                 </button>
-              )}
+              ) : null}
               <button onClick={() => setSelectedNodeId(null)} type="button">
                 Close details
               </button>

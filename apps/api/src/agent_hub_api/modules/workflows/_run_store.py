@@ -9,9 +9,9 @@ from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from agent_hub_api.modules.datasets import DatasetModule
+from agent_hub_api.modules.functions import FunctionModule
 from agent_hub_api.modules.plugin_gateway import PluginGatewayModule
 from agent_hub_api.modules.project_files import ProjectFilesModule
-from agent_hub_api.modules.transforms import TransformModule
 from agent_hub_api.settings import Settings
 
 from ._application import WorkflowDefinitionModule
@@ -148,14 +148,14 @@ def create_postgres_workflow_run_module(
     settings: Settings,
     definitions: WorkflowDefinitionModule,
     datasets: DatasetModule,
-    transforms: TransformModule,
+    functions: FunctionModule,
     gateway: PluginGatewayModule | None,
     project_files: ProjectFilesModule | None = None,
 ) -> WorkflowRunModule:
     return WorkflowRunModule(
         definitions,
         datasets,
-        transforms,
+        functions,
         gateway,
         PostgresWorkflowRunStore(settings),
         project_files=project_files,

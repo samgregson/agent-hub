@@ -19,11 +19,11 @@ from agent_hub_api.modules.artifacts import (
     create_artifact_router,
     create_postgres_artifact_module,
 )
-from agent_hub_api.modules.batch_execution import (
-    create_batch_execution_router,
-    create_postgres_batch_execution_module,
-)
 from agent_hub_api.modules.datasets import create_dataset_router, create_postgres_dataset_module
+from agent_hub_api.modules.functions import (
+    create_function_router,
+    create_postgres_function_module,
+)
 from agent_hub_api.modules.identity import IdentityModule, create_identity_module
 from agent_hub_api.modules.observability import RequestLoggingMiddleware
 from agent_hub_api.modules.plugin_gateway import (
@@ -41,14 +41,6 @@ from agent_hub_api.modules.projects import (
     create_project_router,
 )
 from agent_hub_api.modules.request_limits import RequestBodyLimitMiddleware
-from agent_hub_api.modules.transform_inputs import (
-    TransformInputModule,
-    create_transform_input_router,
-)
-from agent_hub_api.modules.transforms import (
-    create_postgres_transform_module,
-    create_transform_router,
-)
 from agent_hub_api.modules.workflows import (
     create_postgres_workflow_module,
     create_postgres_workflow_run_module,
@@ -80,30 +72,13 @@ def create_app(
         resolved_projects,
         resolved_plugin_gateway,
     )
-    resolved_datasets = create_postgres_dataset_module(
-        resolved_settings, resolved_projects, resolved_plugin_gateway
-    )
-    resolved_transforms = create_postgres_transform_module(
-        resolved_settings,
-        resolved_projects,
-        datasets=resolved_datasets,
-        artifacts=resolved_artifacts,
-    )
-    resolved_batches = create_postgres_batch_execution_module(
-        resolved_settings,
-        resolved_projects,
-        resolved_datasets,
-        resolved_plugin_gateway,
-        transforms=resolved_transforms,
-    )
-    resolved_transform_inputs = TransformInputModule(
-        resolved_batches, resolved_transforms, resolved_artifacts, resolved_datasets
-    )
+    resolved_datasets = create_postgres_dataset_module(resolved_settings, resolved_projects)
+    resolved_functions = create_postgres_function_module(resolved_settings, resolved_projects)
     resolved_workflows = create_postgres_workflow_module(
         resolved_settings,
         resolved_projects,
         resolved_datasets,
-        resolved_transforms,
+        resolved_functions,
         resolved_plugin_gateway,
         resolved_project_files,
     )
@@ -111,7 +86,7 @@ def create_app(
         resolved_settings,
         resolved_workflows,
         resolved_datasets,
-        resolved_transforms,
+        resolved_functions,
         resolved_plugin_gateway,
         resolved_project_files,
     )
@@ -123,9 +98,7 @@ def create_app(
             resolved_plugin_gateway,
             resolved_artifacts,
             resolved_datasets,
-            resolved_batches,
-            resolved_transforms,
-            resolved_transform_inputs,
+            resolved_functions,
             resolved_workflows,
             resolved_workflow_runs,
         )
@@ -138,8 +111,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await resolved_agent_execution.reconcile_non_terminal()
-        await resolved_batches.recover()
-        await resolved_transforms.recover()
         await resolved_workflow_runs.recover()
         yield
         if deep_agent_runner is not None:
@@ -169,18 +140,10 @@ def create_app(
         create_artifact_router(resolved_identity, resolved_artifacts), prefix="/api"
     )
     application.include_router(
-        create_dataset_router(resolved_identity, resolved_datasets, resolved_batches), prefix="/api"
+        create_dataset_router(resolved_identity, resolved_datasets), prefix="/api"
     )
     application.include_router(
-        create_batch_execution_router(resolved_identity, resolved_batches),
-        prefix="/api",
-    )
-    application.include_router(
-        create_transform_router(resolved_identity, resolved_transforms), prefix="/api"
-    )
-    application.include_router(
-        create_transform_input_router(resolved_identity, resolved_transform_inputs),
-        prefix="/api",
+        create_function_router(resolved_identity, resolved_functions), prefix="/api"
     )
     application.include_router(
         create_workflow_router(resolved_identity, resolved_workflows, resolved_workflow_runs),

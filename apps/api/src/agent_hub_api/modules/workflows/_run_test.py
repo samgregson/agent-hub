@@ -7,15 +7,16 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput, MemoryDatasetStore
+from agent_hub_api.modules.functions import FunctionModule, MemoryFunctionStore
 from agent_hub_api.modules.identity import create_identity_module
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
-from agent_hub_api.modules.transforms import MemoryTransformStore, TransformModule
 from agent_hub_api.modules.workflows import (
     MemoryWorkflowRunStore,
     MemoryWorkflowStore,
     WorkflowDefinitionModule,
     WorkflowEdge,
     WorkflowGraph,
+    WorkflowInput,
     WorkflowNode,
     WorkflowNotFound,
     WorkflowOutput,
@@ -37,13 +38,13 @@ async def test_prepared_run_captures_dataset_values_and_definition_before_edits(
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(
         owner, project.id, "Inputs", [DatasetRecordInput({"value": 2})]
     )
-    transforms = TransformModule(projects, MemoryTransformStore())
+    functions = FunctionModule(projects, MemoryFunctionStore())
     definitions = WorkflowDefinitionModule(
-        projects, datasets, transforms, None, MemoryWorkflowStore()
+        projects, datasets, functions, None, MemoryWorkflowStore()
     )
     graph = WorkflowGraph(
         (WorkflowNode("source", "dataset", dataset.id, dataset.version),),
@@ -51,7 +52,7 @@ async def test_prepared_run_captures_dataset_values_and_definition_before_edits(
         (WorkflowOutput("result", "source", "records"),),
     )
     definition = await definitions.create(owner, project.id, "Inspection", graph)
-    runs = WorkflowRunModule(definitions, datasets, transforms, None, MemoryWorkflowRunStore())
+    runs = WorkflowRunModule(definitions, datasets, functions, None, MemoryWorkflowRunStore())
 
     prepared = await runs.prepare(owner, project.id, definition.id, "request-1", expected_version=1)
     assert prepared.status == "prepared"
@@ -87,12 +88,12 @@ async def test_prepared_run_idempotency_key_cannot_switch_workflows() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(owner, project.id, "Inputs", [])
     definitions = WorkflowDefinitionModule(
         projects,
         datasets,
-        TransformModule(projects, MemoryTransformStore()),
+        FunctionModule(projects, MemoryFunctionStore()),
         None,
         MemoryWorkflowStore(),
     )
@@ -106,7 +107,7 @@ async def test_prepared_run_idempotency_key_cannot_switch_workflows() -> None:
     runs = WorkflowRunModule(
         definitions,
         datasets,
-        TransformModule(projects, MemoryTransformStore()),
+        FunctionModule(projects, MemoryFunctionStore()),
         None,
         MemoryWorkflowRunStore(),
     )
@@ -120,19 +121,19 @@ async def test_prepared_run_pins_python_source_and_rejects_changed_revision() ->
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(owner, project.id, "Inputs", [])
-    transforms = TransformModule(projects, MemoryTransformStore())
-    function = await transforms.define(
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    function = await functions.define(
         owner,
         project.id,
         "Count",
         "def transform(inputs, parameters):\n    return 0\n",
-        {"items": "/items"},
+        {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]},
         {"type": "integer"},
     )
     definitions = WorkflowDefinitionModule(
-        projects, datasets, transforms, None, MemoryWorkflowStore()
+        projects, datasets, functions, None, MemoryWorkflowStore()
     )
     graph = WorkflowGraph(
         (
@@ -143,18 +144,18 @@ async def test_prepared_run_pins_python_source_and_rejects_changed_revision() ->
         (WorkflowOutput("result", "count", "result"),),
     )
     definition = await definitions.create(owner, project.id, "Count records", graph)
-    runs = WorkflowRunModule(definitions, datasets, transforms, None, MemoryWorkflowRunStore())
+    runs = WorkflowRunModule(definitions, datasets, functions, None, MemoryWorkflowRunStore())
     prepared = await runs.prepare(owner, project.id, definition.id, "first", expected_version=1)
     targets = cast(dict[str, Any], prepared.snapshot["targets"])
     assert targets["count"]["source"] == function.source
     assert targets["count"]["sourceHash"] == function.source_hash
-    await transforms.revise(
+    await functions.revise(
         owner,
         project.id,
         function.id,
         "Count",
         "def transform(inputs, parameters):\n    return 1\n",
-        {"items": "/items"},
+        {"type": "object", "properties": {"items": {"type": "array"}}, "required": ["items"]},
         {"type": "integer"},
     )
     with pytest.raises(WorkflowValidationError, match="version changed"):
@@ -166,19 +167,20 @@ async def test_prepared_run_route_round_trips_without_dispatching_calls() -> Non
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
     project = await projects.create(owner, "Analysis")
-    datasets = DatasetModule(projects, MemoryDatasetStore(), _Schemas())
+    datasets = DatasetModule(projects, MemoryDatasetStore())
     dataset = await datasets.create_dataset(owner, project.id, "Inputs", [])
-    transforms = TransformModule(projects, MemoryTransformStore())
+    functions = FunctionModule(projects, MemoryFunctionStore())
     definitions = WorkflowDefinitionModule(
-        projects, datasets, transforms, None, MemoryWorkflowStore()
+        projects, datasets, functions, None, MemoryWorkflowStore()
     )
     graph = WorkflowGraph(
         (WorkflowNode("source", "dataset", dataset.id, dataset.version),),
         (),
         (WorkflowOutput("result", "source", "records"),),
+        (WorkflowInput("comment", {"type": "string"}),),
     )
     definition = await definitions.create(owner, project.id, "Inspection", graph)
-    runs = WorkflowRunModule(definitions, datasets, transforms, None, MemoryWorkflowRunStore())
+    runs = WorkflowRunModule(definitions, datasets, functions, None, MemoryWorkflowRunStore())
     app = FastAPI()
     app.include_router(
         create_workflow_router(
@@ -191,10 +193,16 @@ async def test_prepared_run_route_round_trips_without_dispatching_calls() -> Non
     base = f"/api/projects/{project.id}/workflows/{definition.id}/runs"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post(
-            f"{base}/prepare", json={"idempotencyKey": "request-1", "expectedVersion": 1}
+            f"{base}/prepare",
+            json={
+                "idempotencyKey": "request-1",
+                "expectedVersion": 1,
+                "workflowInputs": {"comment": "route test"},
+            },
         )
         assert created.status_code == 201
         assert created.json()["status"] == "prepared"
+        assert created.json()["snapshot"]["workflowInputs"] == {"comment": "route test"}
         assert created.json()["snapshot"]["graph"] == json.loads(json.dumps(asdict(graph)))
         assert (await client.get(base)).json()[0]["id"] == created.json()["id"]
         assert (await client.get(f"{base}/{created.json()['id']}")).json() == created.json()
