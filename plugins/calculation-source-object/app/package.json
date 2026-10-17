@@ -1,0 +1,16 @@
+{
+  "name": "agent-hub-calculation-source-object-app",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "esbuild src/report.tsx --bundle --minify --format=iife --target=es2022 --loader:.css=text --outfile=dist/report.js"
+  },
+  "dependencies": {
+    "@cs-object/core": "0.1.0",
+    "@cs-object/react": "0.1.0",
+    "esbuild": "0.28.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {}
+}

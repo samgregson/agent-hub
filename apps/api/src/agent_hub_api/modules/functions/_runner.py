@@ -19,6 +19,11 @@ class DenoFunctionRunner:
         self._host = parsed.hostname
         self._port = parsed.port or 80
         self._path = f"{parsed.path.rstrip('/')}/execute"
+        # The runner advertises maxConcurrent=1 and returns HTTP 429 "busy" for
+        # overlapping executions. Workflow DAGs schedule independent Python
+        # nodes concurrently, so queue them at this adapter boundary instead of
+        # turning a healthy parallel graph into a failed Workflow Run.
+        self._execute_semaphore = asyncio.Semaphore(1)
 
     async def identity(self) -> FunctionRuntimeIdentity:
         return await asyncio.to_thread(self._identity)
@@ -67,7 +72,8 @@ class DenoFunctionRunner:
     async def execute(
         self, source: str, inputs: dict[str, object], parameters: dict[str, object]
     ) -> tuple[object, str]:
-        return await asyncio.to_thread(self._send, source, inputs, parameters)
+        async with self._execute_semaphore:
+            return await asyncio.to_thread(self._send, source, inputs, parameters)
 
     def _send(
         self, source: str, inputs: dict[str, object], parameters: dict[str, object]

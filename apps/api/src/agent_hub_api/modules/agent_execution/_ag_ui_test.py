@@ -111,3 +111,82 @@ def test_ag_ui_tool_gate_response_maps_back_to_langchain_decision(
     )
 
     assert command.resume == expected
+
+
+def test_batched_hitl_actions_map_and_resume_in_action_order() -> None:
+    actions = [
+        {
+            "name": "create_project_function",
+            "args": {"name": "uppercase_text"},
+        },
+        {"name": "create_project_function", "args": {"name": "word_stats"}},
+        {
+            "name": "create_project_function",
+            "args": {"name": "bullet_summary"},
+        },
+    ]
+    interrupt = Interrupt(
+        id="interrupt-batch",
+        value={
+            "action_requests": actions,
+            "review_configs": [
+                {
+                    "action_name": action["name"],
+                    "allowed_decisions": ["approve", "reject"],
+                }
+                for action in actions
+            ],
+        },
+    )
+    messages = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": f"tool-{index}",
+                    "name": "create_project_function",
+                    "args": action["args"],
+                    "type": "tool_call",
+                }
+                for index, action in enumerate(actions)
+            ],
+        )
+    ]
+
+    mapped = map_langchain_interrupts([interrupt], messages)
+
+    assert [item.id for item in mapped] == [
+        "interrupt-batch:0",
+        "interrupt-batch:1",
+        "interrupt-batch:2",
+    ]
+    assert [item.tool_call_id for item in mapped] == ["tool-0", "tool-1", "tool-2"]
+    adapter = object.__new__(AgentHubLangGraphAgent)
+    command = adapter._build_command_from_agui_resume(
+        [
+            ResumeEntry(
+                interrupt_id="interrupt-batch:0",
+                status="resolved",
+                payload={"approved": True},
+            ),
+            ResumeEntry(
+                interrupt_id="interrupt-batch:1",
+                status="resolved",
+                payload={"approved": False, "reason": "Not now"},
+            ),
+            ResumeEntry(
+                interrupt_id="interrupt-batch:2",
+                status="resolved",
+                payload={"approved": True},
+            ),
+        ],
+        open_interrupts=mapped,
+    )
+
+    assert command.resume == {
+        "decisions": [
+            {"type": "approve"},
+            {"type": "reject", "message": "Not now"},
+            {"type": "approve"},
+        ]
+    }

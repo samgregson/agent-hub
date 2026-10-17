@@ -306,9 +306,15 @@ class WorkflowDefinitionModule:
                 raise WorkflowValidationError("Workflow edge refers to an unknown port.")
             key = (edge.target_node, edge.target_port)
             mapped_item = nodes[edge.target_node].shape == "map" and edge.target_port == "items"
-            selected_target_schema = _schema_at_path(
-                target_schema, edge.target_path, each_item=mapped_item
-            )
+            try:
+                selected_target_schema = _schema_at_path(
+                    target_schema, edge.target_path, each_item=mapped_item
+                )
+            except WorkflowValidationError as error:
+                raise WorkflowValidationError(
+                    f"Invalid target_path {edge.target_path!r} for input "
+                    f"{edge.target_node}.{edge.target_port}: {error}"
+                ) from error
             if edge.source_kind == "node":
                 if edge.source_node is None or edge.source_port is None:
                     raise WorkflowValidationError("Node binding needs a source node and port.")
@@ -322,11 +328,17 @@ class WorkflowDefinitionModule:
                     raise WorkflowValidationError(
                         "Workflow binding refers to an unknown source port."
                     )
-                selected_source_schema = _schema_at_path(
-                    source_schema,
-                    edge.source_path,
-                    each_item=mapped_item,
-                )
+                try:
+                    selected_source_schema = _schema_at_path(
+                        source_schema,
+                        edge.source_path,
+                        each_item=mapped_item,
+                    )
+                except WorkflowValidationError as error:
+                    raise WorkflowValidationError(
+                        f"Invalid source_path {edge.source_path!r} for output "
+                        f"{edge.source_node}.{edge.source_port}: {error}"
+                    ) from error
                 if (
                     nodes[edge.source_node].kind == "dataset"
                     and nodes[edge.target_node].shape == "map"
@@ -354,9 +366,17 @@ class WorkflowDefinitionModule:
             else:
                 raise WorkflowValidationError("Workflow binding has an unknown source kind.")
             if not _compatible(selected_source_schema, selected_target_schema):
+                source = (
+                    f"{edge.source_node}.{edge.source_port}{edge.source_path}"
+                    if edge.source_kind == "node"
+                    else f"Workflow Input {edge.source_input!r}{edge.source_path}"
+                    if edge.source_kind == "workflowInput"
+                    else f"literal{edge.source_path}"
+                )
                 raise WorkflowValidationError(
-                    f"Workflow has incompatible schemas for input "
-                    f"{edge.target_node}.{edge.target_port}{edge.target_path}."
+                    f"Workflow binding from {source} to "
+                    f"{edge.target_node}.{edge.target_port}{edge.target_path} has incompatible "
+                    "schemas. Check the source_path and target_path on this binding."
                 )
             if edge.source_kind == "literal":
                 try:

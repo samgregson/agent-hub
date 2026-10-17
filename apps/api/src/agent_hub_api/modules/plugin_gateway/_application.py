@@ -509,11 +509,20 @@ def create_postgres_plugin_gateway(
         app_resource_uri="ui://agent-hub-reference-calculation/cantilever.html",
         app_tool_names=(),
     )
+    calculation_source_object = PluginManifest(
+        id="calculation-source-object",
+        name="Calculation Source Object",
+        version="0.1.0",
+        endpoint="http://calculation-source-object:8000/mcp",
+        tools=(PluginTool(name="run_calculation", read_only=False, repeat_safe=True),),
+        app_resource_uri="ui://agent-hub-calculation-source-object/report.html",
+        app_tool_names=(),
+    )
     from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
 
     return PluginGatewayModule(
         projects,
-        catalog=(fixture, reference_calculation),
+        catalog=(fixture, reference_calculation, calculation_source_object),
         enablements=PostgresPluginEnablementStore(settings),
         clients={
             fixture.id: McpPluginClient(
@@ -524,6 +533,12 @@ def create_postgres_plugin_gateway(
             ),
             reference_calculation.id: McpPluginClient(
                 endpoint=reference_calculation.endpoint,
+                timeout_seconds=settings.plugin_tool_timeout_seconds,
+                max_result_bytes=settings.plugin_result_max_bytes,
+                allow_private_network=True,
+            ),
+            calculation_source_object.id: McpPluginClient(
+                endpoint=calculation_source_object.endpoint,
                 timeout_seconds=settings.plugin_tool_timeout_seconds,
                 max_result_bytes=settings.plugin_result_max_bytes,
                 allow_private_network=True,
@@ -583,7 +598,13 @@ def _input_model(
                 continue
             declared_type = definition.get("type")
             value_type = (
-                {"number": float, "integer": int, "boolean": bool}.get(declared_type, str)
+                {
+                    "number": float,
+                    "integer": int,
+                    "boolean": bool,
+                    "object": dict[str, Any],
+                    "array": list[Any],
+                }.get(declared_type, str)
                 if isinstance(declared_type, str)
                 else str
             )

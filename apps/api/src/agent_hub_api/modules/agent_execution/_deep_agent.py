@@ -77,7 +77,15 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Workflow graphs define data sources, wiring, and whether a Function processes one "
         "value or a collection. Use Workflow tools to create, inspect, revise, prepare, execute, "
         "resume, and inspect Workflow Runs. Report outputs from saved Workflow Runs.",
-        "Workflow Definitions are saved Project DAGs. graph_json must be an object with nodes, "
+        "For Workflow authoring, first inspect the Project's existing Datasets, Functions, "
+        "Plugins, file sources, and Workflows; reuse suitable assets. Prefer the smallest useful "
+        "end-to-end graph. A source-only graph is valid when that meets the request. For a demo "
+        "that needs a transformation, prefer one Function that handles the whole collection over "
+        "several tiny Functions unless the requested stages are meaningfully distinct. Create "
+        "sample data only when the Project has no suitable source and the request calls for a "
+        "demonstration. Use IDs and versions returned by discovery tools; do not guess them.",
+        "Workflow Definitions are saved Project DAGs. Pass graph_json as a structured object "
+        "with nodes, "
         "edges, outputs, and optional inputs arrays. Each node has id, kind, ref_id, and version "
         "(optionally shape, tool_name, and map_input); node kinds are dataset, file, python, and "
         "mcp. Edges are graph-owned value bindings with target_node and target_port. A node "
@@ -85,13 +93,25 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "uses source_kind='workflowInput' and source_input; a constant uses source_kind='literal' "
         "and literal. Workflow Inputs declare name, JSON Schema in schema, and optional required. "
         "source_path and target_path are RFC 6901 JSON Pointers; empty means the whole value. Use "
-        "them to select fields, rename them, and assemble nested target inputs from several "
-        "bindings. Map nodes send each item from items to map_input for Python Functions; "
+        "source_path to select a property from a whole Function result, and target_path only to "
+        "select within the already selected target input port. Function target_port names are "
+        "already individual input properties: when binding to target_port='records', leave "
+        "target_path empty. For example, pass a Function result's records array with "
+        "source_port='result', source_path='/records', target_port='records', target_path=''. "
+        "Use non-empty target_path only to assemble nested values inside an input. Map nodes send "
+        "each item from items to map_input for Python Functions; "
         "other named ports are shared inputs. Each output has name, node, and port. Do not use a "
         "node map, from/to edge keys, or an outputs map. Dataset sources expose ordered records. "
         "Project File nodes use kind file, the absolute /project path as ref_id, the current "
         "integer version, and expose captured text on content. Call discover_project_file_sources "
-        "before composing a graph; never use /scratch paths as Workflow sources.",
+        "before composing a graph; never use /scratch paths as Workflow sources. File content is "
+        "always text, including when the file contains JSON. For a JSON file, connect content to "
+        "a Function input declared as a string, then parse it inside the Function with json.loads; "
+        "do not bind raw file text to an object or array input. If the next existing Function "
+        "expects parsed records, add one small JSON-parsing Function that accepts content as a "
+        "string and returns the parsed records, then connect it to that Function. Keep parsing "
+        "separate from the existing transformation logic; do not revise existing Functions just "
+        "to make the source binding fit.",
         "Python Function nodes use kind python, the saved Function UUID as ref_id, its revision "
         "as version, and shape single or map. Their input ports are declared input names. The "
         "result output passes the entire value matching the Function output schema; it does not "
@@ -103,7 +123,12 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "output ports. MCP nodes use kind mcp, the enabled Plugin ID as ref_id, Plugin version as "
         "version, and selected tool name as tool_name.",
         "Before creating or revising a Workflow, call validate_project_workflow with the complete "
-        "graph_json and fix every reported error. Validation does not save or execute the graph. "
+        "graph_json object and fix every reported error. Do not serialize graph_json into a "
+        "string. "
+        "Validation does not save or execute the graph. Treat its reported source, target, and "
+        "schema details as authoritative: fix the specific graph binding, and do not revise a "
+        "Function unless its inspected schema or the validator identifies that Function as the "
+        "problem. "
         "Then use the approval-gated create or revise tool. Prepare a Workflow Run to capture "
         "its exact inputs. Supply declared runtime values through workflow_inputs_json when "
         "preparing a Run; saved Preview defaults are never used. Then execute the prepared "
@@ -546,10 +571,14 @@ class PostgresDeepAgentRunner:
             return json.dumps([{"path": item.path, "version": item.version} for item in items])
 
         @tool
-        async def validate_project_workflow(graph_json: str) -> str:
-            """Check Workflow references and wiring; this does not run Python code."""
+        async def validate_project_workflow(graph_json: dict[str, Any]) -> str:
+            """Check a structured Workflow graph's references and wiring.
+
+            Pass graph_json as an object with nodes, edges, outputs, and optional inputs. Do not
+            pass a serialized JSON string. Validation does not run Python code or save the graph.
+            """
             try:
-                graph = WorkflowGraph.from_json(graph_json)
+                graph = WorkflowGraph.from_json(json.dumps(graph_json))
                 await workflows.validate_graph(access, project_id, graph)
             except WorkflowValidationError as error:
                 return f"Workflow graph is invalid: {error}"
@@ -560,25 +589,34 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
-        async def create_project_workflow(name: str, graph_json: str) -> str:
-            """Create a validated Workflow after approval, using snake_case graph fields."""
+        async def create_project_workflow(name: str, graph_json: dict[str, Any]) -> str:
+            """Create a validated Workflow after approval, using snake_case graph fields.
+
+            Reuse discovered source and Function IDs and versions. Keep the graph minimal; a
+            dataset-only graph can expose its records directly as an output. Validate the full
+            graph object first and correct any reported wiring or reference errors before creating
+            it. Pass graph_json as an object, not a serialized JSON string.
+            """
             try:
-                graph = WorkflowGraph.from_json(graph_json)
+                graph = WorkflowGraph.from_json(json.dumps(graph_json))
                 item = await workflows.create(access, project_id, name, graph)
             except WorkflowValidationError as error:
                 return (
                     f"Workflow graph is invalid: {error} "
-                    "Correct graph_json and call this tool again."
+                    "Correct the graph_json object and call this tool again."
                 )
             return json.dumps({"id": item.id, "name": item.name, "version": item.version})
 
         @tool
         async def revise_project_workflow(
-            workflow_id: str, name: str, graph_json: str, expected_version: int
+            workflow_id: str,
+            name: str,
+            graph_json: dict[str, Any],
+            expected_version: int,
         ) -> str:
-            """Revise a validated Workflow after approval, using snake_case graph fields."""
+            """Revise a validated Workflow after approval using a structured graph_json object."""
             try:
-                graph = WorkflowGraph.from_json(graph_json)
+                graph = WorkflowGraph.from_json(json.dumps(graph_json))
                 item = await workflows.revise(
                     access,
                     project_id,
@@ -590,7 +628,7 @@ class PostgresDeepAgentRunner:
             except WorkflowValidationError as error:
                 return (
                     f"Workflow graph is invalid: {error} "
-                    "Correct graph_json and call this tool again."
+                    "Correct the graph_json object and call this tool again."
                 )
             return json.dumps({"id": item.id, "name": item.name, "version": item.version})
 

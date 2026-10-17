@@ -2,9 +2,10 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from ag_ui.core import Interrupt as AGUIInterrupt
-from ag_ui.core import ResumeEntry, ToolCallStartEvent
+from ag_ui.core import ResumeEntry, RunAgentInput, ToolCallStartEvent
 from ag_ui_langgraph import LangGraphAgent
 from ag_ui_langgraph.interrupts import lg_interrupts_to_agui
+from ag_ui_langgraph.utils import agui_messages_to_langchain
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langgraph.types import Command
 
@@ -113,6 +114,24 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
             )
         return dispatched
 
+    async def run(self, input: RunAgentInput):
+        # Resume requests contain the interrupted tool calls in their echoed
+        # message history, but no new ToolCallStartEvents are emitted before
+        # LangGraph resolves the checkpoint interrupt. Seed the matcher from
+        # that history so batched HITL actions keep their per-action AG-UI IDs
+        # and are translated back to LangChain's {"decisions": [...]} payload.
+        messages = agui_messages_to_langchain(input.messages or [])
+        self._visible_tool_calls = [
+            {
+                "id": call.get("id"),
+                "name": call.get("name"),
+                "args": call.get("args"),
+            }
+            for call in _pending_tool_calls(messages)
+        ]
+        async for event in super().run(input):
+            yield event
+
     def _interrupts_to_agui(self, raw_interrupts: Sequence[object]) -> list[AGUIInterrupt]:
         # Streamed calls do not expose their parsed arguments here. LangChain's
         # HITL action request does, so match by stable order and name for the
@@ -141,6 +160,13 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
         for raw_interrupt in raw_interrupts:
             hitl = _hitl_interrupts(raw_interrupt, calls)
             if hitl:
+                used_tool_call_ids = {interrupt.tool_call_id for interrupt in hitl}
+                self._visible_tool_calls = [
+                    call
+                    for call in self._visible_tool_calls
+                    if call.get("id") not in used_tool_call_ids
+                ]
+                calls = [call for call in calls if call.get("id") not in used_tool_call_ids]
                 mapped.extend(hitl)
                 continue
             fallback = lg_interrupts_to_agui([raw_interrupt])
