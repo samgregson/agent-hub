@@ -199,6 +199,21 @@ function graphFrom(value: unknown): WorkflowGraph | null {
   };
 }
 
+function workflowFrom(value: unknown): WorkflowDefinition | null {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.name !== "string" ||
+    typeof value.version !== "number"
+  ) {
+    return null;
+  }
+  const graph = graphFrom(value.graph);
+  return graph
+    ? { id: value.id, name: value.name, version: value.version, graph }
+    : null;
+}
+
 function nodeLabel(node: WorkflowNode) {
   if (node.kind === "mcp") return node.toolName ?? node.refId;
   return node.id;
@@ -294,9 +309,16 @@ export function WorkflowOverview({
           { cache: "no-store" },
         );
         if (!response.ok) throw new Error("Workflow catalog unavailable");
-        const workflows = (await response.json()) as WorkflowDefinition[];
+        const workflowPayload: unknown = await response.json();
+        const workflows = Array.isArray(workflowPayload)
+          ? workflowPayload.map(workflowFrom)
+          : null;
+        if (!workflows || workflows.some((workflow) => workflow === null)) {
+          throw new Error("Workflow catalog has an invalid response.");
+        }
+        const definitions = workflows as WorkflowDefinition[];
         const runResponses = await Promise.all(
-          workflows.map(async (workflow) => {
+          definitions.map(async (workflow) => {
             const runsResponse = await fetch(
               `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow.id)}/runs`,
               { cache: "no-store" },
@@ -313,12 +335,12 @@ export function WorkflowOverview({
           error: null,
           projectId,
           runsByWorkflow: Object.fromEntries(runResponses),
-          workflows,
+          workflows: definitions,
         });
         setSelectedWorkflowId((current) =>
-          workflows.some((workflow) => workflow.id === current)
+          definitions.some((workflow) => workflow.id === current)
             ? current
-            : (workflows[0]?.id ?? null),
+            : (definitions[0]?.id ?? null),
         );
         setSelectedRunId(null);
         setSelectedNodeId(null);
