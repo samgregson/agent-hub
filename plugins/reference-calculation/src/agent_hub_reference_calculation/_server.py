@@ -15,7 +15,11 @@ def create_reference_calculation_server() -> FastMCP:
     """Create the portable calculation Plugin without starting a transport."""
     mcp = FastMCP("agent-hub-reference-calculation")
 
-    @mcp.tool(name=CANTILEVER_TIP_LOAD_TOOL_NAME, annotations={"idempotentHint": True})
+    @mcp.tool(
+        name=CANTILEVER_TIP_LOAD_TOOL_NAME,
+        annotations={"idempotentHint": True},
+        app=AppConfig(resource_uri=CALCULATION_APP_RESOURCE_URI),
+    )
     async def calculate_cantilever_tip_load(
         length_m: float, tip_load_kn: float
     ) -> dict[str, object]:

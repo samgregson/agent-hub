@@ -48,6 +48,7 @@
       const result = document.querySelector("#result");
       const validation = document.querySelector("#validation");
       const curve = document.querySelector("#moment-curve");
+      let toolInput = {};
 
       function draw() {
         const span = +length.value;
@@ -72,11 +73,15 @@
       window.addEventListener("message", (event) => {
         const message = event.data;
         if (message?.id === initializationId && message.result) initialized();
-        const snapshot = message?.method === "ui/notifications/tool-result"
-          ? message.params?.structuredContent?.payload
+        if (message?.method === "ui/notifications/tool-input") {
+          toolInput = message.params?.arguments || {};
+        }
+        const result = message?.method === "ui/notifications/tool-result"
+          ? message.params?.structuredContent
           : null;
-        const input = snapshot?.input;
-        const calculation = snapshot?.output?.calculation;
+        const snapshot = result?.payload;
+        const input = snapshot?.input || toolInput;
+        const calculation = snapshot?.output?.calculation || result?.calculation;
         if (typeof input?.length_m === "number" && typeof input?.tip_load_kn === "number") {
           length.value = input.length_m;
           load.value = input.tip_load_kn;

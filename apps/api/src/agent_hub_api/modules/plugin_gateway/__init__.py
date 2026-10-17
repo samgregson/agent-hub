@@ -1,5 +1,6 @@
 from agent_hub_api.modules.plugin_gateway._application import (
     MemoryPluginEnablementStore,
+    PluginAppUnavailable,
     PluginCallLimitExceeded,
     PluginCapability,
     PluginDiscoveredTool,
@@ -24,6 +25,7 @@ from agent_hub_api.modules.plugin_gateway._mcp import (
 )
 
 __all__ = [
+    "PluginAppUnavailable",
     "MemoryPluginEnablementStore",
     "PluginCallLimitExceeded",
     "McpPluginClient",

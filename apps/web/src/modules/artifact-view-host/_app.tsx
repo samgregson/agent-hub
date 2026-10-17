@@ -14,46 +14,68 @@ function toolError(message: string) {
   return { content: [{ text: message, type: "text" as const }], isError: true };
 }
 
+type McpToolResult = {
+  content: { type: "text"; text: string }[];
+  structuredContent: Record<string, unknown>;
+};
+
 interface AppState {
   availability: "available" | "loading" | "unavailable";
-  error: string | null;
+  message: string | null;
   key: string;
 }
 
-export function ArtifactApp({
-  artifactId,
-  document,
-  projectId,
+export function McpAppFrame({
+  appUrl,
+  toolInput,
+  toolResult,
+  title,
 }: {
-  artifactId: string;
-  document: ArtifactDocument;
-  projectId: string;
+  appUrl: string;
+  toolInput: Record<string, unknown>;
+  toolResult: McpToolResult;
+  title: string;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const payload = useRef({ toolInput, toolResult });
+  payload.current = { toolInput, toolResult };
+  const [attempt, setAttempt] = useState(0);
   const [appState, setAppState] = useState<AppState>({
     availability: "loading",
-    error: null,
+    message: null,
     key: "",
   });
-  const appUrl = `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/app`;
   const availability =
     appState.key === appUrl ? appState.availability : "loading";
-  const error = appState.key === appUrl ? appState.error : null;
+  const message = appState.key === appUrl ? appState.message : null;
 
   useEffect(() => {
     let active = true;
+    setAppState({ availability: "loading", message: null, key: appUrl });
     fetch(appUrl, { cache: "no-store" })
       .then((response) => {
-        if (!response.ok) throw new Error(String(response.status));
+        if (!response.ok) {
+          if (response.status === 404 || response.status === 422) {
+            throw new Error("unavailable");
+          }
+          throw new Error("load_failed");
+        }
         if (active) {
-          setAppState({ availability: "available", error: null, key: appUrl });
+          setAppState({
+            availability: "available",
+            message: null,
+            key: appUrl,
+          });
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (active) {
           setAppState({
             availability: "unavailable",
-            error: null,
+            message:
+              error instanceof Error && error.message === "unavailable"
+                ? "This saved result has no interactive App for its captured version. Its data is still available in the surrounding view."
+                : "The interactive App could not be loaded. Its data is still available in the surrounding view.",
             key: appUrl,
           });
         }
@@ -61,7 +83,7 @@ export function ArtifactApp({
     return () => {
       active = false;
     };
-  }, [appUrl]);
+  }, [appUrl, attempt]);
 
   useEffect(() => {
     if (availability !== "available") return;
@@ -76,18 +98,18 @@ export function ArtifactApp({
     );
 
     bridge.oncalltool = async () =>
-      toolError("This App does not expose any host-approved tools.");
+      toolError("This preview cannot run tools or change the saved result.");
     bridge.oninitialized = () => {
+      const current = payload.current;
       void bridge
-        .sendToolInput({ arguments: { document } })
-        .then(() =>
-          bridge.sendToolResult({ content: [], structuredContent: document }),
-        )
+        .sendToolInput({ arguments: current.toolInput })
+        .then(() => bridge.sendToolResult(current.toolResult))
         .catch(() => {
           if (!disposed) {
             setAppState({
-              availability: "available",
-              error: "The Artifact App could not be initialized.",
+              availability: "unavailable",
+              message:
+                "The interactive App could not receive this saved result. Its inputs and output are still available.",
               key: appUrl,
             });
           }
@@ -104,8 +126,9 @@ export function ArtifactApp({
       .catch(() => {
         if (!disposed) {
           setAppState({
-            availability: "available",
-            error: "The Artifact App could not be initialized.",
+            availability: "unavailable",
+            message:
+              "The interactive App could not be initialized. Its inputs and output are still available.",
             key: appUrl,
           });
         }
@@ -115,19 +138,21 @@ export function ArtifactApp({
       void bridge.teardownResource({}).catch(() => {});
       void bridge.close();
     };
-  }, [appUrl, availability, document]);
+  }, [appUrl, availability]);
 
   return (
-    <section aria-label="Artifact App" className={styles.app}>
-      {error ? <p className={styles.error}>{error}</p> : null}
-      {availability === "loading" ? (
-        <p>Loading compatible Artifact App…</p>
-      ) : null}
+    <section aria-label={title} className={styles.app}>
+      {availability === "loading" ? <p>Loading interactive App…</p> : null}
       {availability === "unavailable" ? (
-        <p>
-          A compatible Artifact App is unavailable. The generic safe view is
-          shown below.
-        </p>
+        <div className={styles.appUnavailable} role="status">
+          <p>{message}</p>
+          <button
+            onClick={() => setAttempt((value) => value + 1)}
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
       ) : null}
       {availability === "available" ? (
         <iframe
@@ -135,9 +160,32 @@ export function ArtifactApp({
           ref={frame}
           referrerPolicy="no-referrer"
           sandbox="allow-scripts"
-          title="Artifact App"
+          title={title}
         />
       ) : null}
     </section>
+  );
+}
+
+export function ArtifactApp({
+  artifactId,
+  document,
+  projectId,
+}: {
+  artifactId: string;
+  document: ArtifactDocument;
+  projectId: string;
+}) {
+  const appUrl = `/api/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/app`;
+  return (
+    <McpAppFrame
+      appUrl={appUrl}
+      title="Artifact App"
+      toolInput={{ document }}
+      toolResult={{
+        content: [],
+        structuredContent: document as unknown as Record<string, unknown>,
+      }}
+    />
   );
 }

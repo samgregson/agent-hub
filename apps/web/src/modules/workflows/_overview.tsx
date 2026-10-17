@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { WorkflowDefinitionEditor } from "./_editor";
+import { WorkflowMapResults } from "./_map-results";
 import styles from "./workflow-overview.module.css";
 
 type WorkflowNode = {
@@ -864,32 +865,37 @@ export function WorkflowOverview({
             {nodeKindLabel(selectedNode)} · {selectedNode.refId} · v
             {selectedNode.version}
           </p>
-          <div className={styles.lineageSources}>
-            <div>
-              <h3>Inputs</h3>
-              <pre>
-                {jsonText(
-                  selectedNodeProgress?.inputs ??
-                    snapshotSources[selectedNode.id] ??
-                    {},
-                )}
-              </pre>
+          {selectedNode.shape === "map" ? (
+            <WorkflowMapResults
+              items={selectedNodeProgress?.items}
+              node={selectedNode}
+              projectId={projectId}
+              target={snapshotTargets[selectedNode.id] ?? {}}
+            />
+          ) : (
+            <div className={styles.lineageSources}>
+              <div>
+                <h3>Inputs</h3>
+                <pre>
+                  {jsonText(
+                    selectedNodeProgress?.inputs ??
+                      snapshotSources[selectedNode.id] ??
+                      {},
+                  )}
+                </pre>
+              </div>
+              <div>
+                <h3>Captured target</h3>
+                <pre>
+                  {jsonText(snapshotTargets[selectedNode.id] ?? selectedNode)}
+                </pre>
+              </div>
+              <div>
+                <h3>Output</h3>
+                <pre>{jsonText(selectedNodeProgress?.output)}</pre>
+              </div>
             </div>
-            <div>
-              <h3>Captured target</h3>
-              <pre>
-                {jsonText(snapshotTargets[selectedNode.id] ?? selectedNode)}
-              </pre>
-            </div>
-            <div>
-              <h3>Output</h3>
-              <pre>
-                {jsonText(
-                  selectedNodeProgress?.output ?? selectedNodeProgress?.items,
-                )}
-              </pre>
-            </div>
-          </div>
+          )}
         </section>
       ) : null}
     </section>
