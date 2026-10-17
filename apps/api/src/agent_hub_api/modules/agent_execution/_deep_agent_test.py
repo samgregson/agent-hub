@@ -182,7 +182,9 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             "outputs": [{"name": "records", "node": "source", "port": "records"}],
         }
     )
-    preflight = await tools["validate_project_workflow"].ainvoke({"graph_json": graph_json})
+    preflight = await tools["validate_project_workflow"].ainvoke(
+        {"graph_json": json.loads(graph_json)}
+    )
     assert "structurally valid" in preflight
     assert "Python code was not run" in preflight
     assert "has not been saved" in preflight
@@ -226,7 +228,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         }
     )
     function_preflight = await tools["validate_project_workflow"].ainvoke(
-        {"graph_json": function_graph}
+        {"graph_json": json.loads(function_graph)}
     )
     assert "structurally valid" in function_preflight
     input_workflow_graph = json.dumps(
@@ -253,7 +255,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     )
     input_workflow = json.loads(
         await tools["create_project_workflow"].ainvoke(
-            {"name": "Normalize input", "graph_json": input_workflow_graph}
+            {"name": "Normalize input", "graph_json": json.loads(input_workflow_graph)}
         )
     )
     input_run = json.loads(
@@ -272,19 +274,17 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     assert input_run_snapshot["workflowInputs"] == {"request": "  sample  "}
     bad_function_graph = function_graph.replace(function.id, "normalize_text")
     function_error = await tools["validate_project_workflow"].ainvoke(
-        {"graph_json": bad_function_graph}
+        {"graph_json": json.loads(bad_function_graph)}
     )
     assert "use the ID returned by discover_project_functions" in function_error
     invalid = await tools["create_project_workflow"].ainvoke(
         {
             "name": "Invalid demo",
-            "graph_json": json.dumps(
-                {
-                    "nodes": {"input": {"type": "input"}},
-                    "edges": [],
-                    "outputs": {"result": "input"},
-                }
-            ),
+            "graph_json": {
+                "nodes": {"input": {"type": "input"}},
+                "edges": [],
+                "outputs": {"result": "input"},
+            },
         }
     )
     assert "Workflow graph is invalid" in invalid
@@ -293,7 +293,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         await tools["create_project_workflow"].ainvoke(
             {
                 "name": "Inspect",
-                "graph_json": graph_json,
+                "graph_json": json.loads(graph_json),
             }
         )
     )

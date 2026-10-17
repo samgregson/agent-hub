@@ -374,9 +374,9 @@ class WorkflowDefinitionModule:
                     else f"literal{edge.source_path}"
                 )
                 raise WorkflowValidationError(
-                    f"Workflow binding from {binding_source} to "
-                    f"{edge.target_node}.{edge.target_port}{edge.target_path} has incompatible "
-                    "schemas. Check the source_path and target_path on this binding."
+                    f"Workflow binding has incompatible schemas for "
+                    f"{edge.target_node}.{edge.target_port}{edge.target_path} from "
+                    f"{binding_source}. Check the source_path and target_path on this binding."
                 )
             if edge.source_kind == "literal":
                 try:
