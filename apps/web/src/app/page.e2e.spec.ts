@@ -195,6 +195,7 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
           refId: "calculation-plugin",
           version: "0.4.0",
           toolName: "calculate",
+          shape: "map",
         },
         {
           id: "summarize",
@@ -215,7 +216,7 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
           sourceNode: "screen",
           sourcePort: "result",
           targetNode: "calculate",
-          targetPort: "record",
+          targetPort: "items",
         },
         {
           sourceNode: "screen",
@@ -258,6 +259,50 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
           definitionId: "filter-function",
           revision: 1,
           source: "def transform(record, parameters): return record",
+          mapInput: "record",
+          inputSchema: {
+            type: "object",
+            properties: {
+              record: {
+                type: "object",
+                properties: {
+                  id: {
+                    type: "string",
+                    title: "Case ID",
+                    description: "Load case identifier",
+                  },
+                  load: {
+                    type: "number",
+                    title: "Applied load",
+                    description: "Load applied to beam",
+                  },
+                },
+              },
+            },
+          },
+          outputSchema: {
+            type: "object",
+            properties: {
+              pass: {
+                type: "boolean",
+                title: "Passed",
+                description: "Whether the item passed",
+              },
+            },
+          },
+        },
+        calculate: {
+          pluginId: "calculation-plugin",
+          toolName: "calculate",
+          version: "0.4.0",
+          inputSchema: {
+            type: "object",
+            properties: {
+              length_m: { type: "number", title: "Span" },
+              tip_load_kn: { type: "number", title: "Tip load" },
+            },
+          },
+          outputSchema: { type: "object" },
         },
       },
     },
@@ -270,11 +315,33 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
           status: "succeeded",
           inputs: { items: [{ id: "LC-1", load: 12.5 }] },
           output: [{ id: "LC-1", load: 12.5 }],
+          items: [
+            {
+              index: 0,
+              itemId: "LC-1",
+              input: { id: "LC-1", load: 12.5 },
+              status: "succeeded",
+              output: { pass: true },
+            },
+          ],
         },
         calculate: {
           status: "succeeded",
           inputs: { record: { id: "LC-1", load: 12.5 } },
           output: { id: "LC-1", pass: true },
+          items: [
+            {
+              index: 0,
+              itemId: "LC-1",
+              input: { length_m: 6.5, tip_load_kn: 12.5 },
+              status: "succeeded",
+              output: {
+                calculation: {
+                  maximumMoment: { value: 81.25, unit: "kN·m" },
+                },
+              },
+            },
+          ],
         },
         summarize: {
           status: "succeeded",
@@ -363,6 +430,16 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
       });
     },
   );
+  const mcpApp = readFileSync(
+    "../../plugins/reference-calculation/app/cantilever-view.html",
+    "utf8",
+  );
+  await page.route(
+    `**/api/projects/${project.id}/plugins/calculation-plugin/tools/calculate/app?version=0.4.0`,
+    async (route) => {
+      await route.fulfill({ body: mcpApp, contentType: "text/html" });
+    },
+  );
   await page.route(`**/api/projects/${project.id}/workflows`, async (route) => {
     await route.fulfill({ json: [workflow] });
   });
@@ -449,7 +526,18 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   ).toContainText("LC-1");
   await expect(
     page.getByRole("region", { name: "Node lineage" }),
+  ).toContainText("Applied load");
+  await page
+    .getByRole("region", { name: "Mapped item results" })
+    .getByRole("button", { name: "Preview" })
+    .click();
+  await expect(
+    page.getByRole("region", { name: "Node lineage" }),
   ).toContainText("Inputs");
+  await expect(page.getByRole("dialog", { name: "LC-1" })).toContainText(
+    "12.5",
+  );
+  await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
     page.getByRole("region", { name: "Node lineage" }),
   ).toContainText("filter-function");
@@ -464,6 +552,18 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(page.getByRole("button", { name: "Open Function" })).toHaveCount(
     0,
   );
+  await page
+    .getByRole("region", { name: "Mapped item results" })
+    .getByRole("button", { name: "Preview" })
+    .click();
+  await page.getByRole("button", { name: "Open MCP App" }).click();
+  const mcpPreview = page.frameLocator(
+    'iframe[title="calculate result preview"]',
+  );
+  await expect(mcpPreview.locator("#length")).toHaveValue("6.5");
+  await expect(mcpPreview.locator("#load")).toHaveValue("12.5");
+  await expect(mcpPreview.locator("#result")).toHaveText("81.3 kN·m");
+  await page.getByRole("button", { name: "Close", exact: true }).click();
   await page.getByRole("button", { name: "Workflow", exact: true }).click();
   await page.getByRole("button", { name: "Inspect screen" }).click();
   await page.getByRole("button", { name: "Open Function" }).click();

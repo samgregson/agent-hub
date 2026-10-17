@@ -48,6 +48,7 @@ class McpPluginClient:
                     read_only=bool(tool.annotations and tool.annotations.read_only_hint),
                     input_schema=dict(tool.input_schema),
                     output_schema=dict(tool.output_schema) if tool.output_schema else None,
+                    app_resource_uri=_app_resource_uri(getattr(tool, "meta", None)),
                 )
                 for tool in result.tools
             )
@@ -58,6 +59,7 @@ class McpPluginClient:
                         "description": tool.description,
                         "inputSchema": tool.input_schema,
                         "outputSchema": tool.output_schema,
+                        "appResourceUri": tool.app_resource_uri,
                     }
                     for tool in discovered
                 ],
@@ -176,6 +178,17 @@ def _content_text(item: object) -> str:
         return json.dumps(_json_value(item), separators=(",", ":"))
     except (TypeError, ValueError) as error:
         raise PluginTransportError("The Plugin returned unsupported MCP content.") from error
+
+
+def _app_resource_uri(meta: object) -> str | None:
+    if not isinstance(meta, Mapping):
+        return None
+    ui_meta = meta.get("ui")
+    nested_uri = ui_meta.get("resourceUri") if isinstance(ui_meta, Mapping) else None
+    resource_uri = nested_uri or meta.get("ui/resourceUri")
+    return (
+        resource_uri if isinstance(resource_uri, str) and resource_uri.startswith("ui://") else None
+    )
 
 
 def _structured_content(value: object) -> Mapping[str, object] | None:

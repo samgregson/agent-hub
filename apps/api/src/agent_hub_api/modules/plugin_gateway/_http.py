@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -11,6 +11,8 @@ from agent_hub_api.modules.identity import (
     RequestContext,
 )
 from agent_hub_api.modules.plugin_gateway import (
+    PluginAppUnavailable,
+    PluginCallLimitExceeded,
     PluginGatewayModule,
     PluginNotAvailable,
     PluginNotEnabled,
@@ -154,6 +156,59 @@ def create_plugin_gateway_router(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Plugin tool contract is unavailable",
             ) from error
+
+    @router.get("/{plugin_id}/tools/{tool_name}/app")
+    async def tool_app_resource(
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        version: str,
+        context: Context,
+    ) -> Response:
+        try:
+            resource = await gateway.app_resource_for_tool(
+                project_access(context), project_id, plugin_id, tool_name, version
+            )
+        except ProjectNotFound as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            ) from error
+        except (
+            PluginAppUnavailable,
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+        ) as error:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="An interactive App is unavailable for this MCP Tool.",
+            ) from error
+        except PluginCallLimitExceeded as error:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="The Plugin is busy; retry later.",
+            ) from error
+        except PluginTransportError as error:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The interactive App is temporarily unavailable.",
+            ) from error
+        return Response(
+            content=resource.html,
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": (
+                    "default-src 'none'; base-uri 'none'; connect-src 'none'; "
+                    "font-src data:; form-action 'none'; frame-ancestors 'self'; "
+                    "frame-src 'none'; img-src data:; script-src 'unsafe-inline'; "
+                    "style-src 'unsafe-inline'"
+                ),
+                "Referrer-Policy": "no-referrer",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @router.put("/{plugin_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def enable_plugin(project_id: str, plugin_id: str, context: Context) -> None:

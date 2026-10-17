@@ -70,6 +70,7 @@ class PluginDiscoveredTool:
     read_only: bool
     input_schema: Mapping[str, object] | None = None
     output_schema: Mapping[str, object] | None = None
+    app_resource_uri: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +97,10 @@ class PluginCallLimitExceeded(Exception):
 
 class PluginTransportError(Exception):
     """The reviewed Plugin did not return a usable MCP result."""
+
+
+class PluginAppUnavailable(Exception):
+    """The requested tool has no current, catalog-approved MCP App resource."""
 
 
 class _PluginCallBudget:
@@ -316,6 +321,42 @@ class PluginGatewayModule:
             raise PluginNotEnabled
         if manifest.app_resource_uri != resource_uri:
             raise PluginToolNotAllowed
+        client = self._clients.get(plugin_id)
+        if client is None:
+            raise PluginNotAvailable
+        return await self._read_ui_resource(plugin_id, resource_uri)
+
+    async def app_resource_for_tool(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        plugin_id: str,
+        tool_name: str,
+        expected_version: str,
+    ) -> PluginUiResource:
+        """Load the reviewed App linked to one enabled, captured MCP tool."""
+        await self._projects.load(access, project_id)
+        manifest = self._catalog.get(plugin_id)
+        if manifest is None:
+            raise PluginNotAvailable
+        if plugin_id not in await self._enablements.enabled_plugin_ids(project_id):
+            raise PluginNotEnabled
+        if manifest.version != expected_version:
+            raise PluginAppUnavailable
+        if tool_name not in {tool.name for tool in manifest.tools}:
+            raise PluginToolNotAllowed
+        discovered = {tool.name: tool for tool in await self._discover(manifest)}
+        tool = discovered.get(tool_name)
+        resource_uri = tool.app_resource_uri if tool is not None else None
+        if (
+            resource_uri is None
+            or resource_uri != manifest.app_resource_uri
+            or not resource_uri.startswith("ui://")
+        ):
+            raise PluginAppUnavailable
+        return await self._read_ui_resource(plugin_id, resource_uri)
+
+    async def _read_ui_resource(self, plugin_id: str, resource_uri: str) -> PluginUiResource:
         client = self._clients.get(plugin_id)
         if client is None:
             raise PluginNotAvailable

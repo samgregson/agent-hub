@@ -89,6 +89,50 @@ async def test_mcp_client_normalizes_a_bounded_result(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("meta", "expected_uri"),
+    [
+        ({"ui": {"resourceUri": "ui://fixture/report.html"}}, "ui://fixture/report.html"),
+        ({"ui/resourceUri": "ui://fixture/report.html"}, "ui://fixture/report.html"),
+        ({"ui": {"resourceUri": "https://fixture/report.html"}}, None),
+        ({}, None),
+    ],
+)
+async def test_mcp_client_discovers_optional_app_resource_uri(
+    monkeypatch: pytest.MonkeyPatch,
+    meta: dict[str, object],
+    expected_uri: str | None,
+) -> None:
+    async def list_tools(_: FakeClient) -> object:
+        tool = type(
+            "Tool",
+            (),
+            {
+                "name": "foundation_status",
+                "description": "Fixture status",
+                "annotations": None,
+                "input_schema": {},
+                "output_schema": None,
+                "meta": meta,
+            },
+        )()
+        return type("ToolList", (), {"tools": [tool]})()
+
+    monkeypatch.setattr(FakeClient, "list_tools", list_tools)
+    monkeypatch.setattr(_mcp, "Client", FakeClient)
+    client = McpPluginClient(
+        endpoint="http://foundation-fixture:8000/mcp",
+        timeout_seconds=12,
+        max_result_bytes=1_024,
+        allow_private_network=True,
+    )
+
+    discovered = await client.discover_tools()
+
+    assert discovered[0].app_resource_uri == expected_uri
+
+
+@pytest.mark.asyncio
 async def test_mcp_client_rejects_an_oversized_result(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeClient.response = FakeResponse(
         content=[FakeContent("x" * 100)],

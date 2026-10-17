@@ -44,10 +44,14 @@ async def _stop_process(process: asyncio.subprocess.Process) -> None:
     await process.wait()
 
 
-async def _execute_source(source: str, function: str, inputs: dict[str, int | float]) -> dict[str, Any]:
+async def _execute_source(
+    source: str, function: str, inputs: dict[str, int | float]
+) -> dict[str, Any]:
     source_bytes = source.encode("utf-8")
     if not source.strip() or len(source_bytes) > _SOURCE_BYTE_LIMIT:
-        raise ToolError(f"Calculation source must be between 1 and {_SOURCE_BYTE_LIMIT} UTF-8 bytes.")
+        raise ToolError(
+            f"Calculation source must be between 1 and {_SOURCE_BYTE_LIMIT} UTF-8 bytes."
+        )
     if not _FUNCTION_NAME.fullmatch(function):
         raise ToolError("The calculation function must be a Python identifier.")
     try:
@@ -134,9 +138,7 @@ async def _execute_source(source: str, function: str, inputs: dict[str, int | fl
     if not isinstance(execution, dict):
         raise ToolError("The calculation runner returned no execution record.")
     if execution.get("assets"):
-        raise ToolError(
-            "This version accepts a single source file without local figure assets."
-        )
+        raise ToolError("This version accepts a single source file without local figure assets.")
     return execution
 
 
@@ -144,7 +146,11 @@ def create_calculation_source_object_server() -> FastMCP:
     """Create a portable MCP server for running and viewing CSO calculations."""
     mcp = FastMCP("agent-hub-calculation-source-object")
 
-    @mcp.tool(name=RUN_CALCULATION_TOOL_NAME, annotations={"idempotentHint": True})
+    @mcp.tool(
+        name=RUN_CALCULATION_TOOL_NAME,
+        annotations={"idempotentHint": True},
+        app=AppConfig(resource_uri=REPORT_APP_RESOURCE_URI),
+    )
     async def run_calculation(
         source: str,
         function: str,
@@ -190,9 +196,7 @@ def create_calculation_source_object_server() -> FastMCP:
 
 
 def main() -> None:
-    create_calculation_source_object_server().run(
-        transport="http", host="0.0.0.0", port=8000
-    )
+    create_calculation_source_object_server().run(transport="http", host="0.0.0.0", port=8000)
 
 
 if __name__ == "__main__":
