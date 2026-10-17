@@ -38,20 +38,23 @@ export function McpAppFrame({
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const payload = useRef({ toolInput, toolResult });
-  payload.current = { toolInput, toolResult };
   const [attempt, setAttempt] = useState(0);
+  const requestKey = `${appUrl}:${attempt}`;
   const [appState, setAppState] = useState<AppState>({
     availability: "loading",
     message: null,
     key: "",
   });
   const availability =
-    appState.key === appUrl ? appState.availability : "loading";
-  const message = appState.key === appUrl ? appState.message : null;
+    appState.key === requestKey ? appState.availability : "loading";
+  const message = appState.key === requestKey ? appState.message : null;
+
+  useEffect(() => {
+    payload.current = { toolInput, toolResult };
+  }, [toolInput, toolResult]);
 
   useEffect(() => {
     let active = true;
-    setAppState({ availability: "loading", message: null, key: appUrl });
     fetch(appUrl, { cache: "no-store" })
       .then((response) => {
         if (!response.ok) {
@@ -64,7 +67,7 @@ export function McpAppFrame({
           setAppState({
             availability: "available",
             message: null,
-            key: appUrl,
+            key: requestKey,
           });
         }
       })
@@ -76,14 +79,14 @@ export function McpAppFrame({
               error instanceof Error && error.message === "unavailable"
                 ? "This saved result has no interactive App for its captured version. Its data is still available in the surrounding view."
                 : "The interactive App could not be loaded. Its data is still available in the surrounding view.",
-            key: appUrl,
+            key: requestKey,
           });
         }
       });
     return () => {
       active = false;
     };
-  }, [appUrl, attempt]);
+  }, [appUrl, attempt, requestKey]);
 
   useEffect(() => {
     if (availability !== "available") return;
@@ -110,7 +113,7 @@ export function McpAppFrame({
               availability: "unavailable",
               message:
                 "The interactive App could not receive this saved result. Its inputs and output are still available.",
-              key: appUrl,
+              key: requestKey,
             });
           }
         });
@@ -129,7 +132,7 @@ export function McpAppFrame({
             availability: "unavailable",
             message:
               "The interactive App could not be initialized. Its inputs and output are still available.",
-            key: appUrl,
+            key: requestKey,
           });
         }
       });
@@ -138,7 +141,7 @@ export function McpAppFrame({
       void bridge.teardownResource({}).catch(() => {});
       void bridge.close();
     };
-  }, [appUrl, availability]);
+  }, [appUrl, availability, requestKey]);
 
   return (
     <section aria-label={title} className={styles.app}>

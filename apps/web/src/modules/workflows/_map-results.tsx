@@ -227,13 +227,12 @@ export function WorkflowMapResults({
     : { value: selectedItem?.output };
 
   useEffect(() => {
-    setShowApp(false);
-  }, [selectedIndex]);
-
-  useEffect(() => {
     if (selectedIndex === null) return;
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setSelectedIndex(null);
+      if (event.key === "Escape") {
+        setShowApp(false);
+        setSelectedIndex(null);
+      }
     }
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
@@ -297,7 +296,10 @@ export function WorkflowMapResults({
                   <td>
                     <button
                       className={styles.mapInspectButton}
-                      onClick={() => setSelectedIndex(item.index)}
+                      onClick={() => {
+                        setShowApp(false);
+                        setSelectedIndex(item.index);
+                      }}
                       type="button"
                     >
                       Preview
@@ -332,9 +334,12 @@ export function WorkflowMapResults({
       {selectedItem ? (
         <div
           className={styles.mapPreviewBackdrop}
-          onMouseDown={(event) =>
-            event.target === event.currentTarget && setSelectedIndex(null)
-          }
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowApp(false);
+              setSelectedIndex(null);
+            }
+          }}
         >
           <aside
             aria-labelledby="map-preview-title"
@@ -349,7 +354,13 @@ export function WorkflowMapResults({
                   {selectedItem.itemId ?? `Item ${selectedItem.index + 1}`}
                 </h3>
               </div>
-              <button onClick={() => setSelectedIndex(null)} type="button">
+              <button
+                onClick={() => {
+                  setShowApp(false);
+                  setSelectedIndex(null);
+                }}
+                type="button"
+              >
                 Close
               </button>
             </header>
