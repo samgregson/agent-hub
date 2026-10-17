@@ -366,7 +366,7 @@ class WorkflowDefinitionModule:
             else:
                 raise WorkflowValidationError("Workflow binding has an unknown source kind.")
             if not _compatible(selected_source_schema, selected_target_schema):
-                source = (
+                binding_source = (
                     f"{edge.source_node}.{edge.source_port}{edge.source_path}"
                     if edge.source_kind == "node"
                     else f"Workflow Input {edge.source_input!r}{edge.source_path}"
@@ -374,7 +374,7 @@ class WorkflowDefinitionModule:
                     else f"literal{edge.source_path}"
                 )
                 raise WorkflowValidationError(
-                    f"Workflow binding from {source} to "
+                    f"Workflow binding from {binding_source} to "
                     f"{edge.target_node}.{edge.target_port}{edge.target_path} has incompatible "
                     "schemas. Check the source_path and target_path on this binding."
                 )

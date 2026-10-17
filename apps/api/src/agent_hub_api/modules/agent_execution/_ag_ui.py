@@ -1,7 +1,7 @@
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any, cast
 
-from ag_ui.core import Interrupt as AGUIInterrupt
+from ag_ui.core import BaseEvent, Interrupt as AGUIInterrupt
 from ag_ui.core import ResumeEntry, RunAgentInput, ToolCallStartEvent
 from ag_ui_langgraph import LangGraphAgent
 from ag_ui_langgraph.interrupts import lg_interrupts_to_agui
@@ -114,7 +114,7 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
             )
         return dispatched
 
-    async def run(self, input: RunAgentInput):
+    async def run(self, input: RunAgentInput) -> AsyncGenerator[BaseEvent, None]:
         # Resume requests contain the interrupted tool calls in their echoed
         # message history, but no new ToolCallStartEvents are emitted before
         # LangGraph resolves the checkpoint interrupt. Seed the matcher from

@@ -2312,10 +2312,11 @@ test("process stays expanded while work streams and collapses when the turn ends
   await expect(
     page.getByText("I checked the brief and found the requested details."),
   ).toBeVisible();
-  await expect(toolDetails.getByText("Project brief loaded")).toBeVisible();
-
   await expect(page.getByText("Process", { exact: true })).toBeVisible();
   await expect(process).not.toHaveAttribute("open", "");
+  await process.locator(":scope > summary").click();
+  await expect(process).toHaveAttribute("open", "");
+  await expect(toolDetails.getByText("Project brief loaded")).toBeVisible();
 });
 
 test("approving an interrupt after a LangGraph message snapshot resumes", async ({
