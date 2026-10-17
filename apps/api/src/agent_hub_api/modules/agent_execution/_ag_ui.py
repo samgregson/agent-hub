@@ -1,8 +1,8 @@
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any, cast
 
-from ag_ui.core import BaseEvent, Interrupt as AGUIInterrupt
-from ag_ui.core import ResumeEntry, RunAgentInput, ToolCallStartEvent
+from ag_ui.core import BaseEvent, ResumeEntry, RunAgentInput, ToolCallStartEvent
+from ag_ui.core import Interrupt as AGUIInterrupt
 from ag_ui_langgraph import LangGraphAgent
 from ag_ui_langgraph.interrupts import lg_interrupts_to_agui
 from ag_ui_langgraph.utils import agui_messages_to_langchain
