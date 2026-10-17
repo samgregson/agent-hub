@@ -3,6 +3,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import asdict
 from typing import Any
+from urllib.parse import quote
 
 from ag_ui.core import BaseEvent, RunAgentInput
 from ag_ui_langgraph.utils import langchain_messages_to_agui
@@ -51,6 +52,7 @@ from agent_hub_api.modules.projects import ProjectAccess
 from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowGraph,
+    WorkflowImage,
     WorkflowRunModule,
     WorkflowValidationError,
 )
@@ -65,7 +67,17 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Workflow execution require approval. Start the appropriate tool action without asking "
         "for approval in chat; the approval card is shown automatically. Wait for its result.",
         "Datasets are registered Project Files under /project/.datasets. Use Dataset tools for "
-        "Dataset changes; generic file writes cannot change registered Dataset files.",
+        "Dataset changes; generic file writes cannot change registered Dataset files. When a "
+        "user asks for a structured multi-row result, prefer creating or updating a Dataset so "
+        "they can inspect it in the Dataset table instead of pasting a large JSON array into "
+        "chat. Check for a suitable existing Dataset first; update one only when the user asks "
+        "to replace or extend it. Pass records_json as a JSON array of record objects: each "
+        "object's fields become that Record's value, while optional sourceKey identifies the row "
+        "and is stored separately. For example, records_json can be "
+        '[{"sourceKey":"case-1","length":10,"area":50}]. '
+        "After saving, report the Dataset "
+        "name, record count, and a short summary; do not repeat the full data in chat unless "
+        "requested.",
         "Python Functions are authored as transform(inputs, parameters). Use Function tools to "
         "discover, inspect, create, revise, delete, or preview them. A preview is transient and "
         "runs against one record; it does not create a durable Run. Function inputs are named "
@@ -77,6 +89,13 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Workflow graphs define data sources, wiring, and whether a Function processes one "
         "value or a collection. Use Workflow tools to create, inspect, revise, prepare, execute, "
         "resume, and inspect Workflow Runs. Report outputs from saved Workflow Runs.",
+        "Python Functions can create PNG charts by importing matplotlib, creating a figure, and "
+        "saving it to io.BytesIO with format='png'; return an image object with kind='image', "
+        "mimeType='image/png', dataBase64 containing base64.b64encode(buffer.getvalue()).decode(), "
+        "and altText. Keep PNG data under 90 KB. Workflow displays image outputs directly and "
+        "offers Save to Library. Use view_image on a saved Workflow Run output when visual "
+        "inspection is useful. If you want to show that image in chat, use the exact Markdown "
+        "image link returned by view_image; never paste base64 into chat.",
         "For Workflow authoring, first inspect the Project's existing Datasets, Functions, "
         "Plugins, file sources, and Workflows; reuse suitable assets. Prefer the smallest useful "
         "end-to-end graph. A source-only graph is valid when that meets the request. For a demo "
@@ -137,6 +156,21 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "automatically. Inspect the saved Run for node outputs and failures.",
     )
 )
+
+
+def _without_image_data(value: Any) -> Any:
+    """Keep image metadata in ordinary tool output and load pixels only on request."""
+    if isinstance(value, Mapping):
+        if value.get("kind") == "image" and isinstance(value.get("dataBase64"), str):
+            return {
+                key: _without_image_data(item) for key, item in value.items() if key != "dataBase64"
+            } | {"imageAvailable": True}
+        return {key: _without_image_data(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_without_image_data(item) for item in value]
+    if isinstance(value, tuple):
+        return [_without_image_data(item) for item in value]
+    return value
 
 
 @tool
@@ -496,7 +530,11 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def create_project_dataset(name: str, records_json: str) -> str:
-            """Create a Dataset from a JSON array of Records after user approval."""
+            """Create a Dataset after approval from a JSON array of row objects.
+
+            Each object's fields become that Record's value. Use optional sourceKey
+            for a human-readable row identifier; it is stored separately.
+            """
             dataset = await datasets.create_dataset(
                 access, project_id, name, _dataset_records(records_json)
             )
@@ -515,7 +553,11 @@ class PostgresDeepAgentRunner:
         async def update_project_dataset(
             dataset_id: str, expected_version: int, name: str, records_json: str
         ) -> str:
-            """Update a Dataset after approval using its loaded document version."""
+            """Update a Dataset after approval using its loaded document version.
+
+            records_json is an array of row objects. Each object's fields become
+            that Record's value; optional sourceKey is stored separately.
+            """
             dataset = await datasets.update_dataset(
                 access,
                 project_id,
@@ -684,10 +726,48 @@ class PostgresDeepAgentRunner:
                     {
                         "id": run.id,
                         "status": run.status,
-                        "snapshot": run.snapshot,
-                        "execution": run.execution,
+                        "snapshot": _without_image_data(run.snapshot),
+                        "execution": _without_image_data(run.execution),
                     }
                 )
+
+            @tool
+            async def view_image(run_id: str, output_name: str) -> list[dict[str, str]]:
+                """View an image saved as a named output in a successful Workflow Run.
+
+                Use when visual inspection would help. To show the image in chat, use the exact
+                Markdown image link supplied in the text result.
+                """
+                run = await workflow_runs.load(access, project_id, run_id)
+                image: WorkflowImage = await workflow_runs.load_image(
+                    access, project_id, run_id, output_name
+                )
+                image_path = (
+                    f"/api/projects/{quote(project_id, safe='')}/workflows/"
+                    f"{quote(run.workflow_id, safe='')}/runs/{quote(run.id, safe='')}/outputs/"
+                    f"{quote(output_name, safe='')}/image"
+                )
+                markdown_alt = (
+                    image.alt_text.replace("\\", "\\\\")
+                    .replace("[", "\\[")
+                    .replace("]", "\\]")
+                    .replace("\r", " ")
+                    .replace("\n", " ")
+                )
+                return [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Viewed image output '{output_name}' from Workflow Run {run.id}. "
+                            f"To display it in chat, use exactly: ![{markdown_alt}]({image_path})"
+                        ),
+                    },
+                    {
+                        "type": "image",
+                        "base64": image.data_base64,
+                        "mime_type": image.mime_type,
+                    },
+                ]
 
             @tool
             async def execute_project_workflow_run(run_id: str) -> str:
@@ -697,13 +777,20 @@ class PostgresDeepAgentRunner:
                     project_id,
                     run_id,
                 )
-                return json.dumps({"id": run.id, "status": run.status, "execution": run.execution})
+                return json.dumps(
+                    {
+                        "id": run.id,
+                        "status": run.status,
+                        "execution": _without_image_data(run.execution),
+                    }
+                )
 
             tools.extend(
                 [
                     prepare_project_workflow_run,
                     execute_project_workflow_run,
                     load_project_workflow_run,
+                    view_image,
                 ]
             )
         return tools

@@ -71,7 +71,16 @@ function virtualFilePath(url: string): string | null {
 
 function safeMarkdownUrl(url: string): string {
   if (virtualFilePath(url)) return url;
+  if (safeWorkflowImagePath(url)) return url;
   return safeExternalMarkdownUrl(url) ?? "";
+}
+
+function safeWorkflowImagePath(url: string): string | null {
+  return /^\/api\/projects\/[A-Za-z0-9_-]+\/workflows\/[A-Za-z0-9_-]+\/runs\/[A-Za-z0-9_-]+\/outputs\/[A-Za-z0-9._~%-]+\/image$/.test(
+    url,
+  )
+    ? url
+    : null;
 }
 
 function safeExternalMarkdownUrl(url: string): string | null {
@@ -124,7 +133,26 @@ function MarkdownTable({ children, ...props }: ComponentProps<"table">) {
   );
 }
 
-const markdownComponents = { a: MarkdownAnchor, table: MarkdownTable };
+function MarkdownImage({ alt, src, ...props }: ComponentProps<"img">) {
+  const safeSrc = typeof src === "string" ? safeWorkflowImagePath(src) : null;
+  if (!safeSrc) return null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      {...props}
+      alt={alt ?? ""}
+      className={styles.messageImage}
+      loading="lazy"
+      src={safeSrc}
+    />
+  );
+}
+
+const markdownComponents = {
+  a: MarkdownAnchor,
+  img: MarkdownImage,
+  table: MarkdownTable,
+};
 const markdownPlugins = [remarkGfm];
 
 function TextPart() {

@@ -34,7 +34,7 @@ export async function runFunction(request, limits = {}) {
       "--cached-only",
       "--no-prompt",
       "--allow-read=/app,/deno-dir",
-      "--deny-net",
+      "--allow-net=cdn.jsdelivr.net",
       "--deny-env",
       "--deny-run",
       "--deny-ffi",

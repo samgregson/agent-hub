@@ -1,0 +1,33 @@
+.preview {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  max-width: 100%;
+  margin: 12px 0;
+}
+
+.preview > a {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.preview img {
+  display: block;
+  max-width: min(100%, 760px);
+  max-height: 620px;
+  object-fit: contain;
+}
+
+.preview figcaption {
+  color: var(--text-strong);
+  font-size: var(--font-size-label);
+  line-height: 1.45;
+}
+
+.preview .caption {
+  color: var(--text-subtle);
+}

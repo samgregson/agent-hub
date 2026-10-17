@@ -146,7 +146,12 @@ def create_app(
         create_function_router(resolved_identity, resolved_functions), prefix="/api"
     )
     application.include_router(
-        create_workflow_router(resolved_identity, resolved_workflows, resolved_workflow_runs),
+        create_workflow_router(
+            resolved_identity,
+            resolved_workflows,
+            resolved_workflow_runs,
+            resolved_artifacts,
+        ),
         prefix="/api",
     )
     application.include_router(

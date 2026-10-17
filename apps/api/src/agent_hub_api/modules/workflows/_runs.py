@@ -1,6 +1,8 @@
 """Durable Workflow Run preparation and immutable execution inputs."""
 
 import asyncio
+import base64
+import binascii
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
@@ -57,6 +59,19 @@ class WorkflowRun:
     initiator_subject: str
     idempotency_key: str
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowImage:
+    """A validated small PNG stored in a successful Workflow Run output."""
+
+    data: bytes
+    data_base64: str
+    alt_text: str
+    mime_type: str = "image/png"
+
+
+MAX_WORKFLOW_IMAGE_BYTES = 90_000
 
 
 class WorkflowRunConflict(Exception):
@@ -951,6 +966,46 @@ class WorkflowRunModule:
         if run is None:
             raise WorkflowNotFound
         return run
+
+    async def load_image(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        run_id: str,
+        output_name: str,
+    ) -> WorkflowImage:
+        """Load one bounded PNG output after Project authorization."""
+        run = await self.load(access, project_id, run_id)
+        outputs = _mapping(run.execution.get("outputs"))
+        output = _mapping(outputs.get(output_name))
+        data_base64 = output.get("dataBase64")
+        alt_text = output.get("altText")
+        if (
+            run.status != "succeeded"
+            or output.get("kind") != "image"
+            or output.get("mimeType") != "image/png"
+            or not isinstance(data_base64, str)
+            or len(data_base64) > 4 * ((MAX_WORKFLOW_IMAGE_BYTES + 2) // 3)
+            or not isinstance(alt_text, str)
+            or len(alt_text) > 500
+        ):
+            raise WorkflowNotFound
+        try:
+            data = base64.b64decode(data_base64, validate=True)
+        except (binascii.Error, ValueError) as error:
+            raise WorkflowNotFound from error
+        if (
+            not data
+            or len(data) > MAX_WORKFLOW_IMAGE_BYTES
+            or not data.startswith(b"\x89PNG\r\n\x1a\n")
+            or len(data) < 24
+        ):
+            raise WorkflowNotFound
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+        if width < 1 or height < 1 or width > 4096 or height > 4096 or width * height > 16_000_000:
+            raise WorkflowNotFound
+        return WorkflowImage(data, data_base64, alt_text)
 
     async def list(
         self, access: ProjectAccess, project_id: str, workflow_id: str

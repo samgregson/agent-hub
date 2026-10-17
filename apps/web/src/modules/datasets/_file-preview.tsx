@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 
-import { filterDatasetRecords, scalarColumns, scalarText } from "./_table";
+import { datasetColumns, filterDatasetRecords } from "./_table";
+import { DatasetRecordsTable } from "./_records-table";
 import styles from "./dataset.module.css";
 
 interface DatasetRecord {
@@ -49,7 +50,7 @@ export function DatasetFilePreview({
   const [name, setName] = useState("");
   const [records, setRecords] = useState<DraftRecord[]>([]);
   const [viewFilter, setViewFilter] = useState("");
-  const columns = scalarColumns(dataset?.records ?? []);
+  const columns = datasetColumns(dataset?.records ?? []);
   const visibleRecords = filterDatasetRecords(
     dataset?.records ?? [],
     viewFilter,
@@ -146,10 +147,10 @@ export function DatasetFilePreview({
         <>
           <header className={styles.datasetHeader}>
             <div>
-              <strong>Dataset</strong>
               <h2>{dataset.name}</h2>
               <p>
-                Version {dataset.version} · {dataset.records.length} Records
+                Version {dataset.version} · {dataset.records.length} Records ·{" "}
+                {columns.length} fields
               </p>
             </div>
             {!editing ? (
@@ -243,6 +244,10 @@ export function DatasetFilePreview({
             </form>
           ) : (
             <div className={styles.datasetBrowse}>
+              <p>
+                Records are shown as a table. Expand a row to inspect nested
+                values.
+              </p>
               <label className={styles.datasetFilter}>
                 Filter records in this view
                 <input
@@ -253,51 +258,13 @@ export function DatasetFilePreview({
               </label>
               <p role="status">
                 Showing {visibleRecords.length} of {dataset.records.length}{" "}
-                Records · View filter only
+                Records
               </p>
-              <div className={styles.datasetTableWrap}>
-                <table className={styles.datasetTable}>
-                  <thead>
-                    <tr>
-                      <th scope="col">Order</th>
-                      <th scope="col">Record</th>
-                      {columns.map((column) => (
-                        <th key={column} scope="col">
-                          {column}
-                        </th>
-                      ))}
-                      <th scope="col">Full record</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleRecords.map((record) => (
-                      <tr key={record.id}>
-                        <td>{record.position + 1}</td>
-                        <td>
-                          <strong>{record.sourceKey ?? record.id}</strong>
-                        </td>
-                        {columns.map((column) => (
-                          <td key={column}>
-                            {scalarText(record.value[column]) ??
-                              (column in record.value
-                                ? "See full record"
-                                : "—")}
-                          </td>
-                        ))}
-                        <td>
-                          <details className={styles.datasetRecordDetails}>
-                            <summary>Inspect JSON</summary>
-                            <pre>{JSON.stringify(record.value, null, 2)}</pre>
-                          </details>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {visibleRecords.length === 0 ? (
+              {visibleRecords.length > 0 ? (
+                <DatasetRecordsTable records={visibleRecords} />
+              ) : (
                 <p>No records match this view filter.</p>
-              ) : null}
+              )}
             </div>
           )}
         </>

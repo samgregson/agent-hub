@@ -4,10 +4,17 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 
+from agent_hub_api.contracts import ArtifactDocument
+from agent_hub_api.modules.artifacts import (
+    ArtifactDraft,
+    ArtifactModule,
+    ArtifactNotFound,
+    ArtifactUserActionAccess,
+)
 from agent_hub_api.modules.identity import (
     IdentityEvidence,
     IdentityModule,
@@ -147,6 +154,7 @@ def create_workflow_router(
     identity: IdentityModule,
     workflows: WorkflowDefinitionModule,
     runs: WorkflowRunModule | None = None,
+    artifacts: ArtifactModule | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/projects/{project_id}/workflows", tags=["workflows"])
 
@@ -303,5 +311,96 @@ def create_workflow_router(
             except WorkflowNotFound as error:
                 raise HTTPException(status_code=404, detail="Run is unavailable.") from error
             return _run_response(item)
+
+        @router.get("/{workflow_id}/runs/{run_id}/outputs/{output_name}/image")
+        async def load_image(
+            project_id: str,
+            workflow_id: str,
+            run_id: str,
+            output_name: str,
+            request_context: Context,
+        ) -> Response:
+            try:
+                run = await runs.load(ProjectAccess(request_context.subject), project_id, run_id)
+                if run.workflow_id != workflow_id:
+                    raise WorkflowNotFound
+                image = await runs.load_image(
+                    ProjectAccess(request_context.subject), project_id, run_id, output_name
+                )
+            except WorkflowNotFound as error:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="Image is unavailable."
+                ) from error
+            return Response(
+                content=image.data,
+                media_type=image.mime_type,
+                headers={
+                    "Cache-Control": "private, no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
+        if artifacts is not None:
+
+            @router.post(
+                "/{workflow_id}/runs/{run_id}/outputs/{output_name}/artifact",
+                response_model=ArtifactDocument,
+                status_code=status.HTTP_201_CREATED,
+            )
+            async def save_image_artifact(
+                project_id: str,
+                workflow_id: str,
+                run_id: str,
+                output_name: str,
+                request_context: Context,
+            ) -> ArtifactDocument:
+                try:
+                    run = await runs.load(
+                        ProjectAccess(request_context.subject), project_id, run_id
+                    )
+                    if run.workflow_id != workflow_id:
+                        raise WorkflowNotFound
+                    image = await runs.load_image(
+                        ProjectAccess(request_context.subject),
+                        project_id,
+                        run_id,
+                        output_name,
+                    )
+                    return await artifacts.create(
+                        ArtifactUserActionAccess(
+                            subject=request_context.subject,
+                            user_action_id=request_context.request_id,
+                        ),
+                        project_id,
+                        ArtifactDraft(
+                            type="agent-hub.image",
+                            title=f"Workflow image · {output_name[:80]}",
+                            summary=f"{output_name} from Workflow Run {run_id}.",
+                            plugin_id="agent-hub",
+                            plugin_version="1.0",
+                            schema_id="agent-hub.image",
+                            schema_version="1.0",
+                            payload={
+                                "kind": "image",
+                                "mimeType": image.mime_type,
+                                "dataBase64": image.data_base64,
+                                "altText": image.alt_text,
+                                "source": {
+                                    "kind": "workflowOutput",
+                                    "workflowId": workflow_id,
+                                    "runId": run_id,
+                                    "outputName": output_name,
+                                },
+                            },
+                        ),
+                    )
+                except WorkflowNotFound as error:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND, detail="Image is unavailable."
+                    ) from error
+                except ArtifactNotFound as error:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND, detail="Project is unavailable."
+                    ) from error
 
     return router

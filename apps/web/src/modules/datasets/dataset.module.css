@@ -114,8 +114,9 @@
 }
 
 .datasetTableWrap {
-  overflow-x: auto;
+  overflow: auto;
   max-width: 100%;
+  max-height: min(70vh, 48rem);
 }
 
 .datasetBrowse {
@@ -148,6 +149,28 @@
   text-align: left;
 }
 
+.datasetTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.datasetTable tbody tr:hover {
+  background: var(--surface-selected);
+}
+
+.datasetTable td {
+  max-width: 18rem;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 .datasetTable th,
 .datasetTable td {
   padding: var(--space-3);
@@ -164,11 +187,61 @@
   white-space: nowrap;
 }
 
-.datasetRecordDetails pre {
-  max-width: 24rem;
-  overflow: auto;
+.datasetRecordDetails[open] {
+  min-width: 14rem;
+  max-width: 32rem;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  white-space: normal;
+}
+
+.datasetValueDetails {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
+}
+
+.datasetValueDetails > div {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.7fr) minmax(0, 1.3fr);
+  gap: var(--space-3);
+}
+
+.datasetValueDetails dt {
+  color: var(--text-muted);
+  font-size: var(--font-size-label);
+}
+
+.datasetValueDetails dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.datasetValueList {
+  display: grid;
+  gap: var(--space-2);
   margin: var(--space-2) 0 0;
-  font-size: var(--font-size-meta);
+  padding-left: var(--space-4);
+}
+
+.datasetValueList li {
+  padding-left: var(--space-1);
+}
+
+.datasetValueList li::marker {
+  color: var(--text-muted);
+}
+
+.datasetRecordDetails[open] .datasetValueList,
+.datasetRecordDetails[open] .datasetValueDetails {
+  max-width: 100%;
+}
+
+.datasetRecordDetails[open] .datasetValueDetails dd {
+  overflow-wrap: anywhere;
 }
 
 .recordEditor {

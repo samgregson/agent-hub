@@ -4,6 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 
 import { WorkflowDefinitionEditor } from "./_editor";
 import { WorkflowMapResults } from "./_map-results";
+import {
+  DatasetRecordsTable,
+  type DatasetTableRecord,
+} from "@/modules/datasets";
+import {
+  ImageOutputPreview,
+  imageDataUrl,
+  isImageOutput,
+  type ImageOutput,
+} from "@/modules/media";
 import styles from "./workflow-overview.module.css";
 
 type WorkflowNode = {
@@ -267,6 +277,35 @@ function jsonText(value: unknown) {
   return JSON.stringify(value, null, 2) ?? "No captured value";
 }
 
+function datasetRows(value: unknown): DatasetTableRecord[] | null {
+  const isDatasetEnvelope =
+    !Array.isArray(value) && isRecord(value) && Array.isArray(value.records);
+  const rawRows: unknown[] | null = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.records)
+      ? value.records
+      : null;
+  if (rawRows === null) return null;
+  if (rawRows.length > 0 && !rawRows.every(isRecord)) return null;
+  return rawRows.flatMap((raw, index) => {
+    if (!isRecord(raw)) return [];
+    const wrappedValue =
+      isDatasetEnvelope && isRecord(raw.value) ? raw.value : raw;
+    const position = typeof raw.position === "number" ? raw.position : index;
+    return [
+      {
+        id:
+          typeof raw.id === "string" || typeof raw.id === "number"
+            ? String(raw.id)
+            : `record-${index + 1}`,
+        position,
+        sourceKey: typeof raw.sourceKey === "string" ? raw.sourceKey : null,
+        value: wrappedValue,
+      },
+    ];
+  });
+}
+
 function runLabel(run: WorkflowRun, index: number) {
   const date = new Date(run.createdAt);
   const timestamp = Number.isNaN(date.valueOf())
@@ -297,6 +336,7 @@ export function WorkflowOverview({
   );
   const [isRunning, setIsRunning] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [savedImages, setSavedImages] = useState<Record<string, boolean>>({});
   const [workflowInputText, setWorkflowInputText] = useState<
     Record<string, string>
   >({});
@@ -406,6 +446,12 @@ export function WorkflowOverview({
   const selectedNodeProgress = selectedNode
     ? progressByNode[selectedNode.id]
     : undefined;
+  const selectedNodeOutput = selectedNodeProgress?.output;
+  const selectedNodeImage: ImageOutput | null = isImageOutput(
+    selectedNodeOutput,
+  )
+    ? selectedNodeOutput
+    : null;
   const snapshotSources = isRecord(selectedRun?.snapshot.sources)
     ? (selectedRun.snapshot.sources as Record<string, SourceSnapshot>)
     : {};
@@ -415,6 +461,10 @@ export function WorkflowOverview({
   const finalOutputs = isRecord(runExecution.outputs)
     ? runExecution.outputs
     : {};
+  const selectedDatasetInputRows =
+    selectedNode?.kind === "dataset"
+      ? datasetRows(snapshotSources[selectedNode.id])
+      : null;
 
   function workflowInputKey(name: string) {
     return `${workflow?.id ?? ""}:${workflow?.version ?? 0}:${name}`;
@@ -426,7 +476,7 @@ export function WorkflowOverview({
     setActionError(null);
     try {
       const workflowInputs: Record<string, unknown> = {};
-      for (const input of workflow.graph.inputs) {
+      for (const input of workflow.graph.inputs ?? []) {
         const raw = workflowInputText[workflowInputKey(input.name)] ?? "";
         if (raw.trim() === "" && !input.required) continue;
         if (input.schema.type === "string") {
@@ -481,6 +531,27 @@ export function WorkflowOverview({
       );
     } finally {
       setIsRunning(false);
+    }
+  }
+
+  async function saveImageToLibrary(outputName: string) {
+    if (!workflow || !selectedRun) return;
+    setActionError(null);
+    const key = `${selectedRun.id}:${outputName}`;
+    try {
+      const response = await fetch(
+        `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow.id)}/runs/${encodeURIComponent(selectedRun.id)}/outputs/${encodeURIComponent(outputName)}/artifact`,
+        { method: "POST" },
+      );
+      if (!response.ok)
+        throw new Error("Could not save this image to Library.");
+      setSavedImages((current) => ({ ...current, [key]: true }));
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Could not save this image to Library.",
+      );
     }
   }
 
@@ -705,18 +776,59 @@ export function WorkflowOverview({
         </div>
         {selectedRun ? (
           <div className={styles.outputList}>
-            {graph.outputs.map((output) => (
-              <article className={styles.output} key={output.name}>
-                <div>
-                  <h3>{output.name}</h3>
-                  <p>
-                    From {graphNodes.get(output.node)?.id ?? output.node} ·{" "}
-                    {output.port}
-                  </p>
-                </div>
-                <pre>{jsonText(finalOutputs[output.name])}</pre>
-              </article>
-            ))}
+            {graph.outputs.map((output) => {
+              const outputNode = graphNodes.get(output.node);
+              const rows = datasetRows(finalOutputs[output.name]);
+              const outputValue = finalOutputs[output.name];
+              const image: ImageOutput | null = isImageOutput(outputValue)
+                ? outputValue
+                : null;
+              const imageKey = `${selectedRun.id}:${output.name}`;
+              const imageUrl = `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow?.id ?? "")}/runs/${encodeURIComponent(selectedRun.id)}/outputs/${encodeURIComponent(output.name)}/image`;
+              return (
+                <article className={styles.output} key={output.name}>
+                  <div>
+                    <h3>{output.name}</h3>
+                    <p>
+                      From {outputNode?.id ?? output.node} · {output.port}
+                    </p>
+                  </div>
+                  {outputNode?.shape === "map" ? (
+                    <WorkflowMapResults
+                      items={progressByNode[output.node]?.items}
+                      node={outputNode}
+                      projectId={projectId}
+                      target={snapshotTargets[output.node] ?? {}}
+                    />
+                  ) : image ? (
+                    <>
+                      <ImageOutputPreview
+                        altText={image.altText}
+                        src={imageUrl}
+                        title={output.name}
+                      />
+                      <button
+                        className={styles.secondaryButton}
+                        disabled={savedImages[imageKey]}
+                        onClick={() => void saveImageToLibrary(output.name)}
+                        type="button"
+                      >
+                        {savedImages[imageKey]
+                          ? "Saved to Library"
+                          : "Save to Library"}
+                      </button>
+                    </>
+                  ) : rows ? (
+                    <DatasetRecordsTable
+                      ariaLabel={`${output.name} workflow output`}
+                      records={rows}
+                    />
+                  ) : (
+                    <pre>{jsonText(finalOutputs[output.name])}</pre>
+                  )}
+                </article>
+              );
+            })}
           </div>
         ) : (
           <p>
@@ -876,13 +988,30 @@ export function WorkflowOverview({
             <div className={styles.lineageSources}>
               <div>
                 <h3>Inputs</h3>
-                <pre>
-                  {jsonText(
-                    selectedNodeProgress?.inputs ??
-                      snapshotSources[selectedNode.id] ??
-                      {},
-                  )}
-                </pre>
+                {selectedNode.kind === "dataset" ? (
+                  selectedDatasetInputRows ? (
+                    <DatasetRecordsTable
+                      ariaLabel="Captured Dataset input records"
+                      records={selectedDatasetInputRows}
+                    />
+                  ) : (
+                    <pre>
+                      {jsonText(
+                        selectedNodeProgress?.inputs ??
+                          snapshotSources[selectedNode.id] ??
+                          {},
+                      )}
+                    </pre>
+                  )
+                ) : (
+                  <pre>
+                    {jsonText(
+                      selectedNodeProgress?.inputs ??
+                        snapshotSources[selectedNode.id] ??
+                        {},
+                    )}
+                  </pre>
+                )}
               </div>
               <div>
                 <h3>Captured target</h3>
@@ -892,7 +1021,15 @@ export function WorkflowOverview({
               </div>
               <div>
                 <h3>Output</h3>
-                <pre>{jsonText(selectedNodeProgress?.output)}</pre>
+                {selectedNodeImage ? (
+                  <ImageOutputPreview
+                    altText={selectedNodeImage.altText}
+                    src={imageDataUrl(selectedNodeImage)}
+                    title="Function output"
+                  />
+                ) : (
+                  <pre>{jsonText(selectedNodeProgress?.output)}</pre>
+                )}
               </div>
             </div>
           )}

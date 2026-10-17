@@ -16,7 +16,13 @@ from ._application import (
 )
 from ._http import create_workflow_router
 from ._run_store import create_postgres_workflow_run_module
-from ._runs import MemoryWorkflowRunStore, WorkflowRun, WorkflowRunConflict, WorkflowRunModule
+from ._runs import (
+    MemoryWorkflowRunStore,
+    WorkflowImage,
+    WorkflowRun,
+    WorkflowRunConflict,
+    WorkflowRunModule,
+)
 from ._store import create_postgres_workflow_module
 
 __all__ = [
@@ -27,6 +33,7 @@ __all__ = [
     "WorkflowEdge",
     "WorkflowFileSource",
     "WorkflowGraph",
+    "WorkflowImage",
     "WorkflowInput",
     "WorkflowNode",
     "WorkflowNotFound",

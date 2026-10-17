@@ -47,6 +47,17 @@
   min-width: 0;
 }
 
+.messageImage {
+  display: block;
+  max-width: 100%;
+  max-height: 620px;
+  margin: var(--space-3) 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  object-fit: contain;
+}
+
 .messageMarkdown > :first-child {
   margin-top: 0;
 }

@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { ArtifactDocument } from "@/contracts";
+import {
+  ImageOutputPreview,
+  imageDataUrl,
+  isImageOutput,
+} from "@/modules/media";
 
 import { ArtifactApp } from "./_app";
 import styles from "./artifact-view-host.module.css";
@@ -30,6 +35,11 @@ export function ArtifactDocumentPreview({
   const error = result.key === key ? result.error : null;
   const [staleKey, setStaleKey] = useState<string | null>(null);
   const isStale = staleKey === key;
+  const imagePayload =
+    document?.artifact.schema.id === "agent-hub.image" &&
+    isImageOutput(document.payload)
+      ? document.payload
+      : null;
 
   const load = useCallback(async () => {
     const response = await fetch(
@@ -106,11 +116,19 @@ export function ArtifactDocumentPreview({
               </button>
             </p>
           ) : null}
-          <ArtifactApp
-            artifactId={artifactId}
-            document={document}
-            projectId={projectId}
-          />
+          {imagePayload ? (
+            <ImageOutputPreview
+              altText={imagePayload.altText}
+              src={imageDataUrl(imagePayload)}
+              title={document.artifact.title}
+            />
+          ) : (
+            <ArtifactApp
+              artifactId={artifactId}
+              document={document}
+              projectId={projectId}
+            />
+          )}
           <details className={styles.details}>
             <summary>Artifact details</summary>
             <dl>
@@ -139,10 +157,12 @@ export function ArtifactDocumentPreview({
               </div>
             </dl>
           </details>
-          <details className={styles.fallback}>
-            <summary>Raw snapshot</summary>
-            <pre>{JSON.stringify(document.payload, null, 2)}</pre>
-          </details>
+          {!imagePayload ? (
+            <details className={styles.fallback}>
+              <summary>Raw snapshot</summary>
+              <pre>{JSON.stringify(document.payload, null, 2)}</pre>
+            </details>
+          ) : null}
         </>
       ) : null}
     </section>

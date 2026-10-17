@@ -11,11 +11,17 @@ try {
     stdout: () => {},
     stderr: () => {},
   });
+  if (/^\s*(?:import\s+matplotlib|from\s+matplotlib)/m.test(request.source)) {
+    pyodide.runPython("import os; os.environ['MPLBACKEND'] = 'Agg'");
+    await pyodide.loadPackage("matplotlib");
+  }
   pyodide.globals.set("source", request.source);
   pyodide.globals.set("input_json", JSON.stringify(request.inputs));
   pyodide.globals.set("parameters_json", JSON.stringify(request.parameters));
   const outputJson = pyodide.runPython(`
 import json
+import os
+os.environ["MPLBACKEND"] = "Agg"
 _scope = {}
 exec(source, _scope)
 _result = _scope["transform"](json.loads(input_json), json.loads(parameters_json))
