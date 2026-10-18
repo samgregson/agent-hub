@@ -541,7 +541,9 @@ class WorkflowDefinitionModule:
                 )
             except (PluginNotAvailable, PluginNotEnabled, PluginToolNotAllowed) as error:
                 raise WorkflowValidationError(
-                    "MCP tool is unavailable for this Project."
+                    f"MCP tool {node.tool_name!r} from Plugin ID {node.ref_id!r} is unavailable "
+                    "for this Project. Call discover_project_plugins and use the exact ID of an "
+                    "enabled Plugin with that tool."
                 ) from error
             if version != node.version:
                 raise WorkflowValidationError(

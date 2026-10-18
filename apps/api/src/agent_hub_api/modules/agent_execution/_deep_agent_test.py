@@ -96,11 +96,14 @@ def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
     assert "saved Function UUID as ref_id" in _AGENT_SYSTEM_PROMPT
     assert "target_port names a Function input" in _AGENT_SYSTEM_PROMPT
     assert "never put a Function name in ref_id" in _AGENT_SYSTEM_PROMPT
-    assert "create it without a separate validation call" in _AGENT_SYSTEM_PROMPT
+    assert "Create or revise a Workflow directly" in _AGENT_SYSTEM_PROMPT
+    assert "those authoring tools validate automatically" in _AGENT_SYSTEM_PROMPT
     assert "discover_project_file_sources" in _AGENT_SYSTEM_PROMPT
     assert "Workflow output schema properties are inside the result value" in _AGENT_SYSTEM_PROMPT
     assert "when its Function accepts a collection" in _AGENT_SYSTEM_PROMPT
     assert "Never map a collection filter" in _AGENT_SYSTEM_PROMPT
+    assert "Workflow IDs and Workflow Run IDs are different" in _AGENT_SYSTEM_PROMPT
+    assert "treat it as a recoverable tool result" in _AGENT_SYSTEM_PROMPT
 
 
 @pytest.mark.asyncio
@@ -190,8 +193,8 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         {"run_id": "missing-run", "output_name": "chart"}
     )
     image_error_payload = json.loads(image_error[0]["text"])
-    assert image_error_payload["error"]["code"] == "image_output_unavailable"
-    assert "Load the Run" in image_error_payload["nextStep"]
+    assert image_error_payload["error"]["code"] == "workflow_run_not_found"
+    assert "Use the Run ID" in image_error_payload["nextStep"]
     file_sources = json.loads(await tools["discover_project_file_sources"].ainvoke({}))
     assert file_sources == [{"path": "/project/demo.txt", "version": file.version}]
     graph_json = json.dumps(
@@ -201,12 +204,6 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             "outputs": [{"name": "records", "node": "source", "port": "records"}],
         }
     )
-    preflight = await tools["validate_project_workflow"].ainvoke(
-        {"graph_json": json.loads(graph_json)}
-    )
-    assert "structurally valid" in preflight
-    assert "Python code was not run" in preflight
-    assert "has not been saved" in preflight
     function = await functions.define(
         owner,
         project.id,
@@ -252,10 +249,6 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             "outputs": [{"name": "normalized", "node": "normalize", "port": "result"}],
         }
     )
-    function_preflight = await tools["validate_project_workflow"].ainvoke(
-        {"graph_json": json.loads(function_graph)}
-    )
-    assert "structurally valid" in function_preflight
     input_workflow_graph = json.dumps(
         {
             "nodes": [
@@ -286,7 +279,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     input_run = json.loads(
         await tools["prepare_project_workflow_run"].ainvoke(
             {
-                "workflow_id": input_workflow["id"],
+                "workflow_id": input_workflow["workflowId"],
                 "expected_version": 1,
                 "idempotency_key": "runtime-input-run",
                 "workflow_inputs": {"request": "  sample  "},
@@ -294,12 +287,12 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         )
     )
     input_run_snapshot = json.loads(
-        await tools["load_project_workflow_run"].ainvoke({"run_id": input_run["id"]})
+        await tools["load_project_workflow_run"].ainvoke({"run_id": input_run["runId"]})
     )["snapshot"]
     assert input_run_snapshot["workflowInputs"] == {"request": "  sample  "}
     bad_function_graph = function_graph.replace(function.id, "normalize_text")
-    function_error = await tools["validate_project_workflow"].ainvoke(
-        {"graph_json": json.loads(bad_function_graph)}
+    function_error = await tools["create_project_workflow"].ainvoke(
+        {"name": "Invalid Function reference", "graph_json": json.loads(bad_function_graph)}
     )
     assert json.loads(function_error) == {
         "ok": False,
@@ -311,8 +304,8 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             ),
         },
         "nextStep": (
-            "Correct the named node, reference, schema, or binding, then create or revise "
-            "the Workflow."
+            "Correct graph_json using the named node, reference, schema, or binding, then "
+            "retry once."
         ),
     }
     invalid = await tools["create_project_workflow"].ainvoke(
@@ -337,9 +330,11 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         )
     )
     assert created["version"] == 1
+    workflow_listing = json.loads(await tools["list_project_workflows"].ainvoke({}))
+    assert any(item["workflowId"] == created["workflowId"] for item in workflow_listing)
     invalid_revision = await tools["revise_project_workflow"].ainvoke(
         {
-            "workflow_id": created["id"],
+            "workflow_id": created["workflowId"],
             "name": "Invalid revision",
             "expected_version": 1,
             "graph_json": {
@@ -350,29 +345,85 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         }
     )
     assert json.loads(invalid_revision)["error"]["code"] == "workflow_validation"
+    missing_revision = json.loads(
+        await tools["revise_project_workflow"].ainvoke(
+            {
+                "workflow_id": "missing-workflow",
+                "name": "Missing workflow",
+                "expected_version": 1,
+                "graph_json": json.loads(graph_json),
+            }
+        )
+    )
+    assert missing_revision["error"]["code"] == "workflow_not_found"
 
     loaded = json.loads(
         await tools["load_project_workflow"].ainvoke(
             {
-                "workflow_id": created["id"],
+                "workflow_id": created["workflowId"],
             }
         )
     )
+    assert loaded["workflowId"] == created["workflowId"]
     assert loaded["graph"]["outputs"][0]["name"] == "records"
+    missing_workflow = json.loads(
+        await tools["load_project_workflow"].ainvoke({"workflow_id": "missing-workflow"})
+    )
+    assert missing_workflow["error"]["code"] == "workflow_not_found"
+    assert "list_project_workflows" in missing_workflow["nextStep"]
+    missing_prepare = json.loads(
+        await tools["prepare_project_workflow_run"].ainvoke(
+            {
+                "workflow_id": "missing-workflow",
+                "expected_version": 1,
+                "idempotency_key": "missing-workflow-run",
+            }
+        )
+    )
+    assert missing_prepare["error"]["code"] == "workflow_not_found"
+
     prepared = json.loads(
         await tools["prepare_project_workflow_run"].ainvoke(
             {
-                "workflow_id": created["id"],
+                "workflow_id": created["workflowId"],
                 "expected_version": 1,
                 "idempotency_key": "agent-request-1",
             }
         )
     )
     assert prepared["status"] == "prepared"
+    assert prepared["workflowId"] == created["workflowId"]
     inspected = json.loads(
-        await tools["load_project_workflow_run"].ainvoke({"run_id": prepared["id"]})
+        await tools["load_project_workflow_run"].ainvoke({"run_id": prepared["runId"]})
     )
+    assert inspected["runId"] == prepared["runId"]
+    assert inspected["workflowId"] == created["workflowId"]
     assert inspected["snapshot"]["sources"]["source"]["records"][0]["value"] == {"value": 2}
+
+    wrong_resource_id = await tools["load_project_workflow_run"].ainvoke(
+        {"run_id": created["workflowId"]}
+    )
+    assert json.loads(wrong_resource_id) == {
+        "ok": False,
+        "error": {
+            "code": "workflow_run_not_found",
+            "message": (
+                f"Workflow Run '{created['workflowId']}' is unavailable in this Project. "
+                "This may be a Workflow ID rather than a Run ID."
+            ),
+        },
+        "nextStep": (
+            "Use the Run ID returned by prepare_project_workflow_run or "
+            "execute_project_workflow_run. If you meant a saved Workflow, call "
+            "list_project_workflows and use its ID with load_project_workflow; prepare a new "
+            "Run if no Run ID is available."
+        ),
+    }
+    missing_run = json.loads(
+        await tools["execute_project_workflow_run"].ainvoke({"run_id": "missing-run"})
+    )
+    assert missing_run["error"]["code"] == "workflow_run_not_found"
+    assert "prepare a fresh Run" in missing_run["nextStep"]
 
 
 @pytest.mark.asyncio
@@ -500,7 +551,8 @@ async def test_agent_exposes_authoring_and_workflow_tools_without_standalone_run
     assert "create_project_function" in captured["interrupt_on"]
     assert "update_project_function" in captured["interrupt_on"]
     assert "delete_project_function" in captured["interrupt_on"]
-    assert {"list_project_workflows", "validate_project_workflow"} <= names
+    assert "list_project_workflows" in names
+    assert "validate_project_workflow" not in names
     assert {"prepare_project_workflow_run", "execute_project_workflow_run"} <= names
     assert not any(
         "batch_run" in name

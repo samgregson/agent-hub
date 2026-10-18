@@ -95,6 +95,12 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "by the Dataset loading tool. Declare a Function input schema that matches those row "
         "values, and have the Function consume each row directly. Bind the whole records array "
         "instead of guessing nested paths.",
+        "MCP tools are available to a Run only when their Plugin is enabled for the selected "
+        "Project. Before using a requested MCP tool, call discover_project_plugins if the tool "
+        "is missing or its availability is unclear. If the requested Plugin is disabled, explain "
+        "that it must be enabled in the Project's Plugins view; do not claim the tool is absent "
+        "from the deployment. Preserve the exact tool error when a call fails and correct only "
+        "what that error identifies.",
         "Workflow Definitions are saved Project DAGs. Pass graph_json as an object with nodes, "
         "edges, outputs, and optional inputs. Each node has id, kind, ref_id, and version "
         "(optionally shape, tool_name, and map_input); kinds are dataset, file, python, and mcp. "
@@ -107,7 +113,9 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "Function input, "
         "so leave target_path empty unless assembling a nested input. Each output has name, node, "
         "and port. Python nodes use the saved Function UUID as ref_id and its revision as "
-        "version; never put a Function name in ref_id. The result port is the complete Function "
+        "version; never put a Function name in ref_id. For MCP nodes, ref_id must be the exact "
+        "Plugin ID returned by discover_project_plugins; tool_name is the separate tool name. "
+        "The result port is the complete Function "
         "output object; Workflow output schema properties are inside the result value, not "
         "separate "
         "ports. Map invokes a one-item Function for each item; use a single node when its Function "
@@ -116,16 +124,21 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "and tool_name. Project File nodes use an absolute /project path and current integer "
         "version; file content is text, including JSON. Use discover_project_file_sources for "
         "Project File Workflow inputs, never /scratch paths.",
-        "create_project_workflow and revise_project_workflow validate their graph. For a direct "
-        "Dataset-to-Function graph with current IDs, revisions, and matching declared schemas, "
-        "create it without a separate validation call. Use validate_project_workflow when a "
-        "complex graph or uncertain binding benefits from preflight. If a tool "
-        "reports an error, correct the named reference, schema, or binding and retry with the "
-        "corrected input. Never repeat an unchanged failing call. Use the revision returned by a "
-        "Function update in the Workflow node; reload only when that revision is unavailable.",
-        "To run a Workflow, prepare it once with its declared workflow_inputs, then execute the "
-        "prepared Run. Inspect saved outputs and diagnostics. Do not repeat a failed Run "
-        "unchanged.",
+        "Create or revise a Workflow directly; those authoring tools validate automatically and "
+        "return structured errors. If authoring fails, correct the named reference, schema, or "
+        "binding and retry with the corrected input. Never repeat an unchanged failing call. Use "
+        "the revision returned by a Function update in the Workflow node; reload only when that "
+        "revision is unavailable.",
+        "Workflow IDs and Workflow Run IDs are different, even though both are strings. Tool "
+        "results identify them with workflowId and runId fields. Use workflowId returned by "
+        "list_project_workflows or create_project_workflow only with Workflow Definition tools. "
+        "Use runId returned by prepare_project_workflow_run or execute_project_workflow_run only "
+        "with Run tools such as load_project_workflow_run and view_image. To run a Workflow, "
+        "prepare it once with its declared workflow_inputs, then "
+        "execute the prepared Run. Inspect saved outputs and diagnostics. If a tool reports a "
+        "not-found error, treat it as a recoverable tool result: rediscover the appropriate "
+        "Project resource and use its matching ID, or prepare a fresh Run; never repeat the "
+        "same failing call unchanged.",
         "The isolated Python runner supports matplotlib and loads it when imported; it does not "
         "provide pandas or general network access. For a PNG Function output, import io, base64, "
         "and matplotlib.pyplot as plt, save the figure to "
@@ -248,6 +261,8 @@ class PostgresDeepAgentRunner:
         assert self._model is not None
         tools = [foundation_protected_action] if self._settings.enable_foundation_test_tool else []
         if self._plugin_gateway is not None:
+            if subject is not None:
+                tools.extend(self._plugin_tools(self._plugin_gateway, project_id, subject))
             tools.extend(
                 await self._plugin_gateway.agent_tools(
                     project_id,
@@ -367,6 +382,39 @@ class PostgresDeepAgentRunner:
             emit_interrupt_outcome=True,
         )
         return agent
+
+    @staticmethod
+    def _plugin_tools(
+        plugin_gateway: PluginGatewayModule, project_id: str, subject: str
+    ) -> list[BaseTool]:
+        access = ProjectAccess(subject=subject)
+
+        @tool
+        async def discover_project_plugins() -> str:
+            """List reviewed Plugins, their Project enablement, and declared tools."""
+            selections = await plugin_gateway.selections(access, project_id)
+            return json.dumps(
+                [
+                    {
+                        "id": selection.manifest.id,
+                        "name": selection.manifest.name,
+                        "version": selection.manifest.version,
+                        "enabled": selection.enabled,
+                        "tools": [
+                            {
+                                "name": item.name,
+                                "readOnly": item.read_only,
+                                "description": item.description,
+                            }
+                            for item in selection.manifest.tools
+                            if item.agent_visible
+                        ],
+                    }
+                    for selection in selections
+                ]
+            )
+
+        return [discover_project_plugins]
 
     def _snapshot_recorder(
         self, project_id: str, thread_id: str | None, run_id: str | None, subject: str | None
@@ -592,19 +640,30 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def list_project_workflows() -> str:
-            """List saved Workflow Definitions in this Project."""
+            """List saved Workflow Definitions and their Workflow IDs in this Project."""
             items = await workflows.list(access, project_id)
             return json.dumps(
-                [{"id": item.id, "name": item.name, "version": item.version} for item in items]
+                [
+                    {"workflowId": item.id, "name": item.name, "version": item.version}
+                    for item in items
+                ]
             )
 
         @tool
         async def load_project_workflow(workflow_id: str) -> str:
-            """Read one saved Workflow Definition and its graph."""
-            item = await workflows.load(access, project_id, workflow_id)
+            """Read a saved Workflow Definition by Workflow ID, not a Workflow Run ID."""
+            try:
+                item = await workflows.load(access, project_id, workflow_id)
+            except WorkflowNotFound:
+                return _tool_error(
+                    "workflow_not_found",
+                    f"Workflow '{workflow_id}' is unavailable in this Project.",
+                    "Call list_project_workflows and use one of its Workflow IDs. If the "
+                    "Workflow is not listed, create it before loading or preparing a Run.",
+                )
             return json.dumps(
                 {
-                    "id": item.id,
+                    "workflowId": item.id,
                     "name": item.name,
                     "version": item.version,
                     "graph": asdict(item.graph),
@@ -616,30 +675,6 @@ class PostgresDeepAgentRunner:
             """List ordinary durable Project Files and versions usable as Workflow inputs."""
             items = await workflows.list_file_sources(access, project_id)
             return json.dumps([{"path": item.path, "version": item.version} for item in items])
-
-        @tool
-        async def validate_project_workflow(graph_json: dict[str, Any]) -> str:
-            """Preflight a structured Workflow graph before approval when useful.
-
-            Pass graph_json as an object with nodes, edges, outputs, and optional inputs. Do not
-            pass a serialized JSON string. Validation does not run Python code or save the graph.
-            Create and revise tools validate automatically, so this call is optional.
-            """
-            try:
-                graph = WorkflowGraph.from_json(json.dumps(graph_json))
-                await workflows.validate_graph(access, project_id, graph)
-            except WorkflowValidationError as error:
-                return _tool_error(
-                    "workflow_validation",
-                    str(error),
-                    "Correct the named node, reference, schema, or binding, then create or revise "
-                    "the Workflow.",
-                )
-            return (
-                "Workflow graph is structurally valid and its references are current. "
-                "Python code was not run; input value compatibility must be checked from "
-                "the Function source and output schema. The Workflow has not been saved."
-            )
 
         @tool
         async def create_project_workflow(name: str, graph_json: dict[str, Any]) -> str:
@@ -659,7 +694,9 @@ class PostgresDeepAgentRunner:
                     "Correct graph_json using the named node, reference, schema, or binding, then "
                     "retry once.",
                 )
-            return json.dumps({"id": item.id, "name": item.name, "version": item.version})
+            return json.dumps(
+                {"workflowId": item.id, "name": item.name, "version": item.version}
+            )
 
         @tool
         async def revise_project_workflow(
@@ -668,7 +705,7 @@ class PostgresDeepAgentRunner:
             graph_json: dict[str, Any],
             expected_version: int,
         ) -> str:
-            """Revise a Workflow after approval; graph_json is validated by this tool."""
+            """Revise by Workflow ID after approval; graph_json is validated by this tool."""
             try:
                 graph = WorkflowGraph.from_json(json.dumps(graph_json))
                 item = await workflows.revise(
@@ -686,13 +723,21 @@ class PostgresDeepAgentRunner:
                     "Correct graph_json using the named node, reference, schema, or binding, then "
                     "retry once.",
                 )
-            return json.dumps({"id": item.id, "name": item.name, "version": item.version})
+            except WorkflowNotFound:
+                return _tool_error(
+                    "workflow_not_found",
+                    f"Workflow '{workflow_id}' is unavailable in this Project.",
+                    "Call list_project_workflows, then retry with the exact Workflow ID and "
+                    "current version returned by that tool.",
+                )
+            return json.dumps(
+                {"workflowId": item.id, "name": item.name, "version": item.version}
+            )
 
         tools: list[BaseTool] = [
             list_project_workflows,
             load_project_workflow,
             discover_project_file_sources,
-            validate_project_workflow,
             create_project_workflow,
             revise_project_workflow,
         ]
@@ -705,7 +750,7 @@ class PostgresDeepAgentRunner:
                 idempotency_key: str,
                 workflow_inputs: dict[str, Any] | None = None,
             ) -> str:
-                """After approval, capture a Workflow Run and declared runtime inputs."""
+                """Prepare a Run from a Workflow ID; the returned id is a distinct Run ID."""
                 try:
                     run = await workflow_runs.prepare(
                         access,
@@ -724,9 +769,16 @@ class PostgresDeepAgentRunner:
                             "idempotency key. Do not execute an older Run."
                         )
                     return f"Workflow Run could not be prepared: {error}"
+                except WorkflowNotFound:
+                    return _tool_error(
+                        "workflow_not_found",
+                        f"Workflow '{workflow_id}' is unavailable in this Project.",
+                        "Call list_project_workflows and use a listed Workflow ID, not a Run ID. "
+                        "If no matching Workflow exists, create it first.",
+                    )
                 return json.dumps(
                     {
-                        "id": run.id,
+                        "runId": run.id,
                         "workflowId": run.workflow_id,
                         "status": run.status,
                         "definitionVersion": run.definition_version,
@@ -735,11 +787,23 @@ class PostgresDeepAgentRunner:
 
             @tool
             async def load_project_workflow_run(run_id: str) -> str:
-                """Inspect captured inputs, node outputs, and detailed failure diagnostics."""
-                run = await workflow_runs.load(access, project_id, run_id)
+                """Inspect a Workflow Run by Run ID, not by Workflow ID."""
+                try:
+                    run = await workflow_runs.load(access, project_id, run_id)
+                except WorkflowNotFound:
+                    return _tool_error(
+                        "workflow_run_not_found",
+                        f"Workflow Run '{run_id}' is unavailable in this Project. "
+                        "This may be a Workflow ID rather than a Run ID.",
+                        "Use the Run ID returned by prepare_project_workflow_run or "
+                        "execute_project_workflow_run. If you meant a saved Workflow, call "
+                        "list_project_workflows and use its ID with load_project_workflow; "
+                        "prepare a new Run if no Run ID is available.",
+                    )
                 return json.dumps(
                     {
-                        "id": run.id,
+                        "runId": run.id,
+                        "workflowId": run.workflow_id,
                         "status": run.status,
                         "snapshot": _without_image_data(run.snapshot),
                         "execution": _without_image_data(run.execution),
@@ -750,11 +814,27 @@ class PostgresDeepAgentRunner:
             async def view_image(run_id: str, output_name: str) -> list[dict[str, str]]:
                 """View an image saved as a named output in a successful Workflow Run.
 
+                run_id must be the Run ID returned by prepare_project_workflow_run or
+                execute_project_workflow_run, not a Workflow ID.
                 Use when visual inspection would help. To show the image in chat, use the exact
                 Markdown image link supplied in the text result.
                 """
                 try:
                     run = await workflow_runs.load(access, project_id, run_id)
+                except WorkflowNotFound:
+                    return [
+                        {
+                            "type": "text",
+                            "text": _tool_error(
+                                "workflow_run_not_found",
+                                f"Workflow Run '{run_id}' is unavailable in this Project.",
+                                "Use the Run ID returned by prepare_project_workflow_run or "
+                                "execute_project_workflow_run. If you meant a saved Workflow, "
+                                "call list_project_workflows and load it with its Workflow ID.",
+                            ),
+                        }
+                    ]
+                try:
                     image: WorkflowImage = await workflow_runs.load_image(
                         access, project_id, run_id, output_name
                     )
@@ -801,7 +881,7 @@ class PostgresDeepAgentRunner:
 
             @tool
             async def execute_project_workflow_run(run_id: str) -> str:
-                """After approval, execute or resume a recoverable Workflow Run.
+                """Execute by Run ID returned from prepare_project_workflow_run.
 
                 Inspect the returned execution. If it failed, read the node diagnostic or item
                 diagnostics, revise the Function or graph based on that evidence, and do not
@@ -823,7 +903,8 @@ class PostgresDeepAgentRunner:
                         )
                     return json.dumps(
                         {
-                            "id": run.id,
+                            "runId": run.id,
+                            "workflowId": run.workflow_id,
                             "status": run.status,
                             "execution": _without_image_data(run.execution),
                             "message": str(error),
@@ -834,9 +915,17 @@ class PostgresDeepAgentRunner:
                             ),
                         }
                     )
+                except WorkflowNotFound:
+                    return _tool_error(
+                        "workflow_run_not_found",
+                        f"Workflow Run '{run_id}' is unavailable in this Project.",
+                        "Use the Run ID returned by prepare_project_workflow_run. If the Run "
+                        "does not exist, call list_project_workflows, then prepare a fresh Run.",
+                    )
                 return json.dumps(
                     {
-                        "id": run.id,
+                        "runId": run.id,
+                        "workflowId": run.workflow_id,
                         "status": run.status,
                         "execution": _without_image_data(run.execution),
                     }

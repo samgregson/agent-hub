@@ -3,7 +3,13 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 
 import { Button, Field } from "@/shared/ui";
+import { ImageOutputPreview, imageDataUrl } from "@/modules/media";
 
+import { exampleFunctionInputs } from "./_preview-input";
+import {
+  functionPreviewImage,
+  functionPreviewSummary,
+} from "./_preview-output";
 import styles from "./functions.module.css";
 
 interface Definition {
@@ -62,7 +68,9 @@ export function FunctionCatalog({
   const root = `/api/projects/${encodeURIComponent(projectId)}/functions`;
   const [definitions, setDefinitions] = useState<Definition[] | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [inputsJson, setInputsJson] = useState('{"load": 3}');
+  const [inputOverrides, setInputOverrides] = useState<Record<string, string>>(
+    {},
+  );
   const [parametersJson, setParametersJson] = useState("{}");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -73,6 +81,11 @@ export function FunctionCatalog({
   const selectedDefinition = definitions?.find(
     (item) => item.id === selectedFunctionId,
   );
+  const inputsJson = selectedDefinition
+    ? (inputOverrides[selectedDefinition.id] ??
+      exampleFunctionInputs(selectedDefinition.inputSchema))
+    : "{}";
+  const previewImage = preview ? functionPreviewImage(preview.output) : null;
 
   useEffect(() => {
     let active = true;
@@ -138,6 +151,11 @@ export function FunctionCatalog({
         ...(current ?? []).filter((item) => item.id !== saved.id),
         saved,
       ]);
+      setInputOverrides((current) => {
+        const next = { ...current };
+        delete next[saved.id];
+        return next;
+      });
       onSelectFunction(saved.id);
       setIsEditing(false);
       setPreview(null);
@@ -408,7 +426,10 @@ export function FunctionCatalog({
                   <textarea
                     disabled={busy !== null}
                     onChange={(event) => {
-                      setInputsJson(event.target.value);
+                      setInputOverrides((current) => ({
+                        ...current,
+                        [selectedDefinition.id]: event.target.value,
+                      }));
                       setPreview(null);
                     }}
                     rows={5}
@@ -452,7 +473,20 @@ export function FunctionCatalog({
                     <pre>{JSON.stringify(preview.inputs, null, 2)}</pre>
                     <pre>{JSON.stringify(preview.parameters, null, 2)}</pre>
                   </details>
-                  <pre>{JSON.stringify(preview.output, null, 2)}</pre>
+                  {previewImage ? (
+                    <ImageOutputPreview
+                      altText={previewImage.altText}
+                      src={imageDataUrl(previewImage)}
+                      title="Image output"
+                    />
+                  ) : null}
+                  <pre>
+                    {JSON.stringify(
+                      functionPreviewSummary(preview.output),
+                      null,
+                      2,
+                    )}
+                  </pre>
                 </section>
               ) : null}
             </section>
