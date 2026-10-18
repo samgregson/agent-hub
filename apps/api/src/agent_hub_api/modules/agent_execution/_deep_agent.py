@@ -38,6 +38,7 @@ from agent_hub_api.modules.datasets import DatasetModule, DatasetRecordInput
 from agent_hub_api.modules.functions import (
     FunctionExecutionError,
     FunctionModule,
+    FunctionNotFound,
     FunctionValidationError,
 )
 from agent_hub_api.modules.plugin_gateway import (
@@ -53,10 +54,20 @@ from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowGraph,
     WorkflowImage,
+    WorkflowNotFound,
+    WorkflowRunConflict,
     WorkflowRunModule,
     WorkflowValidationError,
 )
 from agent_hub_api.settings import Settings
+
+
+def _tool_error(code: str, message: str, next_step: str) -> str:
+    """Return a compact, machine-readable error that tells the agent how to recover."""
+    return json.dumps(
+        {"ok": False, "error": {"code": code, "message": message}, "nextStep": next_step}
+    )
+
 
 _AGENT_SYSTEM_PROMPT = "\n\n".join(
     (
@@ -68,92 +79,60 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "for approval in chat; the approval card is shown automatically. Wait for its result.",
         "Datasets are registered Project Files under /project/.datasets. Use Dataset tools for "
         "Dataset changes; generic file writes cannot change registered Dataset files. When a "
-        "user asks for a structured multi-row result, prefer creating or updating a Dataset so "
-        "they can inspect it in the Dataset table instead of pasting a large JSON array into "
-        "chat. Check for a suitable existing Dataset first; update one only when the user asks "
-        "to replace or extend it. Pass records_json as a JSON array of record objects: each "
-        "object's fields become that Record's value, while optional sourceKey identifies the row "
-        "and is stored separately. For example, records_json can be "
-        '[{"sourceKey":"case-1","length":10,"area":50}]. '
-        "After saving, report the Dataset "
-        "name, record count, and a short summary; do not repeat the full data in chat unless "
-        "requested.",
+        "user asks for a structured multi-row result, prefer a Dataset table over a large JSON "
+        "array in chat. Inspect for a suitable Dataset and update it only when asked to replace "
+        "or extend it. Pass records as an array of row objects; optional sourceKey identifies a "
+        "row and is stored separately. Report the Dataset name, record count, and a short summary.",
         "Python Functions are authored as transform(inputs, parameters). Use Function tools to "
-        "discover, inspect, create, revise, delete, or preview them. A preview is transient and "
-        "runs against one record; it does not create a durable Run. Function inputs are named "
-        "by input_schema_json and output_schema_json, which are JSON Schema objects. Workflow "
-        "edges provide the named inputs; filtering, sorting, and collection processing belong in "
-        "Functions or Workflow Map policy. Use preview_project_function with example named "
-        "inputs to check a Function before connecting it to a Workflow.",
-        "Workflow is the only durable execution path for Python Functions and MCP tools. "
-        "Workflow graphs define data sources, wiring, and whether a Function processes one "
-        "value or a collection. Use Workflow tools to create, inspect, revise, prepare, execute, "
-        "resume, and inspect Workflow Runs. Report outputs from saved Workflow Runs.",
-        "Python Functions can create PNG charts by importing matplotlib, creating a figure, and "
-        "saving it to io.BytesIO with format='png'; return an image object with kind='image', "
-        "mimeType='image/png', dataBase64 containing base64.b64encode(buffer.getvalue()).decode(), "
-        "and altText. Keep PNG data under 90 KB. Workflow displays image outputs directly and "
-        "offers Save to Library. Use view_image on a saved Workflow Run output when visual "
-        "inspection is useful. If you want to show that image in chat, use the exact Markdown "
-        "image link returned by view_image; never paste base64 into chat.",
-        "For Workflow authoring, first inspect the Project's existing Datasets, Functions, "
-        "Plugins, file sources, and Workflows; reuse suitable assets. Prefer the smallest useful "
-        "end-to-end graph. A source-only graph is valid when that meets the request. For a demo "
-        "that needs a transformation, prefer one Function that handles the whole collection over "
-        "several tiny Functions unless the requested stages are meaningfully distinct. Create "
-        "sample data only when the Project has no suitable source and the request calls for a "
-        "demonstration. Use IDs and versions returned by discovery tools; do not guess them.",
-        "Workflow Definitions are saved Project DAGs. Pass graph_json as a structured object "
-        "with nodes, "
-        "edges, outputs, and optional inputs arrays. Each node has id, kind, ref_id, and version "
-        "(optionally shape, tool_name, and map_input); node kinds are dataset, file, python, and "
-        "mcp. Edges are graph-owned value bindings with target_node and target_port. A node "
-        "binding uses source_kind='node', source_node, and source_port. A run-time input binding "
-        "uses source_kind='workflowInput' and source_input; a constant uses source_kind='literal' "
-        "and literal. Workflow Inputs declare name, JSON Schema in schema, and optional required. "
-        "source_path and target_path are RFC 6901 JSON Pointers; empty means the whole value. Use "
-        "source_path to select a property from a whole Function result, and target_path only to "
-        "select within the already selected target input port. Function target_port names are "
-        "already individual input properties: when binding to target_port='records', leave "
-        "target_path empty. For example, pass a Function result's records array with "
-        "source_port='result', source_path='/records', target_port='records', target_path=''. "
-        "Use non-empty target_path only to assemble nested values inside an input. Map nodes send "
-        "each item from items to map_input for Python Functions; "
-        "other named ports are shared inputs. Each output has name, node, and port. Do not use a "
-        "node map, from/to edge keys, or an outputs map. Dataset sources expose ordered records. "
-        "Project File nodes use kind file, the absolute /project path as ref_id, the current "
-        "integer version, and expose captured text on content. Call discover_project_file_sources "
-        "before composing a graph; never use /scratch paths as Workflow sources. File content is "
-        "always text, including when the file contains JSON. For a JSON file, connect content to "
-        "a Function input declared as a string, then parse it inside the Function with json.loads; "
-        "do not bind raw file text to an object or array input. If the next existing Function "
-        "expects parsed records, add one small JSON-parsing Function that accepts content as a "
-        "string and returns the parsed records, then connect it to that Function. Keep parsing "
-        "separate from the existing transformation logic; do not revise existing Functions just "
-        "to make the source binding fit.",
-        "Python Function nodes use kind python, the saved Function UUID as ref_id, its revision "
-        "as version, and shape single or map. Their input ports are declared input names. The "
-        "result output passes the entire value matching the Function output schema; it does not "
-        "unwrap object properties. A single Function may accept a named array input to filter or "
-        "reorder a whole collection; use shape map only when invoking a one-item Function for "
-        "each member. Never map a collection filter. Never put a Function name in ref_id. Inspect "
-        "Function source and schemas before wiring adjacent nodes. Workflow output schema "
-        "properties are inside the result value, not separate "
-        "output ports. MCP nodes use kind mcp, the enabled Plugin ID as ref_id, Plugin version as "
-        "version, and selected tool name as tool_name.",
-        "Before creating or revising a Workflow, call validate_project_workflow with the complete "
-        "graph_json object and fix every reported error. Do not serialize graph_json into a "
-        "string. "
-        "Validation does not save or execute the graph. Treat its reported source, target, and "
-        "schema details as authoritative: fix the specific graph binding, and do not revise a "
-        "Function unless its inspected schema or the validator identifies that Function as the "
-        "problem. "
-        "Then use the approval-gated create or revise tool. Prepare a Workflow Run to capture "
-        "its exact inputs. Supply declared runtime values through workflow_inputs_json when "
-        "preparing a Run; saved Preview defaults are never used. Then execute the prepared "
-        "Run. Completed nodes are reused on resume; "
-        "an interrupted single MCP call with unknown outcome is never dispatched again "
-        "automatically. Inspect the saved Run for node outputs and failures.",
+        "discover, inspect, create, revise, delete, or preview them. Pass input_schema and "
+        "output_schema as JSON Schema objects, and pass preview inputs and parameters as objects. "
+        "Workflow edges provide named inputs. A preview is transient and creates no durable Run; "
+        "use it when a code or data-shape check is useful.",
+        "Workflow is the durable execution path for Python Functions and MCP tools. Inspect only "
+        "the Project assets needed for the request and reuse a matching source or capability. Use "
+        "IDs and versions returned by tools. A Dataset Workflow node's records port is an array "
+        "of the original row values; it does not include the id/sourceKey/value wrappers returned "
+        "by the Dataset loading tool. Declare a Function input schema that matches those row "
+        "values, and have the Function consume each row directly. Bind the whole records array "
+        "instead of guessing nested paths.",
+        "Workflow Definitions are saved Project DAGs. Pass graph_json as an object with nodes, "
+        "edges, outputs, and optional inputs. Each node has id, kind, ref_id, and version "
+        "(optionally shape, tool_name, and map_input); kinds are dataset, file, python, and mcp. "
+        "Edges use target_node and target_port. A node binding uses source_kind='node', "
+        "source_node, and source_port. A run-time input uses source_kind='workflowInput' and "
+        "source_input; a constant uses source_kind='literal' and literal. Workflow Inputs have "
+        "name, JSON Schema in schema, and optional required. source_path and target_path are RFC "
+        "6901 JSON Pointers; empty means the whole value. source_path selects within the source "
+        "value; target_path selects or assembles within the target input. target_port names a "
+        "Function input, "
+        "so leave target_path empty unless assembling a nested input. Each output has name, node, "
+        "and port. Python nodes use the saved Function UUID as ref_id and its revision as "
+        "version; never put a Function name in ref_id. The result port is the complete Function "
+        "output object; Workflow output schema properties are inside the result value, not "
+        "separate "
+        "ports. Map invokes a one-item Function for each item; use a single node when its Function "
+        "accepts a collection. Never map a collection filter. Do not use a node map, from/to edge "
+        "keys, or an outputs map. MCP nodes use the enabled Plugin ID, version, "
+        "and tool_name. Project File nodes use an absolute /project path and current integer "
+        "version; file content is text, including JSON. Use discover_project_file_sources for "
+        "Project File Workflow inputs, never /scratch paths.",
+        "create_project_workflow and revise_project_workflow validate their graph. For a direct "
+        "Dataset-to-Function graph with current IDs, revisions, and matching declared schemas, "
+        "create it without a separate validation call. Use validate_project_workflow when a "
+        "complex graph or uncertain binding benefits from preflight. If a tool "
+        "reports an error, correct the named reference, schema, or binding and retry with the "
+        "corrected input. Never repeat an unchanged failing call. Use the revision returned by a "
+        "Function update in the Workflow node; reload only when that revision is unavailable.",
+        "To run a Workflow, prepare it once with its declared workflow_inputs, then execute the "
+        "prepared Run. Inspect saved outputs and diagnostics. Do not repeat a failed Run "
+        "unchanged.",
+        "The isolated Python runner supports matplotlib and loads it when imported; it does not "
+        "provide pandas or general network access. For a PNG Function output, import io, base64, "
+        "and matplotlib.pyplot as plt, save the figure to "
+        "io.BytesIO and return {kind: 'image', mimeType: 'image/png', dataBase64: "
+        "base64.b64encode(buffer.getvalue()).decode(), altText}; keep encoded data under 90 KB. "
+        "Workflow image outputs render in the Workflow view. Use view_image when visual "
+        "inspection helps, and use its exact Markdown image link to show an image in chat.",
     )
 )
 
@@ -456,7 +435,7 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def create_project_artifact(
-            plugin_id: str, tool_name: str, arguments_json: str
+            plugin_id: str, tool_name: str, arguments: dict[str, Any]
         ) -> str:
             """Create an Artifact with an enabled Plugin tool after user approval."""
             document = await artifacts.create_from_plugin(
@@ -464,7 +443,7 @@ class PostgresDeepAgentRunner:
                 project_id,
                 plugin_id=plugin_id,
                 tool_name=tool_name,
-                arguments=_artifact_arguments(arguments_json),
+                arguments=_artifact_arguments(arguments),
             )
             return (
                 f"Created Artifact {document.artifact.title} "
@@ -473,7 +452,10 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def edit_project_artifact(
-            artifact_id: str, expected_version: int, tool_name: str, arguments_json: str
+            artifact_id: str,
+            expected_version: int,
+            tool_name: str,
+            arguments: dict[str, Any],
         ) -> str:
             """Apply a semantic Plugin edit to a current Artifact after user approval."""
             document = await artifacts.apply_plugin_operation(
@@ -482,7 +464,7 @@ class PostgresDeepAgentRunner:
                 artifact_id,
                 expected_version=expected_version,
                 tool_name=tool_name,
-                arguments=_artifact_arguments(arguments_json),
+                arguments=_artifact_arguments(arguments),
             )
             return (
                 f"Updated Artifact {document.artifact.title} "
@@ -497,7 +479,10 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def discover_project_datasets() -> str:
-            """List compact Dataset summaries on demand."""
+            """List Dataset IDs, versions, counts, and up to three original row values.
+
+            Samples are original row values, not the id/sourceKey/value wrappers from the load tool.
+            """
             items = await datasets.list_datasets(access, project_id)
             return json.dumps(
                 [
@@ -506,6 +491,7 @@ class PostgresDeepAgentRunner:
                         "name": dataset.name,
                         "recordCount": len(dataset.records),
                         "version": dataset.version,
+                        "sampleRecords": [record.value for record in dataset.records[:3]],
                     }
                     for dataset in items
                 ]
@@ -513,7 +499,10 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def load_project_dataset(dataset_id: str) -> str:
-            """Load one Dataset, including stable Record IDs, when details are needed."""
+            """Load one Dataset and its Records shaped as {id, sourceKey, value}.
+
+            Each Record's value is the original row object.
+            """
             dataset = await datasets.load_dataset(access, project_id, dataset_id)
             return json.dumps(
                 {
@@ -529,18 +518,23 @@ class PostgresDeepAgentRunner:
             )
 
         @tool
-        async def create_project_dataset(name: str, records_json: str) -> str:
-            """Create a Dataset after approval from a JSON array of row objects.
+        async def create_project_dataset(name: str, records: list[dict[str, Any]]) -> str:
+            """Create a Dataset after approval from an array of row objects.
 
             Each object's fields become that Record's value. Use optional sourceKey
             for a human-readable row identifier; it is stored separately.
             """
             dataset = await datasets.create_dataset(
-                access, project_id, name, _dataset_records(records_json)
+                access, project_id, name, _dataset_records(records)
             )
-            return (
-                f"Created Dataset {dataset.name} ({dataset.id}) "
-                f"with {len(dataset.records)} Records."
+            return json.dumps(
+                {
+                    "created": "dataset",
+                    "id": dataset.id,
+                    "name": dataset.name,
+                    "version": dataset.version,
+                    "recordCount": len(dataset.records),
+                }
             )
 
         @tool
@@ -551,22 +545,33 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def update_project_dataset(
-            dataset_id: str, expected_version: int, name: str, records_json: str
+            dataset_id: str,
+            expected_version: int,
+            name: str,
+            records: list[dict[str, Any]],
         ) -> str:
             """Update a Dataset after approval using its loaded document version.
 
-            records_json is an array of row objects. Each object's fields become
-            that Record's value; optional sourceKey is stored separately.
+            Each row object's fields become that Record's value; optional sourceKey
+            is stored separately.
             """
             dataset = await datasets.update_dataset(
                 access,
                 project_id,
                 dataset_id,
                 name,
-                _dataset_records(records_json),
+                _dataset_records(records),
                 expected_version=expected_version,
             )
-            return f"Updated Dataset {dataset.name} ({dataset.id}, v{dataset.version})."
+            return json.dumps(
+                {
+                    "updated": "dataset",
+                    "id": dataset.id,
+                    "name": dataset.name,
+                    "version": dataset.version,
+                    "recordCount": len(dataset.records),
+                }
+            )
 
         return [
             discover_project_datasets,
@@ -614,16 +619,22 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def validate_project_workflow(graph_json: dict[str, Any]) -> str:
-            """Check a structured Workflow graph's references and wiring.
+            """Preflight a structured Workflow graph before approval when useful.
 
             Pass graph_json as an object with nodes, edges, outputs, and optional inputs. Do not
             pass a serialized JSON string. Validation does not run Python code or save the graph.
+            Create and revise tools validate automatically, so this call is optional.
             """
             try:
                 graph = WorkflowGraph.from_json(json.dumps(graph_json))
                 await workflows.validate_graph(access, project_id, graph)
             except WorkflowValidationError as error:
-                return f"Workflow graph is invalid: {error}"
+                return _tool_error(
+                    "workflow_validation",
+                    str(error),
+                    "Correct the named node, reference, schema, or binding, then create or revise "
+                    "the Workflow.",
+                )
             return (
                 "Workflow graph is structurally valid and its references are current. "
                 "Python code was not run; input value compatibility must be checked from "
@@ -632,20 +643,21 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def create_project_workflow(name: str, graph_json: dict[str, Any]) -> str:
-            """Create a validated Workflow after approval, using snake_case graph fields.
+            """Create a Workflow after approval, using snake_case graph fields.
 
             Reuse discovered source and Function IDs and versions. Keep the graph minimal; a
-            dataset-only graph can expose its records directly as an output. Validate the full
-            graph object first and correct any reported wiring or reference errors before creating
-            it. Pass graph_json as an object, not a serialized JSON string.
+            dataset-only graph can expose its records directly as an output. This tool validates
+            graph_json itself. Pass it as an object, not a serialized JSON string.
             """
             try:
                 graph = WorkflowGraph.from_json(json.dumps(graph_json))
                 item = await workflows.create(access, project_id, name, graph)
             except WorkflowValidationError as error:
-                return (
-                    f"Workflow graph is invalid: {error} "
-                    "Correct the graph_json object and call this tool again."
+                return _tool_error(
+                    "workflow_validation",
+                    str(error),
+                    "Correct graph_json using the named node, reference, schema, or binding, then "
+                    "retry once.",
                 )
             return json.dumps({"id": item.id, "name": item.name, "version": item.version})
 
@@ -656,7 +668,7 @@ class PostgresDeepAgentRunner:
             graph_json: dict[str, Any],
             expected_version: int,
         ) -> str:
-            """Revise a validated Workflow after approval using a structured graph_json object."""
+            """Revise a Workflow after approval; graph_json is validated by this tool."""
             try:
                 graph = WorkflowGraph.from_json(json.dumps(graph_json))
                 item = await workflows.revise(
@@ -668,9 +680,11 @@ class PostgresDeepAgentRunner:
                     expected_version=expected_version,
                 )
             except WorkflowValidationError as error:
-                return (
-                    f"Workflow graph is invalid: {error} "
-                    "Correct the graph_json object and call this tool again."
+                return _tool_error(
+                    "workflow_validation",
+                    str(error),
+                    "Correct graph_json using the named node, reference, schema, or binding, then "
+                    "retry once.",
                 )
             return json.dumps({"id": item.id, "name": item.name, "version": item.version})
 
@@ -689,15 +703,9 @@ class PostgresDeepAgentRunner:
                 workflow_id: str,
                 expected_version: int,
                 idempotency_key: str,
-                workflow_inputs_json: str = "{}",
+                workflow_inputs: dict[str, Any] | None = None,
             ) -> str:
                 """After approval, capture a Workflow Run and declared runtime inputs."""
-                try:
-                    workflow_inputs = json.loads(workflow_inputs_json)
-                except json.JSONDecodeError:
-                    return "Workflow Inputs must be a JSON object."
-                if not isinstance(workflow_inputs, dict):
-                    return "Workflow Inputs must be a JSON object."
                 try:
                     run = await workflow_runs.prepare(
                         access,
@@ -705,9 +713,16 @@ class PostgresDeepAgentRunner:
                         workflow_id,
                         idempotency_key,
                         expected_version=expected_version,
-                        workflow_inputs=workflow_inputs,
+                        workflow_inputs=workflow_inputs or {},
                     )
                 except WorkflowValidationError as error:
+                    if "version changed" in str(error).lower():
+                        return (
+                            f"Workflow Run could not be prepared: {error} Reload the Workflow "
+                            "and Function, revise the Workflow node to the current Function "
+                            "revision, validate it, then prepare a fresh Run with a new "
+                            "idempotency key. Do not execute an older Run."
+                        )
                     return f"Workflow Run could not be prepared: {error}"
                 return json.dumps(
                     {
@@ -720,7 +735,7 @@ class PostgresDeepAgentRunner:
 
             @tool
             async def load_project_workflow_run(run_id: str) -> str:
-                """Inspect a prepared Workflow Run and its captured sources and targets."""
+                """Inspect captured inputs, node outputs, and detailed failure diagnostics."""
                 run = await workflow_runs.load(access, project_id, run_id)
                 return json.dumps(
                     {
@@ -738,10 +753,25 @@ class PostgresDeepAgentRunner:
                 Use when visual inspection would help. To show the image in chat, use the exact
                 Markdown image link supplied in the text result.
                 """
-                run = await workflow_runs.load(access, project_id, run_id)
-                image: WorkflowImage = await workflow_runs.load_image(
-                    access, project_id, run_id, output_name
-                )
+                try:
+                    run = await workflow_runs.load(access, project_id, run_id)
+                    image: WorkflowImage = await workflow_runs.load_image(
+                        access, project_id, run_id, output_name
+                    )
+                except WorkflowNotFound:
+                    return [
+                        {
+                            "type": "text",
+                            "text": _tool_error(
+                                "image_output_unavailable",
+                                f"Run '{run_id}' has no viewable image output named "
+                                f"'{output_name}'.",
+                                "Load the Run to inspect its status and exact output names; "
+                                "then call view_image with a successful Run and a named image "
+                                "output.",
+                            ),
+                        }
+                    ]
                 image_path = (
                     f"/api/projects/{quote(project_id, safe='')}/workflows/"
                     f"{quote(run.workflow_id, safe='')}/runs/{quote(run.id, safe='')}/outputs/"
@@ -771,12 +801,39 @@ class PostgresDeepAgentRunner:
 
             @tool
             async def execute_project_workflow_run(run_id: str) -> str:
-                """After approval, execute or resume a recoverable Workflow Run."""
-                run = await workflow_runs.execute(
-                    access,
-                    project_id,
-                    run_id,
-                )
+                """After approval, execute or resume a recoverable Workflow Run.
+
+                Inspect the returned execution. If it failed, read the node diagnostic or item
+                diagnostics, revise the Function or graph based on that evidence, and do not
+                repeat the same failing run unchanged.
+                """
+                try:
+                    run = await workflow_runs.execute(
+                        access,
+                        project_id,
+                        run_id,
+                    )
+                except WorkflowRunConflict as error:
+                    try:
+                        run = await workflow_runs.load(access, project_id, run_id)
+                    except WorkflowNotFound:
+                        return (
+                            f"Workflow Run {run_id} is unavailable. Prepare a fresh Run from "
+                            "the current validated Workflow."
+                        )
+                    return json.dumps(
+                        {
+                            "id": run.id,
+                            "status": run.status,
+                            "execution": _without_image_data(run.execution),
+                            "message": str(error),
+                            "nextStep": (
+                                "Do not execute this Run again. If it failed, correct and "
+                                "validate the Workflow, then prepare a fresh Run with a new "
+                                "idempotency key. If it is running, inspect its status later."
+                            ),
+                        }
+                    )
                 return json.dumps(
                     {
                         "id": run.id,
@@ -803,19 +860,19 @@ class PostgresDeepAgentRunner:
     ) -> list[BaseTool]:
         access = ProjectAccess(subject=subject)
 
-        def object_json(raw: str) -> dict[str, Any]:
-            value = json.loads(raw)
-            if not isinstance(value, dict):
-                raise ValueError("Expected a JSON object")
-            return value
-
         @tool
         async def discover_project_functions() -> str:
-            """List saved Python Functions with IDs and revisions."""
+            """List Python Function IDs, revisions, and declared input/output schemas."""
             definitions = await functions.list(access, project_id)
             return json.dumps(
                 [
-                    {"id": item.id, "name": item.name, "revision": item.revision}
+                    {
+                        "id": item.id,
+                        "name": item.name,
+                        "revision": item.revision,
+                        "inputSchema": item.input_schema,
+                        "outputSchema": item.output_schema,
+                    }
                     for item in definitions
                 ]
             )
@@ -823,7 +880,13 @@ class PostgresDeepAgentRunner:
         @tool
         async def load_project_function(function_id: str) -> str:
             """Load a saved Python Function by UUID, including source and declared contracts."""
-            item = await functions.load(access, project_id, function_id)
+            try:
+                item = await functions.load(access, project_id, function_id)
+            except FunctionNotFound:
+                return (
+                    f"Function {function_id} is unavailable in this Project. "
+                    "Rediscover Functions and use a current ID."
+                )
             return json.dumps(
                 {
                     "id": item.id,
@@ -840,13 +903,13 @@ class PostgresDeepAgentRunner:
         async def create_project_function(
             name: str,
             source: str,
-            input_schema_json: str,
-            output_schema_json: str,
+            input_schema: dict[str, Any],
+            output_schema: dict[str, Any],
         ) -> str:
             """Create a saved Python Function after approval. It can be used by Workflow nodes.
 
-            source is Python defining transform(inputs, parameters). The input and output
-            schemas are JSON Schema objects. Workflow edges provide the named inputs.
+            source defines transform(inputs, parameters). Pass input_schema and output_schema
+            as JSON Schema objects. Workflow edges provide the named inputs.
             """
             try:
                 item = await functions.define(
@@ -854,12 +917,15 @@ class PostgresDeepAgentRunner:
                     project_id,
                     name,
                     source,
-                    object_json(input_schema_json),
-                    object_json(output_schema_json),
+                    input_schema,
+                    output_schema,
                 )
             except (ValueError, FunctionValidationError) as error:
-                return (
-                    f"Function was not created: {error}. Propose a corrected change for approval."
+                return _tool_error(
+                    "function_validation",
+                    str(error),
+                    "Correct the Python source or JSON Schema contract using this diagnostic, "
+                    "then propose the corrected Function for approval.",
                 )
             return json.dumps(
                 {
@@ -867,6 +933,8 @@ class PostgresDeepAgentRunner:
                     "id": item.id,
                     "name": item.name,
                     "revision": item.revision,
+                    "inputSchema": item.input_schema,
+                    "outputSchema": item.output_schema,
                 }
             )
 
@@ -875,10 +943,10 @@ class PostgresDeepAgentRunner:
             function_id: str,
             name: str,
             source: str,
-            input_schema_json: str,
-            output_schema_json: str,
+            input_schema: dict[str, Any],
+            output_schema: dict[str, Any],
         ) -> str:
-            """Revise a saved Python Function after approval."""
+            """Revise a saved Python Function after approval and return its current revision."""
             try:
                 item = await functions.revise(
                     access,
@@ -886,41 +954,70 @@ class PostgresDeepAgentRunner:
                     function_id,
                     name,
                     source,
-                    object_json(input_schema_json),
-                    object_json(output_schema_json),
+                    input_schema,
+                    output_schema,
                 )
-            except (ValueError, FunctionValidationError) as error:
-                return (
-                    f"Function was not updated: {error}. Propose a corrected change for approval."
+            except (ValueError, FunctionNotFound, FunctionValidationError) as error:
+                return _tool_error(
+                    "function_validation",
+                    str(error),
+                    "Correct the Python source, schema, or Function ID using this diagnostic, "
+                    "then propose the corrected revision for approval.",
                 )
-            return f"Updated Function {item.name} ({item.id})."
+            return json.dumps(
+                {
+                    "updated": "python_function",
+                    "id": item.id,
+                    "name": item.name,
+                    "revision": item.revision,
+                    "inputSchema": item.input_schema,
+                    "outputSchema": item.output_schema,
+                }
+            )
 
         @tool
         async def delete_project_function(function_id: str) -> str:
             """Delete a saved Python Function after user approval."""
-            await functions.delete(access, project_id, function_id)
+            try:
+                await functions.delete(access, project_id, function_id)
+            except FunctionNotFound:
+                return f"Function {function_id} is no longer available; nothing was deleted."
             return f"Deleted Function {function_id}."
 
         @tool
         async def preview_project_function(
             function_id: str,
-            inputs_json: str,
-            parameters_json: str = "{}",
+            inputs: dict[str, Any],
+            parameters: dict[str, Any] | None = None,
         ) -> str:
-            """Run one transient preview against named JSON inputs; no Run is saved."""
+            """Preview one Function using structured inputs and parameters; no Run is saved.
+
+            Image output is summarized without pixel bytes. View an image from a saved Workflow
+            Run when visual inspection is needed.
+            """
             try:
                 preview = await functions.preview(
                     access,
                     project_id,
                     function_id,
-                    object_json(inputs_json),
-                    object_json(parameters_json),
+                    inputs,
+                    parameters or {},
                 )
-            except (ValueError, FunctionValidationError, FunctionExecutionError) as error:
-                return f"Function preview failed: {error}"
+            except (
+                ValueError,
+                FunctionNotFound,
+                FunctionValidationError,
+                FunctionExecutionError,
+            ) as error:
+                return _tool_error(
+                    "function_preview_failed",
+                    str(error),
+                    "Use the diagnostic to fix the Function source or input shape, revise it, "
+                    "and preview again.",
+                )
             return json.dumps(
                 {
-                    "output": preview.output,
+                    "output": _without_image_data(preview.output),
                     "runtime": preview.runtime,
                     "sourceHash": preview.source_hash,
                 }
@@ -1026,15 +1123,9 @@ def _scratch_state_path(path: str) -> str:
     return path.removeprefix("/scratch")
 
 
-def _dataset_records(value: str) -> list[DatasetRecordInput]:
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as error:
-        raise ValueError("Dataset Records must be a JSON array.") from error
-    if not isinstance(parsed, list):
-        raise ValueError("Dataset Records must be a JSON array.")
+def _dataset_records(value: list[dict[str, Any]]) -> list[DatasetRecordInput]:
     records: list[DatasetRecordInput] = []
-    for item in parsed:
+    for item in value:
         if not isinstance(item, dict):
             raise ValueError("Every Dataset Record must be a JSON object.")
         record_value = dict(item)
@@ -1057,13 +1148,7 @@ def _argument_mappings(value: str) -> dict[str, str]:
     return parsed
 
 
-def _artifact_arguments(value: str) -> dict[str, object]:
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError as error:
-        raise ValueError("Plugin arguments must be a JSON object.") from error
-    if not isinstance(parsed, dict):
-        raise ValueError("Plugin arguments must be a JSON object.")
-    if "document" in parsed:
+def _artifact_arguments(value: dict[str, Any]) -> dict[str, object]:
+    if "document" in value:
         raise ValueError("The current Artifact document is supplied by Agent Hub.")
-    return parsed
+    return value

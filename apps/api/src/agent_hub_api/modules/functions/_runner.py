@@ -84,7 +84,10 @@ class DenoFunctionRunner:
         ).encode()
         if len(payload) > 128_000:
             raise FunctionExecutionError("input_limit")
-        connection = HTTPConnection(self._host, self._port, timeout=12)
+        # The first Pyodide process may download the plotting package before
+        # executing user code. Leave room beyond the runner's 30 second limit
+        # for JSON transfer and container scheduling.
+        connection = HTTPConnection(self._host, self._port, timeout=35)
         try:
             connection.request(
                 "POST",
@@ -101,7 +104,19 @@ class DenoFunctionRunner:
                 raise FunctionExecutionError("runner_failed")
             if response.status != 200 or result.get("ok") is not True:
                 code = result.get("code")
-                raise FunctionExecutionError(code if isinstance(code, str) else "runner_failed")
+                diagnostic = result.get("diagnostic")
+                bounded_diagnostic = None
+                if isinstance(diagnostic, dict):
+                    bounds = {"type": 160, "message": 2_000, "traceback": 6_000, "stderr": 2_000}
+                    bounded_diagnostic = {
+                        key: value[:limit]
+                        for key, limit in bounds.items()
+                        if isinstance((value := diagnostic.get(key)), str) and value
+                    }
+                raise FunctionExecutionError(
+                    code if isinstance(code, str) else "runner_failed",
+                    bounded_diagnostic,
+                )
             deno, pyodide = result.get("deno"), result.get("pyodide")
             if not isinstance(deno, str) or not isinstance(pyodide, str) or "output" not in result:
                 raise FunctionExecutionError("runner_failed")

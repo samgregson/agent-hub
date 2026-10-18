@@ -59,9 +59,23 @@ class FunctionValidationError(Exception):
 class FunctionExecutionError(Exception):
     """The isolated Function runner could not produce a valid output."""
 
-    def __init__(self, code: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        diagnostic: Mapping[str, object] | None = None,
+    ) -> None:
         self.code = code
-        super().__init__(code)
+        self.diagnostic = dict(diagnostic) if diagnostic else None
+        message = self.diagnostic.get("message") if self.diagnostic else None
+        traceback = self.diagnostic.get("traceback") if self.diagnostic else None
+        stderr = self.diagnostic.get("stderr") if self.diagnostic else None
+        details = [
+            value
+            for value in (message, traceback, stderr)
+            if isinstance(value, str) and value
+        ]
+        details_text = "\n".join(details)
+        super().__init__(f"{code}: {details_text}" if details_text else code)
 
 
 class FunctionStore(Protocol):

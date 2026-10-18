@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 
 import { expect, test } from "@playwright/test";
@@ -1990,6 +1991,323 @@ test("approving a tool call resumes through the AG-UI transport contract", async
   await expect(page.getByText("# Example")).toBeVisible();
 });
 
+test("approval waits for the interrupting stream to close before resuming", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-18T00:00:00.000Z",
+    id: "project-late-approval-snapshot",
+    name: "Approval snapshot",
+    updatedAt: "2026-10-18T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-18T00:00:00.000Z",
+    id: "thread-late-approval-snapshot",
+    projectId: project.id,
+    title: "Approve after snapshot",
+    updatedAt: "2026-10-18T00:00:00.000Z",
+  };
+  const resumeRequests: unknown[] = [];
+  let closeInitialStream: (() => void) | undefined;
+  const streamServer = createServer((_request, response) => {
+    response.writeHead(200, {
+      "cache-control": "no-cache",
+      "content-type": "text/event-stream",
+      connection: "keep-alive",
+    });
+    const events = [
+      { type: "RUN_STARTED", threadId: thread.id, runId: "initial-run" },
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: "tool-draining-run",
+        toolCallName: "create_project_function",
+      },
+      {
+        type: "TOOL_CALL_ARGS",
+        toolCallId: "tool-draining-run",
+        delta: JSON.stringify({
+          input_schema: {},
+          name: "Approved function",
+          output_schema: {},
+          source: "def run(inputs): return inputs",
+        }),
+      },
+      { type: "TOOL_CALL_END", toolCallId: "tool-draining-run" },
+      {
+        type: "RUN_FINISHED",
+        threadId: thread.id,
+        runId: "initial-run",
+        outcome: {
+          type: "interrupt",
+          interrupts: [
+            {
+              id: "interrupt-draining-run",
+              reason: "tool_call",
+              message: "Create the proposed Python Function?",
+              toolCallId: "tool-draining-run",
+              metadata: {
+                agentHubLangChainHITL: {
+                  rawInterruptId: "interrupt-draining-run",
+                  actionIndex: 0,
+                  allowedDecisions: ["approve", "reject"],
+                },
+              },
+            },
+          ],
+        },
+      },
+    ];
+    response.write(sse(events));
+    closeInitialStream = () => response.end();
+  });
+  await new Promise<void>((resolve, reject) => {
+    streamServer.once("error", reject);
+    streamServer.listen(0, "127.0.0.1", resolve);
+  });
+  const address = streamServer.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Approval test stream server did not bind to a port.");
+  }
+
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      if (input.resume) {
+        resumeRequests.push(input.resume);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: "assistant-after-late-snapshot",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: "assistant-after-late-snapshot",
+              delta: "The approved action completed.",
+            },
+            {
+              type: "TEXT_MESSAGE_END",
+              messageId: "assistant-after-late-snapshot",
+            },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+        return;
+      }
+      await route.continue({
+        url: `http://127.0.0.1:${address.port}/agent`,
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  try {
+    await page.goto("/");
+    await page.getByLabel("Message").fill("Create a Python Function");
+    await page.getByRole("button", { name: "Send" }).click();
+    const approval = page.getByRole("region", {
+      name: "Approve protected action",
+    });
+    await expect(approval).toContainText(
+      "Create the proposed Python Function?",
+    );
+    await expect(page.getByText("Run: Running")).toBeVisible();
+    await expect(
+      approval.getByRole("button", { name: "Approve" }),
+    ).toBeDisabled();
+    expect(resumeRequests).toEqual([]);
+
+    closeInitialStream?.();
+    await expect(
+      approval.getByRole("button", { name: "Approve" }),
+    ).toBeEnabled();
+    await approval.getByRole("button", { name: "Approve" }).click();
+
+    await expect
+      .poll(() => resumeRequests)
+      .toEqual([
+        [
+          {
+            interruptId: "interrupt-draining-run",
+            payload: { approved: true },
+            status: "resolved",
+          },
+        ],
+      ]);
+    await expect(
+      page.getByText("The approved action completed."),
+    ).toBeVisible();
+    await expect(
+      page.getByText("The agent run failed. You can try sending again."),
+    ).toBeHidden();
+  } finally {
+    closeInitialStream?.();
+    await new Promise<void>((resolve) => streamServer.close(() => resolve()));
+  }
+});
+
+test("auto-approve mode resumes approval-gated tools in the current thread", async ({
+  page,
+}) => {
+  const project = {
+    createdAt: "2026-10-18T00:00:00.000Z",
+    id: "project-auto-approve",
+    name: "Auto approval",
+    updatedAt: "2026-10-18T00:00:00.000Z",
+  };
+  const thread = {
+    createdAt: "2026-10-18T00:00:00.000Z",
+    id: "thread-auto-approve",
+    projectId: project.id,
+    title: "Auto-approve one thread",
+    updatedAt: "2026-10-18T00:00:00.000Z",
+  };
+  const resumeRequests: unknown[] = [];
+
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        resume?: unknown[];
+        runId: string;
+      };
+      if (input.resume) {
+        resumeRequests.push(input.resume);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "TEXT_MESSAGE_START",
+              messageId: "assistant-auto-approved",
+              role: "assistant",
+            },
+            {
+              type: "TEXT_MESSAGE_CONTENT",
+              messageId: "assistant-auto-approved",
+              delta: "The approval-gated action completed.",
+            },
+            {
+              type: "TEXT_MESSAGE_END",
+              messageId: "assistant-auto-approved",
+            },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "call-auto-approve",
+            toolCallName: "create_project_workflow",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "call-auto-approve",
+            delta: JSON.stringify({ name: "Approved by mode" }),
+          },
+          { type: "TOOL_CALL_END", toolCallId: "call-auto-approve" },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-auto-approve",
+                  reason: "tool_call",
+                  message: "Create this Workflow Definition?",
+                  toolCallId: "call-auto-approve",
+                  metadata: {
+                    agentHubLangChainHITL: {
+                      rawInterruptId: "interrupt-auto-approve",
+                      actionIndex: 0,
+                      allowedDecisions: ["approve", "reject"],
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Approval mode").selectOption("auto");
+  await page.getByLabel("Message").fill("Create a workflow");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect
+    .poll(() => resumeRequests)
+    .toEqual([
+      [
+        {
+          interruptId: "interrupt-auto-approve",
+          payload: { approved: true },
+          status: "resolved",
+        },
+      ],
+    ]);
+  await expect(
+    page.getByText("The approval-gated action completed."),
+  ).toBeVisible();
+  await expect(
+    page.getByText("The agent run failed. You can try sending again."),
+  ).toBeHidden();
+});
+
 test("a batch of approvals resumes only after every docked decision", async ({
   page,
 }) => {
@@ -2009,9 +2327,9 @@ test("a batch of approvals resumes only after every docked decision", async ({
   const actions = ["uppercase_text", "word_stats", "bullet_summary"].map(
     (name, index) => ({
       args: {
-        input_schema_json: "{}",
+        input_schema: {},
         name,
-        output_schema_json: "{}",
+        output_schema: {},
         source: "def run(inputs): return inputs",
       },
       interruptId: `interrupt-${index + 1}`,
@@ -2517,9 +2835,9 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
             type: "TOOL_CALL_ARGS",
             toolCallId: "call-create-function",
             delta: JSON.stringify({
-              input_schema_json: "{}",
+              input_schema: {},
               name: "Workflow step",
-              output_schema_json: "{}",
+              output_schema: {},
               source: "def run(inputs): return inputs",
             }),
           },
@@ -2559,9 +2877,9 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
                     function: {
                       name: "create_project_function",
                       arguments: JSON.stringify({
-                        input_schema_json: "{}",
+                        input_schema: {},
                         name: "Workflow step",
-                        output_schema_json: "{}",
+                        output_schema: {},
                         source: "def run(inputs): return inputs",
                       }),
                     },

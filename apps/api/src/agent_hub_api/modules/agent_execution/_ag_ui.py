@@ -6,7 +6,8 @@ from ag_ui.core import Interrupt as AGUIInterrupt
 from ag_ui_langgraph import LangGraphAgent
 from ag_ui_langgraph.interrupts import lg_interrupts_to_agui
 from ag_ui_langgraph.utils import agui_messages_to_langchain
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, RemoveMessage, ToolMessage
+from langgraph.graph.message import REMOVE_ALL_MESSAGES
 from langgraph.types import Command
 
 _HITL_METADATA_KEY = "agentHubLangChainHITL"
@@ -131,6 +132,33 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
         ]
         async for event in super().run(input):
             yield event
+
+    def langgraph_default_merge_state(self, state: Any, messages: Any, input: RunAgentInput) -> Any:
+        """Canonicalize replayed tool results by call ID after the adapter merge."""
+        merged = super().langgraph_default_merge_state(state, messages, input)
+        seen_tool_call_ids: set[str] = set()
+        canonical_messages = []
+        changed = False
+        for message in merged.get("messages", []):
+            if isinstance(message, ToolMessage) and message.tool_call_id:
+                if message.tool_call_id in seen_tool_call_ids:
+                    changed = True
+                    continue
+                seen_tool_call_ids.add(message.tool_call_id)
+            canonical_messages.append(message)
+
+        if changed:
+            # Message IDs can differ after an AG-UI round trip, so add_messages
+            # cannot replace a repeated ToolMessage by ID. Reset the channel and
+            # write the canonical transcript in one graph update instead.
+            merged = {
+                **merged,
+                "messages": [
+                    RemoveMessage(id=REMOVE_ALL_MESSAGES),
+                    *canonical_messages,
+                ],
+            }
+        return merged
 
     def _interrupts_to_agui(self, raw_interrupts: Sequence[object]) -> list[AGUIInterrupt]:
         # Streamed calls do not expose their parsed arguments here. LangChain's

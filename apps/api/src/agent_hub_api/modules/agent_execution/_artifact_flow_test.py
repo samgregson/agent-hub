@@ -80,7 +80,7 @@ async def test_two_threads_create_discover_and_plugin_edit_one_artifact() -> Non
         {
             "plugin_id": "foundation-fixture",
             "tool_name": "create_status_artifact",
-            "arguments_json": '{"title":"Bridge status"}',
+            "arguments": {"title": "Bridge status"},
         }
     )
     summary = json.loads(await second_tools["discover_project_artifacts"].ainvoke({}))[0]
@@ -101,7 +101,7 @@ async def test_two_threads_create_discover_and_plugin_edit_one_artifact() -> Non
             "artifact_id": artifact_id,
             "expected_version": 1,
             "tool_name": "set_status_artifact_status",
-            "arguments_json": '{"status":"unavailable"}',
+            "arguments": {"status": "unavailable"},
         }
     )
     current = await artifacts.load(ArtifactAccess(subject="sam"), project.id, artifact_id)

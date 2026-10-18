@@ -58,7 +58,12 @@ services:
     pids_limit: 64
     mem_limit: 512m
     cpus: 1
+    tmpfs:
+      - /tmp:size=128m,mode=1777
     networks:
+      # The trusted Deno child has a package-source allowlist. The parent API
+      # remains on the isolated network; Python code itself gets no network.
+      - default
       - python_internal
 
   foundation-fixture:

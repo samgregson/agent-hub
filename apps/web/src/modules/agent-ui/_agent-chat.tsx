@@ -15,6 +15,7 @@ import {
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import {
   fromAgUiMessages,
+  useAgUiInterrupts,
   useAgUiRuntime,
   type AgUiInterrupt,
 } from "@assistant-ui/react-ag-ui";
@@ -24,6 +25,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ComponentProps,
   type FormEvent,
@@ -170,18 +172,28 @@ function ToolCall({
   args,
   argsText,
   approval,
+  autoApprove = false,
   dock = false,
+  approvalDisabled = false,
   isError,
   result,
   respondToApproval,
   toolCallId,
   toolName,
-}: ToolCallMessagePartProps & { dock?: boolean }) {
+}: ToolCallMessagePartProps & {
+  autoApprove?: boolean;
+  approvalDisabled?: boolean;
+  dock?: boolean;
+}) {
   const projectId = useContext(ProjectIdContext);
   const openVirtualFile = useContext(OpenVirtualFileContext);
   const openArtifact = useContext(OpenArtifactContext);
   const openFileProposal = useContext(OpenFileProposalContext);
   const decisionRecord = useContext(ApprovalHistoryContext)[toolCallId];
+  const pendingInterrupts = useAgUiInterrupts();
+  const hasPendingInterrupt = pendingInterrupts.some(
+    (interrupt) => interrupt.id === approval?.id,
+  );
   const [review, setReview] = useState<
     | { kind: "loading" }
     | { kind: "unavailable"; text: string }
@@ -189,6 +201,7 @@ function ToolCall({
     | null
   >(null);
   const [submitting, setSubmitting] = useState(false);
+  const [approvalError, setApprovalError] = useState<string | null>(null);
   const waitingForDecision =
     approval !== undefined &&
     approval.approved === undefined &&
@@ -259,7 +272,11 @@ function ToolCall({
     const label = approvalLabel(toolName);
     const target = approvalTarget(args);
     const outcome = waitingForDecision
-      ? "Needs approval"
+      ? autoApprove
+        ? "Auto-approving"
+        : hasPendingInterrupt
+          ? "Needs approval"
+          : "Preparing approval"
       : approval.resolution === "cancelled"
         ? "Cancelled"
         : approval.resolution === "expired"
@@ -282,6 +299,12 @@ function ToolCall({
         {approval.prompt ? <p>{approval.prompt}</p> : null}
         {waitingForDecision ? (
           <>
+            {autoApprove ? (
+              <p role="status">This action will be approved automatically.</p>
+            ) : null}
+            {!autoApprove && !hasPendingInterrupt ? (
+              <p role="status">Waiting for the approval request to be ready…</p>
+            ) : null}
             {target.path ? (
               <>
                 <details className={styles.approvalDetails}>
@@ -317,33 +340,65 @@ function ToolCall({
                 <pre>{JSON.stringify(args, null, 2)}</pre>
               </details>
             )}
-            <div className={styles.approvalActions}>
-              <button
-                disabled={submitting || !respondToApproval}
-                onClick={() => {
-                  setSubmitting(true);
-                  void respondToApproval?.({ approved: true }).catch(() =>
-                    setSubmitting(false),
-                  );
-                }}
-                type="button"
-              >
-                Approve
-              </button>
-              <button
-                disabled={submitting || !respondToApproval}
-                onClick={() => {
-                  setSubmitting(true);
-                  void respondToApproval?.({
-                    approved: false,
-                    reason: "Rejected by the user",
-                  }).catch(() => setSubmitting(false));
-                }}
-                type="button"
-              >
-                Reject
-              </button>
-            </div>
+            {approvalError ? (
+              <p className={styles.approvalError} role="alert">
+                Could not submit this approval: {approvalError} If it is still
+                pending, reload this thread and try again.
+              </p>
+            ) : null}
+            {!autoApprove ? (
+              <div className={styles.approvalActions}>
+                <button
+                  disabled={
+                    submitting ||
+                    approvalDisabled ||
+                    !hasPendingInterrupt ||
+                    !respondToApproval
+                  }
+                  onClick={() => {
+                    setApprovalError(null);
+                    setSubmitting(true);
+                    void respondToApproval?.({ approved: true }).catch(
+                      (error: unknown) => {
+                        setSubmitting(false);
+                        setApprovalError(
+                          error instanceof Error
+                            ? error.message
+                            : String(error),
+                        );
+                      },
+                    );
+                  }}
+                  type="button"
+                >
+                  Approve
+                </button>
+                <button
+                  disabled={
+                    submitting ||
+                    approvalDisabled ||
+                    !hasPendingInterrupt ||
+                    !respondToApproval
+                  }
+                  onClick={() => {
+                    setApprovalError(null);
+                    setSubmitting(true);
+                    void respondToApproval?.({
+                      approved: false,
+                      reason: "Rejected by the user",
+                    }).catch((error: unknown) => {
+                      setSubmitting(false);
+                      setApprovalError(
+                        error instanceof Error ? error.message : String(error),
+                      );
+                    });
+                  }}
+                  type="button"
+                >
+                  Reject
+                </button>
+              </div>
+            ) : null}
           </>
         ) : (
           <details className={styles.approvalDetails}>
@@ -602,9 +657,33 @@ function ConversationMessages() {
   );
 }
 
-function ApprovalDock() {
+function isAgentHubApprovalInterrupt(interrupt: AgUiInterrupt): boolean {
+  const metadata = interrupt.metadata?.agentHubLangChainHITL;
+  if (typeof metadata !== "object" || metadata === null) return false;
+  const allowed = (metadata as Record<string, unknown>).allowedDecisions;
+  return (
+    interrupt.reason === "tool_call" &&
+    Array.isArray(allowed) &&
+    allowed.includes("approve") &&
+    allowed.includes("reject")
+  );
+}
+
+function ApprovalDock({
+  autoApprove,
+  onAutoApproveChange,
+}: {
+  autoApprove: boolean;
+  onAutoApproveChange: (enabled: boolean) => void;
+}) {
   const aui = useAui();
+  const isRunning = useAuiState((state) => state.thread.isRunning);
   const messages = useAuiState((state) => state.thread.messages);
+  const pendingInterrupts = useAgUiInterrupts();
+  const attemptedAutoApproval = useRef<string | null>(null);
+  const [autoApprovalError, setAutoApprovalError] = useState<string | null>(
+    null,
+  );
   const approvals = useMemo(
     () =>
       messages.flatMap((message) =>
@@ -621,42 +700,106 @@ function ApprovalDock() {
       ),
     [messages],
   );
-  if (approvals.length === 0) return null;
+  const interruptKey = pendingInterrupts.map(({ id }) => id).join("|");
+  const matchingApprovals = pendingInterrupts.map((interrupt) =>
+    approvals.find(({ part }) => part.toolCallId === interrupt.toolCallId),
+  );
+  const canAutoApprove =
+    pendingInterrupts.length > 0 &&
+    pendingInterrupts.every(isAgentHubApprovalInterrupt) &&
+    matchingApprovals.every((approval) => approval !== undefined);
+
+  useEffect(() => {
+    if (!autoApprove) {
+      attemptedAutoApproval.current = null;
+      return;
+    }
+    if (
+      isRunning ||
+      !canAutoApprove ||
+      attemptedAutoApproval.current === interruptKey
+    ) {
+      return;
+    }
+
+    attemptedAutoApproval.current = interruptKey;
+    setAutoApprovalError(null);
+    void (async () => {
+      try {
+        for (const approval of matchingApprovals) {
+          if (!approval) throw new Error("A pending approval card is missing.");
+          await aui.thread
+            .message({ id: approval.messageId })
+            .part({ toolCallId: approval.part.toolCallId })
+            .respondToToolApproval({ approved: true });
+        }
+      } catch (error) {
+        setAutoApprovalError(
+          error instanceof Error ? error.message : String(error),
+        );
+        onAutoApproveChange(false);
+      }
+    })();
+  }, [
+    aui,
+    autoApprove,
+    canAutoApprove,
+    interruptKey,
+    isRunning,
+    matchingApprovals,
+    onAutoApproveChange,
+  ]);
 
   return (
-    <section aria-label="Pending approvals" className={styles.approvalDock}>
-      {approvals.map(({ messageId, part }) => (
-        <ToolCall
-          {...part}
-          dock
-          key={part.toolCallId}
-          addResult={(result) =>
-            aui.thread
-              .message({ id: messageId })
-              .part({ toolCallId: part.toolCallId })
-              .addToolResult(result)
-          }
-          resume={(payload) =>
-            aui.thread
-              .message({ id: messageId })
-              .part({ toolCallId: part.toolCallId })
-              .resumeToolCall(payload)
-          }
-          respondToApproval={(response) =>
-            aui.thread
-              .message({ id: messageId })
-              .part({ toolCallId: part.toolCallId })
-              .respondToToolApproval(response)
-          }
-        />
-      ))}
-    </section>
+    <>
+      {autoApprovalError ? (
+        <p className={styles.approvalError} role="alert">
+          Auto-approval could not continue: {autoApprovalError} Review the
+          pending action and approve it manually.
+        </p>
+      ) : null}
+      {approvals.length > 0 ? (
+        <section aria-label="Pending approvals" className={styles.approvalDock}>
+          {approvals.map(({ messageId, part }) => (
+            <ToolCall
+              {...part}
+              autoApprove={autoApprove}
+              dock
+              approvalDisabled={isRunning}
+              key={part.toolCallId}
+              addResult={(result) =>
+                aui.thread
+                  .message({ id: messageId })
+                  .part({ toolCallId: part.toolCallId })
+                  .addToolResult(result)
+              }
+              resume={(payload) =>
+                aui.thread
+                  .message({ id: messageId })
+                  .part({ toolCallId: part.toolCallId })
+                  .resumeToolCall(payload)
+              }
+              respondToApproval={(response) =>
+                aui.thread
+                  .message({ id: messageId })
+                  .part({ toolCallId: part.toolCallId })
+                  .respondToToolApproval(response)
+              }
+            />
+          ))}
+        </section>
+      ) : null}
+    </>
   );
 }
 
 function ComposerArea({
+  autoApprove,
+  onAutoApproveChange,
   onSubmit,
 }: {
+  autoApprove: boolean;
+  onAutoApproveChange: (enabled: boolean) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const messages = useAuiState((state) => state.thread.messages);
@@ -681,7 +824,10 @@ function ComposerArea({
 
   return (
     <>
-      <ApprovalDock />
+      <ApprovalDock
+        autoApprove={autoApprove}
+        onAutoApproveChange={onAutoApproveChange}
+      />
       {hasPendingApproval ? (
         <p className={styles.approvalHold} role="status">
           Respond to the pending approval before sending another message.
@@ -698,6 +844,19 @@ function ComposerArea({
           rows={2}
         />
         <div className={styles.actions}>
+          <label className={styles.approvalMode}>
+            <span>Approval</span>
+            <select
+              aria-label="Approval mode"
+              onChange={(event) =>
+                onAutoApproveChange(event.target.value === "auto")
+              }
+              value={autoApprove ? "auto" : "manual"}
+            >
+              <option value="manual">Ask first</option>
+              <option value="auto">Auto-approve</option>
+            </select>
+          </label>
           <ComposerPrimitive.Cancel className={styles.cancel}>
             Stop
           </ComposerPrimitive.Cancel>
@@ -858,6 +1017,14 @@ export function AgentChat({
   threadId: string;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [autoApprovalSetting, setAutoApprovalSetting] = useState({
+    threadId,
+    enabled: false,
+  });
+  const autoApprove =
+    autoApprovalSetting.threadId === threadId && autoApprovalSetting.enabled;
+  const setAutoApprove = (enabled: boolean) =>
+    setAutoApprovalSetting({ threadId, enabled });
   const [approvalHistory, setApprovalHistory] = useState<
     Record<string, ResolvedApproval>
   >({});
@@ -918,7 +1085,11 @@ export function AgentChat({
                     />
                     {error ? <p className={styles.runError}>{error}</p> : null}
                     <ThreadPrimitive.ViewportFooter className={styles.footer}>
-                      <ComposerArea onSubmit={captureUserMessage} />
+                      <ComposerArea
+                        autoApprove={autoApprove}
+                        onAutoApproveChange={setAutoApprove}
+                        onSubmit={captureUserMessage}
+                      />
                     </ThreadPrimitive.ViewportFooter>
                   </ThreadPrimitive.Viewport>
                 </ThreadPrimitive.Root>

@@ -71,33 +71,35 @@ def test_project_file_writes_start_before_the_approval_card_is_shown() -> None:
 def test_agent_instructions_treat_datasets_as_registered_project_files() -> None:
     assert "Datasets are registered Project Files" in _AGENT_SYSTEM_PROMPT
     assert "Use Dataset tools for" in _AGENT_SYSTEM_PROMPT
+    assert "array of the original row values" in _AGENT_SYSTEM_PROMPT
+    assert "does not include the id/sourceKey/value wrappers" in _AGENT_SYSTEM_PROMPT
+    assert "Function input schema that matches those row values" in _AGENT_SYSTEM_PROMPT
 
 
 def test_agent_instructions_describe_function_preview_and_workflow_execution() -> None:
     assert "Python Functions are authored as" in _AGENT_SYSTEM_PROMPT
     assert "transform(inputs, parameters)" in _AGENT_SYSTEM_PROMPT
-    assert "input_schema_json" in _AGENT_SYSTEM_PROMPT
+    assert "input_schema and output_schema as JSON Schema objects" in _AGENT_SYSTEM_PROMPT
     assert "input_selectors" not in _AGENT_SYSTEM_PROMPT
     assert "preview" in _AGENT_SYSTEM_PROMPT
     assert "durable execution" in _AGENT_SYSTEM_PROMPT
 
 
 def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
-    assert "edges, outputs, and optional inputs arrays" in _AGENT_SYSTEM_PROMPT
+    assert "edges, outputs, and optional inputs" in _AGENT_SYSTEM_PROMPT
     assert "target_node and target_port" in _AGENT_SYSTEM_PROMPT
     assert "source_kind='workflowInput'" in _AGENT_SYSTEM_PROMPT
     assert "RFC 6901 JSON Pointers" in _AGENT_SYSTEM_PROMPT
-    assert "workflow_inputs_json" in _AGENT_SYSTEM_PROMPT
+    assert "workflow_inputs" in _AGENT_SYSTEM_PROMPT
     assert "name, node, and port" in _AGENT_SYSTEM_PROMPT
     assert "Do not use a node map, from/to edge keys, or an outputs map" in _AGENT_SYSTEM_PROMPT
     assert "saved Function UUID as ref_id" in _AGENT_SYSTEM_PROMPT
-    assert "Their input ports are declared input names" in _AGENT_SYSTEM_PROMPT
-    assert "Never put a Function name in ref_id" in _AGENT_SYSTEM_PROMPT
-    assert "call validate_project_workflow" in _AGENT_SYSTEM_PROMPT
+    assert "target_port names a Function input" in _AGENT_SYSTEM_PROMPT
+    assert "never put a Function name in ref_id" in _AGENT_SYSTEM_PROMPT
+    assert "create it without a separate validation call" in _AGENT_SYSTEM_PROMPT
     assert "discover_project_file_sources" in _AGENT_SYSTEM_PROMPT
-    assert "does not unwrap object properties" in _AGENT_SYSTEM_PROMPT
     assert "Workflow output schema properties are inside the result value" in _AGENT_SYSTEM_PROMPT
-    assert "A single Function may accept a named array input" in _AGENT_SYSTEM_PROMPT
+    assert "when its Function accepts a collection" in _AGENT_SYSTEM_PROMPT
     assert "Never map a collection filter" in _AGENT_SYSTEM_PROMPT
 
 
@@ -138,6 +140,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     runner._model = cast(Any, object())
     runner._project_files = files
     runner._plugin_gateway = None
+    runner._datasets = datasets
     runner._functions = functions
     runner._workflows = workflows
     runner._workflow_runs = workflow_runs
@@ -173,6 +176,22 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         == "Create the proposed Python Function?"
     )
     tools = {registered.name: registered for registered in captured["tools"]}
+    discovered_datasets = json.loads(await tools["discover_project_datasets"].ainvoke({}))
+    assert discovered_datasets == [
+        {
+            "id": dataset.id,
+            "name": "Inputs",
+            "recordCount": 1,
+            "version": 1,
+            "sampleRecords": [{"value": 2}],
+        }
+    ]
+    image_error = await tools["view_image"].ainvoke(
+        {"run_id": "missing-run", "output_name": "chart"}
+    )
+    image_error_payload = json.loads(image_error[0]["text"])
+    assert image_error_payload["error"]["code"] == "image_output_unavailable"
+    assert "Load the Run" in image_error_payload["nextStep"]
     file_sources = json.loads(await tools["discover_project_file_sources"].ainvoke({}))
     assert file_sources == [{"path": "/project/demo.txt", "version": file.version}]
     graph_json = json.dumps(
@@ -198,7 +217,13 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     )
     saved_functions = json.loads(await tools["discover_project_functions"].ainvoke({}))
     assert saved_functions == [
-        {"id": function.id, "name": "normalize_text", "revision": function.revision}
+        {
+            "id": function.id,
+            "name": "normalize_text",
+            "revision": function.revision,
+            "inputSchema": function.input_schema,
+            "outputSchema": function.output_schema,
+        }
     ]
     function_graph = json.dumps(
         {
@@ -264,7 +289,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
                 "workflow_id": input_workflow["id"],
                 "expected_version": 1,
                 "idempotency_key": "runtime-input-run",
-                "workflow_inputs_json": '{"request":"  sample  "}',
+                "workflow_inputs": {"request": "  sample  "},
             }
         )
     )
@@ -276,7 +301,20 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     function_error = await tools["validate_project_workflow"].ainvoke(
         {"graph_json": json.loads(bad_function_graph)}
     )
-    assert "use the ID returned by discover_project_functions" in function_error
+    assert json.loads(function_error) == {
+        "ok": False,
+        "error": {
+            "code": "workflow_validation",
+            "message": (
+                "Python Function ID 'normalize_text' is unavailable; use the ID returned by "
+                "discover_project_functions, not the Function name."
+            ),
+        },
+        "nextStep": (
+            "Correct the named node, reference, schema, or binding, then create or revise "
+            "the Workflow."
+        ),
+    }
     invalid = await tools["create_project_workflow"].ainvoke(
         {
             "name": "Invalid demo",
@@ -287,7 +325,8 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             },
         }
     )
-    assert "Workflow graph is invalid" in invalid
+    assert json.loads(invalid)["error"]["code"] == "workflow_validation"
+    assert "Correct graph_json" in json.loads(invalid)["nextStep"]
 
     created = json.loads(
         await tools["create_project_workflow"].ainvoke(
@@ -310,7 +349,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             },
         }
     )
-    assert "Workflow graph is invalid" in invalid_revision
+    assert json.loads(invalid_revision)["error"]["code"] == "workflow_validation"
 
     loaded = json.loads(
         await tools["load_project_workflow"].ainvoke(
@@ -491,42 +530,41 @@ async def test_invalid_approved_function_proposal_returns_actionable_tool_error(
         item.name: item
         for item in PostgresDeepAgentRunner._function_tools(functions, project.id, access.subject)
     }
-    input_schema_json = json.dumps(
-        {
-            "type": "object",
-            "properties": {"record": {"type": "object"}},
-            "required": ["record"],
-            "additionalProperties": False,
-        }
-    )
+    input_schema = {
+        "type": "object",
+        "properties": {"record": {"type": "object"}},
+        "required": ["record"],
+        "additionalProperties": False,
+    }
 
     invalid_source = await tools["create_project_function"].ainvoke(
         {
             "name": "Copy dataset records",
             "source": "export default function transform(record, parameters) { return record; }",
-            "input_schema_json": input_schema_json,
-            "output_schema_json": '{"type":"object"}',
+            "input_schema": input_schema,
+            "output_schema": {"type": "object"},
         }
     )
-    assert "Function source is not valid Python" in invalid_source
+    assert json.loads(invalid_source)["error"]["code"] == "function_validation"
+    assert "Function source is not valid Python" in json.loads(invalid_source)["error"]["message"]
 
     invalid_source = await tools["create_project_function"].ainvoke(
         {
             "name": "Copy dataset records",
             "source": "export default function transform(record, parameters) { return record; }",
-            "input_schema_json": input_schema_json,
-            "output_schema_json": '{"type":"object"}',
+            "input_schema": input_schema,
+            "output_schema": {"type": "object"},
         }
     )
-    assert "Function source is not valid Python" in invalid_source
+    assert json.loads(invalid_source)["error"]["code"] == "function_validation"
     assert await functions.list(access, project.id) == ()
 
     created = await tools["create_project_function"].ainvoke(
         {
             "name": "Copy dataset records",
             "source": "def transform(inputs, parameters):\n    return dict(inputs['record'])\n",
-            "input_schema_json": input_schema_json,
-            "output_schema_json": '{"type":"object"}',
+            "input_schema": input_schema,
+            "output_schema": {"type": "object"},
         }
     )
     created_function = json.loads(created)
@@ -539,11 +577,11 @@ async def test_invalid_approved_function_proposal_returns_actionable_tool_error(
             "function_id": definition.id,
             "name": "Copy dataset records",
             "source": "export default function transform(record) { return record; }",
-            "input_schema_json": input_schema_json,
-            "output_schema_json": '{"type":"object"}',
+            "input_schema": input_schema,
+            "output_schema": {"type": "object"},
         }
     )
-    assert "Function source is not valid Python" in invalid_revision
+    assert json.loads(invalid_revision)["error"]["code"] == "function_validation"
     assert (await functions.load(access, project.id, definition.id)).revision == 1
 
 
@@ -567,11 +605,13 @@ async def test_unavailable_function_preview_returns_actionable_tool_error() -> N
     }
 
     result = await tools["preview_project_function"].ainvoke(
-        {"function_id": definition.id, "inputs_json": '{"value":1}'}
+        {"function_id": definition.id, "inputs": {"value": 1}}
     )
 
-    assert "Function preview failed" in result
-    assert "runner_unavailable" in result
+    preview_error = json.loads(result)
+    assert preview_error["error"]["code"] == "function_preview_failed"
+    assert "runner_unavailable" in preview_error["error"]["message"]
+    assert "fix the Function source or input shape" in preview_error["nextStep"]
 
 
 @pytest.mark.asyncio

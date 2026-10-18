@@ -2,7 +2,9 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export const RUNNER_LIMITS = Object.freeze({
-  timeoutMs: 10_000,
+  // Cold Pyodide startup and the first Matplotlib package load can exceed the
+  // old 10 second ceiling. Keep plenty of room while bounding execution.
+  timeoutMs: 30_000,
   maxInputBytes: 128_000,
   maxOutputBytes: 128_000,
   maxSourceBytes: 64_000,
@@ -33,8 +35,9 @@ export async function runFunction(request, limits = {}) {
       "run",
       "--cached-only",
       "--no-prompt",
-      "--allow-read=/app,/deno-dir",
+      "--allow-read=/app,/deno-dir,/tmp",
       "--allow-net=cdn.jsdelivr.net",
+      "--allow-write=/tmp",
       "--deny-env",
       "--deny-run",
       "--deny-ffi",
@@ -44,7 +47,7 @@ export async function runFunction(request, limits = {}) {
     env: { DENO_DIR: "/deno-dir", DENO_NO_PROMPT: "1" },
     stdin: "piped",
     stdout: "piped",
-    stderr: "null",
+    stderr: "piped",
   }).spawn();
 
   let expired = false;
@@ -61,9 +64,24 @@ export async function runFunction(request, limits = {}) {
     const result = await child.output();
     if (expired) return { ok: false, code: "timeout" };
     if (!result.success || result.stdout.length > maxOutputBytes + 2048) {
-      return { ok: false, code: "runner_failed" };
+      const stderr = decoder.decode(result.stderr).slice(0, 2_000);
+      return {
+        ok: false,
+        code: "runner_failed",
+        ...(stderr ? { diagnostic: { stderr } } : {}),
+      };
     }
-    const response = JSON.parse(decoder.decode(result.stdout));
+    let response;
+    try {
+      response = JSON.parse(decoder.decode(result.stdout));
+    } catch {
+      const stderr = decoder.decode(result.stderr).slice(0, 2_000);
+      return {
+        ok: false,
+        code: "runner_failed",
+        ...(stderr ? { diagnostic: { stderr } } : {}),
+      };
+    }
     if (!response || typeof response.ok !== "boolean") {
       return { ok: false, code: "runner_failed" };
     }

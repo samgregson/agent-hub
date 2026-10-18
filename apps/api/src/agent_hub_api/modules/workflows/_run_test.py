@@ -1,5 +1,7 @@
+import base64
 import json
 from dataclasses import asdict
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -20,6 +22,7 @@ from agent_hub_api.modules.workflows import (
     WorkflowNode,
     WorkflowNotFound,
     WorkflowOutput,
+    WorkflowRun,
     WorkflowRunConflict,
     WorkflowRunModule,
     WorkflowValidationError,
@@ -81,6 +84,72 @@ async def test_prepared_run_captures_dataset_values_and_definition_before_edits(
         await runs.prepare(owner, project.id, definition.id, "request-2", expected_version=2)
     with pytest.raises(WorkflowNotFound):
         await runs.load(ProjectAccess(subject="other"), project.id, prepared.id)
+
+
+@pytest.mark.asyncio
+async def test_load_image_accepts_image_nested_in_named_workflow_output() -> None:
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="owner")
+    project = await projects.create(owner, "Image output")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    dataset = await datasets.create_dataset(owner, project.id, "Inputs", [])
+    definitions = WorkflowDefinitionModule(
+        projects,
+        datasets,
+        FunctionModule(projects, MemoryFunctionStore()),
+        None,
+        MemoryWorkflowStore(),
+    )
+    definition = await definitions.create(
+        owner,
+        project.id,
+        "Chart",
+        WorkflowGraph(
+            (WorkflowNode("source", "dataset", dataset.id, dataset.version),),
+            (),
+            (WorkflowOutput("chart", "source", "records"),),
+        ),
+    )
+    store = MemoryWorkflowRunStore()
+    runs = WorkflowRunModule(
+        definitions,
+        datasets,
+        FunctionModule(projects, MemoryFunctionStore()),
+        None,
+        store,
+    )
+    png = b"\x89PNG\r\n\x1a\n" + bytes(8) + (1).to_bytes(4, "big") * 2
+    data_base64 = base64.b64encode(png).decode("ascii")
+    run = WorkflowRun(
+        id="run-with-nested-image",
+        project_id=project.id,
+        workflow_id=definition.id,
+        definition_version=definition.version,
+        status="succeeded",
+        snapshot={},
+        execution={
+            "outputs": {
+                "chart": {
+                    "image": {
+                        "kind": "image",
+                        "mimeType": "image/png",
+                        "dataBase64": data_base64,
+                        "altText": "A chart",
+                    }
+                }
+            }
+        },
+        initiator_subject=owner.subject,
+        idempotency_key="nested-image",
+        created_at=datetime.now(UTC),
+    )
+    await store.create_or_load(run)
+
+    image = await runs.load_image(owner, project.id, run.id, "chart")
+
+    assert image.data == png
+    assert image.data_base64 == data_base64
+    assert image.alt_text == "A chart"
 
 
 @pytest.mark.asyncio

@@ -563,6 +563,11 @@ class WorkflowRunModule:
                         "error": (
                             error.code if isinstance(error, FunctionExecutionError) else str(error)
                         ),
+                        **(
+                            {"diagnostic": error.diagnostic}
+                            if isinstance(error, FunctionExecutionError) and error.diagnostic
+                            else {}
+                        ),
                     }
                     execution_nodes[node.id] = {
                         "status": "failed",
@@ -642,6 +647,11 @@ class WorkflowRunModule:
                 "status": "failed",
                 "inputs": inputs,
                 "error": error.code if isinstance(error, FunctionExecutionError) else str(error),
+                **(
+                    {"diagnostic": error.diagnostic}
+                    if isinstance(error, FunctionExecutionError) and error.diagnostic
+                    else {}
+                ),
             }
             await checkpoint()
             return None, (
@@ -951,7 +961,25 @@ class WorkflowRunModule:
     async def _fail(
         self, run: WorkflowRun, nodes: Mapping[str, object], node_id: str, code: str
     ) -> WorkflowRun:
-        execution = {"nodes": dict(nodes), "error": {"nodeId": node_id, "code": code}}
+        error: dict[str, object] = {"nodeId": node_id, "code": code}
+        failed_node = _mapping(nodes.get(node_id))
+        diagnostic = failed_node.get("diagnostic")
+        if isinstance(diagnostic, Mapping):
+            error["diagnostic"] = dict(diagnostic)
+        else:
+            items = failed_node.get("items")
+            item_diagnostics = [
+                {
+                    "index": item.get("index"),
+                    "diagnostic": item["diagnostic"],
+                }
+                for item in (items if isinstance(items, list) else [])
+                if isinstance(item, Mapping)
+                if isinstance(item.get("diagnostic"), Mapping)
+            ]
+            if item_diagnostics:
+                error["itemDiagnostics"] = item_diagnostics
+        execution = {"nodes": dict(nodes), "error": error}
         return await self._replace(replace(run, status="failed", execution=execution), "running")
 
     async def _replace(self, run: WorkflowRun, expected_status: str) -> WorkflowRun:
@@ -978,6 +1006,9 @@ class WorkflowRunModule:
         run = await self.load(access, project_id, run_id)
         outputs = _mapping(run.execution.get("outputs"))
         output = _mapping(outputs.get(output_name))
+        nested_image = _mapping(output.get("image"))
+        if output.get("kind") != "image" and nested_image:
+            output = nested_image
         data_base64 = output.get("dataBase64")
         alt_text = output.get("altText")
         if (
