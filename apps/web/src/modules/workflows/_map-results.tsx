@@ -13,6 +13,7 @@ type Schema = JsonObject & {
 };
 type Field = {
   key: string;
+  path?: string[];
   label: string;
   description: string | null;
   schema: Schema;
@@ -95,12 +96,88 @@ function fieldsFor(schemaValue: unknown, values: unknown[]): Field[] {
   });
 }
 
+function summaryFieldsFor(schemaValue: unknown, values: unknown[]): Field[] {
+  const output: Field[] = [];
+  const visit = (
+    schemaValueAtPath: unknown,
+    currentValues: unknown[],
+    path: string[],
+    labels: string[],
+    depth: number,
+  ) => {
+    const schema = isRecord(schemaValueAtPath)
+      ? (schemaValueAtPath as Schema)
+      : {};
+    const properties = isRecord(schema.properties) ? schema.properties : {};
+    const keys = [
+      ...Object.keys(properties),
+      ...currentValues.flatMap((value) =>
+        isRecord(value) ? Object.keys(value) : [],
+      ),
+    ].filter((key, index, all) => all.indexOf(key) === index);
+    for (const key of keys) {
+      const childSchema = isRecord(properties[key])
+        ? (properties[key] as Schema)
+        : {};
+      const childValues = currentValues.map((value) =>
+        isRecord(value) ? value[key] : undefined,
+      );
+      const isNested =
+        childSchema.type === "object" ||
+        childValues.some((value) => isRecord(value));
+      const label = stringValue(childSchema.title) ?? humanize(key);
+      if (isNested && depth < 3) {
+        visit(
+          childSchema,
+          childValues,
+          [...path, key],
+          [...labels, label],
+          depth + 1,
+        );
+      } else if (
+        childValues.some(
+          (value) =>
+            value !== undefined &&
+            (value === null ||
+              ["string", "number", "boolean"].includes(typeof value)),
+        )
+      ) {
+        output.push({
+          key: [...path, key].join("/"),
+          path: [...path, key],
+          label: [...labels, label].join(" · "),
+          description: stringValue(childSchema.description),
+          schema: childSchema,
+        });
+      }
+    }
+  };
+  visit(schemaValue, values, [], [], 0);
+  const useful = output.filter(
+    (field) =>
+      !/(^|\/)(source|source_code|source_hash|code|hash|sha|provenance|execution)$/i.test(
+        field.key,
+      ),
+  );
+  const priority = (field: Field) =>
+    /(check|warning|result|value|area|deflection|moment|capacity|passed|safe|status)/i.test(
+      field.key,
+    )
+      ? 0
+      : field.description
+        ? 1
+        : 2;
+  return useful
+    .sort((left, right) => priority(left) - priority(right))
+    .slice(0, 3);
+}
+
 function fieldValue(value: unknown, field: Field) {
-  return field.key === rootValueKey
-    ? value
-    : isRecord(value)
-      ? value[field.key]
-      : undefined;
+  if (field.key === rootValueKey) return value;
+  return (field.path ?? [field.key]).reduce<unknown>(
+    (current, key) => (isRecord(current) ? current[key] : undefined),
+    value,
+  );
 }
 
 function compactValue(value: unknown): string {
@@ -206,6 +283,14 @@ export function WorkflowMapResults({
       ),
     [items, target.outputSchema],
   );
+  const summaryOutputFields = useMemo(
+    () =>
+      summaryFieldsFor(
+        target.outputSchema,
+        items.map((item) => item.output),
+      ),
+    [items, target.outputSchema],
+  );
   const missingDescriptions = [...inputFields, ...outputFields].some(
     (field) => !field.description,
   );
@@ -244,8 +329,8 @@ export function WorkflowMapResults({
         <div>
           <h3>Results by item</h3>
           <p>
-            Columns use the saved input and output schemas. Preview a row to
-            inspect its captured values.
+            Primary output values and status are shown here. Preview a row for
+            its complete captured input, output, and technical details.
           </p>
         </div>
         <span>{items.length} items</span>
@@ -267,16 +352,7 @@ export function WorkflowMapResults({
             <thead>
               <tr>
                 <th>Item</th>
-                <th>Inspect</th>
-                {inputFields.map((field) => (
-                  <th
-                    key={`input-${field.key}`}
-                    title={field.description ?? undefined}
-                  >
-                    {field.label}
-                  </th>
-                ))}
-                {outputFields.map((field) => (
+                {summaryOutputFields.map((field) => (
                   <th
                     key={`output-${field.key}`}
                     title={field.description ?? undefined}
@@ -285,6 +361,7 @@ export function WorkflowMapResults({
                   </th>
                 ))}
                 <th>Status</th>
+                <th>Inspect</th>
               </tr>
             </thead>
             <tbody>
@@ -293,24 +370,7 @@ export function WorkflowMapResults({
                   <td>
                     <strong>{item.itemId ?? `Item ${item.index + 1}`}</strong>
                   </td>
-                  <td>
-                    <button
-                      className={styles.mapInspectButton}
-                      onClick={() => {
-                        setShowApp(false);
-                        setSelectedIndex(item.index);
-                      }}
-                      type="button"
-                    >
-                      Preview
-                    </button>
-                  </td>
-                  {inputFields.map((field) => (
-                    <td key={`input-${field.key}`}>
-                      {compactValue(fieldValue(item.input, field))}
-                    </td>
-                  ))}
-                  {outputFields.map((field) => (
+                  {summaryOutputFields.map((field) => (
                     <td key={`output-${field.key}`}>
                       {item.output === undefined
                         ? "—"
@@ -323,6 +383,18 @@ export function WorkflowMapResults({
                     >
                       {statusLabel(item.status)}
                     </span>
+                  </td>
+                  <td>
+                    <button
+                      className={styles.mapInspectButton}
+                      onClick={() => {
+                        setShowApp(false);
+                        setSelectedIndex(item.index);
+                      }}
+                      type="button"
+                    >
+                      Preview
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -386,6 +458,14 @@ export function WorkflowMapResults({
                 No output was saved for this item.
               </p>
             )}
+            <details className={styles.mapTechnicalDetails}>
+              <summary>Technical details and provenance</summary>
+              <p>
+                Item ID:{" "}
+                {selectedItem.itemId ?? `Item ${selectedItem.index + 1}`}
+              </p>
+              <pre>{JSON.stringify(target, null, 2)}</pre>
+            </details>
             {appUrl && selectedItem.status === "succeeded" ? (
               <section className={styles.mapAppPreview}>
                 <div>

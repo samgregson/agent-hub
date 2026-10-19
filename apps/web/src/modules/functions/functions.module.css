@@ -164,6 +164,68 @@
   background: var(--surface);
 }
 
+.contractSummary {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.contractSummary h3,
+.inputEditor h3 {
+  margin: 0 0 var(--space-1);
+  color: var(--text-strong);
+  font-size: var(--font-size-body);
+}
+
+.contractSummary p,
+.contractSummary ul,
+.inputEditor p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.contractSummary ul {
+  padding-left: var(--space-4);
+}
+
+.inputEditor,
+.schemaInputFields {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.schemaGroup {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+.schemaGroup legend {
+  padding: 0 var(--space-1);
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.schemaGroup > p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.schemaArrayItem {
+  display: grid;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.fieldError {
+  color: var(--danger);
+}
+
 @media (max-width: 850px) {
   .columns,
   .formGrid {

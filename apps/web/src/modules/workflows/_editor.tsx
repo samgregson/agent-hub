@@ -14,6 +14,9 @@ type AddableNode = {
   version: number | string;
   toolName?: string;
   inputPorts: string[];
+  inputTypes: Record<string, string>;
+  inputSchema: Record<string, unknown> | null;
+  outputSchema: Record<string, unknown> | null;
   repeatSafe: boolean;
 };
 
@@ -22,6 +25,34 @@ type EditorCatalog = {
   warning: string | null;
   items: AddableNode[] | null;
 };
+
+function schemaFieldPaths(value: Record<string, unknown> | null) {
+  if (!value) return [];
+  const paths: string[] = [];
+  const visit = (schema: Record<string, unknown>, prefix: string) => {
+    const properties = schema.properties;
+    if (
+      !properties ||
+      typeof properties !== "object" ||
+      Array.isArray(properties)
+    )
+      return;
+    for (const [name, childValue] of Object.entries(properties)) {
+      if (
+        !childValue ||
+        typeof childValue !== "object" ||
+        Array.isArray(childValue)
+      )
+        continue;
+      const pointerPart = name.replaceAll("~", "~0").replaceAll("/", "~1");
+      const path = `${prefix}/${pointerPart}`;
+      paths.push(path);
+      visit(childValue as Record<string, unknown>, path);
+    }
+  };
+  visit(value, "");
+  return paths;
+}
 
 export function WorkflowDefinitionEditor({
   definition,
@@ -89,7 +120,10 @@ export function WorkflowDefinitionEditor({
             id: string;
             name: string;
             revision: number;
-            inputSchema: { properties?: Record<string, unknown> };
+            inputSchema: Record<string, unknown> & {
+              properties?: Record<string, unknown>;
+            };
+            outputSchema?: Record<string, unknown>;
           }>,
           Array<{
             id: string;
@@ -106,6 +140,9 @@ export function WorkflowDefinitionEditor({
             kind: "dataset" as const,
             version: dataset.version,
             inputPorts: [],
+            inputTypes: {},
+            inputSchema: null,
+            outputSchema: null,
             repeatSafe: false,
           })),
           ...files.files
@@ -116,6 +153,9 @@ export function WorkflowDefinitionEditor({
               kind: "file" as const,
               version: file.version,
               inputPorts: [],
+              inputTypes: {},
+              inputSchema: null,
+              outputSchema: null,
               repeatSafe: false,
             })),
           ...functions.map((definition) => ({
@@ -124,6 +164,17 @@ export function WorkflowDefinitionEditor({
             kind: "python" as const,
             version: definition.revision,
             inputPorts: Object.keys(definition.inputSchema.properties ?? {}),
+            inputTypes: Object.fromEntries(
+              Object.entries(definition.inputSchema.properties ?? {}).flatMap(
+                ([name, schema]) => {
+                  if (!schema || typeof schema !== "object") return [];
+                  const type = (schema as { type?: unknown }).type;
+                  return typeof type === "string" ? [[name, type]] : [];
+                },
+              ),
+            ),
+            inputSchema: definition.inputSchema,
+            outputSchema: definition.outputSchema ?? null,
             repeatSafe: false,
           })),
         ];
@@ -142,7 +193,10 @@ export function WorkflowDefinitionEditor({
                   name: string;
                   version: string;
                   repeatSafe: boolean;
-                  inputSchema: { properties?: Record<string, unknown> };
+                  inputSchema: Record<string, unknown> & {
+                    properties?: Record<string, unknown>;
+                  };
+                  outputSchema?: Record<string, unknown>;
                 }>,
               };
             } catch {
@@ -159,6 +213,17 @@ export function WorkflowDefinitionEditor({
               version: tool.version,
               toolName: tool.name,
               inputPorts: Object.keys(tool.inputSchema.properties ?? {}),
+              inputTypes: Object.fromEntries(
+                Object.entries(tool.inputSchema.properties ?? {}).flatMap(
+                  ([name, schema]) => {
+                    if (!schema || typeof schema !== "object") return [];
+                    const type = (schema as { type?: unknown }).type;
+                    return typeof type === "string" ? [[name, type]] : [];
+                  },
+                ),
+              ),
+              inputSchema: tool.inputSchema,
+              outputSchema: tool.outputSchema ?? null,
               repeatSafe: tool.repeatSafe,
             })),
         );
@@ -236,6 +301,102 @@ export function WorkflowDefinitionEditor({
             ),
           ];
     return item?.inputPorts ?? [];
+  }
+
+  function nodeName(nodeId: string | null) {
+    const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+    if (!node) return "unselected source";
+    const item = catalog.items?.find(
+      (candidate) =>
+        candidate.id === node.refId &&
+        candidate.kind === node.kind &&
+        candidate.toolName === node.toolName,
+    );
+    return item?.label ?? `${node.kind} · ${node.id}`;
+  }
+
+  function targetInputType(edge: EditableGraph["edges"][number]) {
+    if (edge.targetPort === "items") return "array";
+    const node = graph.nodes.find(
+      (candidate) => candidate.id === edge.targetNode,
+    );
+    if (!node) return "json";
+    return (
+      catalog.items?.find(
+        (candidate) =>
+          candidate.id === node.refId &&
+          candidate.kind === node.kind &&
+          candidate.toolName === node.toolName,
+      )?.inputTypes[edge.targetPort] ?? "json"
+    );
+  }
+
+  function sourcePathOptions(edge: EditableGraph["edges"][number]) {
+    if (edge.sourceKind === "workflowInput") {
+      const input = graph.inputs.find((item) => item.name === edge.sourceInput);
+      return schemaFieldPaths(input?.schema ?? null);
+    }
+    const node = graph.nodes.find(
+      (candidate) => candidate.id === edge.sourceNode,
+    );
+    if (!node) return [];
+    const item = catalog.items?.find(
+      (candidate) =>
+        candidate.id === node.refId &&
+        candidate.kind === node.kind &&
+        candidate.toolName === node.toolName,
+    );
+    return schemaFieldPaths(item?.outputSchema ?? null);
+  }
+
+  function targetPathOptions(edge: EditableGraph["edges"][number]) {
+    const node = graph.nodes.find(
+      (candidate) => candidate.id === edge.targetNode,
+    );
+    if (!node) return [];
+    const item = catalog.items?.find(
+      (candidate) =>
+        candidate.id === node.refId &&
+        candidate.kind === node.kind &&
+        candidate.toolName === node.toolName,
+    );
+    const properties = item?.inputSchema?.properties;
+    const targetSchema =
+      properties && typeof properties === "object" && !Array.isArray(properties)
+        ? (properties as Record<string, unknown>)[edge.targetPort]
+        : undefined;
+    return schemaFieldPaths(
+      targetSchema &&
+        typeof targetSchema === "object" &&
+        !Array.isArray(targetSchema)
+        ? (targetSchema as Record<string, unknown>)
+        : null,
+    );
+  }
+
+  function bindingSummary(edge: EditableGraph["edges"][number]) {
+    const pointer = (path: string | undefined) => {
+      if (!path) return "whole value";
+      return path
+        .split("/")
+        .slice(1)
+        .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"))
+        .join(" → ");
+    };
+    const source =
+      edge.sourceKind === "workflowInput"
+        ? `Workflow Input · ${edge.sourceInput ?? "unnamed"}`
+        : edge.sourceKind === "literal"
+          ? "Literal value"
+          : nodeName(edge.sourceNode);
+    const targetNode = graph.nodes.find((node) => node.id === edge.targetNode);
+    const targetRole =
+      targetNode?.shape === "map"
+        ? edge.targetPort === "items" || edge.targetPort === targetNode.mapInput
+          ? "Map item"
+          : "Shared input"
+        : "Input";
+    return `${source} · ${pointer(edge.sourcePath)} → ${nodeName(edge.targetNode)} · ${targetRole} ${edge.targetPort}${edge.targetPath ? ` · ${pointer(edge.targetPath)}` : ""}`;
   }
 
   function addNode() {
@@ -680,14 +841,32 @@ export function WorkflowDefinitionEditor({
             Add binding
           </button>
         </div>
+        <p className={styles.bindingHelp}>
+          Each connection below shows its source and destination. The assembled
+          values cannot be resolved here when they depend on current Dataset or
+          Project File contents, upstream steps that have not run, or Workflow
+          Inputs that will be supplied at Run time. Those values are captured
+          and shown in the Run record. Known schema paths are offered as
+          suggestions; advanced JSON Pointer paths remain editable.
+        </p>
         {graph.edges.map((edge, index) => (
           <div className={styles.editorRow} key={`edge-${index}`}>
+            <p className={styles.bindingSummary}>{bindingSummary(edge)}</p>
             <label>
               <span>Value comes from</span>
               <select
                 onChange={(event) => {
                   const sourceKind = event.target.value as
                     "node" | "workflowInput" | "literal";
+                  const literalType = targetInputType(edge);
+                  const defaultLiteral =
+                    literalType === "string"
+                      ? ""
+                      : literalType === "number" || literalType === "integer"
+                        ? 0
+                        : literalType === "boolean"
+                          ? false
+                          : null;
                   updateEdge(index, {
                     sourceKind,
                     sourceNode:
@@ -702,12 +881,21 @@ export function WorkflowDefinitionEditor({
                       sourceKind === "workflowInput"
                         ? (graph.inputs[0]?.name ?? null)
                         : null,
-                    literal: sourceKind === "literal" ? null : undefined,
+                    literal:
+                      sourceKind === "literal" ? defaultLiteral : undefined,
                   });
-                  if (sourceKind === "literal")
+                  if (sourceKind === "literal") {
                     setLiteralText((current) =>
-                      current.map((text, i) => (i === index ? "null" : text)),
+                      current.map((text, i) =>
+                        i === index ? JSON.stringify(defaultLiteral) : text,
+                      ),
                     );
+                    setLiteralErrors((current) => {
+                      const next = { ...current };
+                      delete next[index];
+                      return next;
+                    });
+                  }
                 }}
                 value={edge.sourceKind ?? "node"}
               >
@@ -766,13 +954,64 @@ export function WorkflowDefinitionEditor({
             ) : null}
             {edge.sourceKind === "literal" ? (
               <label>
-                <span>Literal JSON value</span>
-                <textarea
-                  aria-label={`Literal for binding ${index + 1}`}
-                  onChange={(event) => changeLiteral(index, event.target.value)}
-                  rows={3}
-                  value={literalText[index] ?? "null"}
-                />
+                <span>
+                  {targetInputType(edge) === "json" ||
+                  targetInputType(edge) === "object" ||
+                  targetInputType(edge) === "array"
+                    ? "Literal value (JSON)"
+                    : `Literal ${targetInputType(edge)}`}
+                </span>
+                {targetInputType(edge) === "boolean" ? (
+                  <input
+                    aria-label={`Literal for binding ${index + 1}`}
+                    checked={edge.literal === true}
+                    onChange={(event) => {
+                      setLiteralText((current) =>
+                        current.map((text, itemIndex) =>
+                          itemIndex === index
+                            ? String(event.target.checked)
+                            : text,
+                        ),
+                      );
+                      updateEdge(index, { literal: event.target.checked });
+                    }}
+                    type="checkbox"
+                  />
+                ) : targetInputType(edge) === "string" ? (
+                  <input
+                    aria-label={`Literal for binding ${index + 1}`}
+                    onChange={(event) => {
+                      setLiteralText((current) =>
+                        current.map((text, itemIndex) =>
+                          itemIndex === index ? event.target.value : text,
+                        ),
+                      );
+                      updateEdge(index, { literal: event.target.value });
+                    }}
+                    type="text"
+                    value={typeof edge.literal === "string" ? edge.literal : ""}
+                  />
+                ) : targetInputType(edge) === "number" ||
+                  targetInputType(edge) === "integer" ? (
+                  <input
+                    aria-label={`Literal for binding ${index + 1}`}
+                    onChange={(event) =>
+                      changeLiteral(index, event.target.value)
+                    }
+                    step={targetInputType(edge) === "integer" ? "1" : "any"}
+                    type="number"
+                    value={typeof edge.literal === "number" ? edge.literal : ""}
+                  />
+                ) : (
+                  <textarea
+                    aria-label={`Literal for binding ${index + 1}`}
+                    onChange={(event) =>
+                      changeLiteral(index, event.target.value)
+                    }
+                    rows={3}
+                    value={literalText[index] ?? "null"}
+                  />
+                )}
                 {literalErrors[index] ? (
                   <span role="alert">{literalErrors[index]}</span>
                 ) : null}
@@ -782,12 +1021,18 @@ export function WorkflowDefinitionEditor({
               <span>Source field path</span>
               <input
                 aria-label={`Source field path for binding ${index + 1}`}
+                list={`workflow-source-paths-${index}`}
                 onChange={(event) =>
                   updateEdge(index, { sourcePath: event.target.value })
                 }
                 placeholder="/field/nested"
                 value={edge.sourcePath ?? ""}
               />
+              <datalist id={`workflow-source-paths-${index}`}>
+                {sourcePathOptions(edge).map((path) => (
+                  <option key={path} value={path} />
+                ))}
+              </datalist>
             </label>
             <label>
               <span>To node</span>
@@ -826,12 +1071,18 @@ export function WorkflowDefinitionEditor({
               <span>Target field path</span>
               <input
                 aria-label={`Target field path for binding ${index + 1}`}
+                list={`workflow-target-paths-${index}`}
                 onChange={(event) =>
                   updateEdge(index, { targetPath: event.target.value })
                 }
                 placeholder="/field/nested"
                 value={edge.targetPath ?? ""}
               />
+              <datalist id={`workflow-target-paths-${index}`}>
+                {targetPathOptions(edge).map((path) => (
+                  <option key={path} value={path} />
+                ))}
+              </datalist>
             </label>
             <button
               aria-label={`Remove connection ${index + 1}`}

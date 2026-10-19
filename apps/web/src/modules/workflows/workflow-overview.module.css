@@ -261,6 +261,19 @@
   font-size: 15px;
 }
 
+.bindingHelp {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.bindingSummary {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
 .editorRow {
   display: grid;
   grid-template-columns:
@@ -793,6 +806,35 @@
 
 .mapPreviewPanel > h4 {
   margin: 22px 0 8px;
+}
+
+.mapTechnicalDetails {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.mapTechnicalDetails summary {
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.mapTechnicalDetails p {
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.mapTechnicalDetails pre {
+  overflow: auto;
+  max-height: 22rem;
+  padding: 12px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font:
+    12px/1.55 ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .mapFieldList {
