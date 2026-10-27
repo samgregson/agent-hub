@@ -42,7 +42,9 @@ export function readableFunctionExample(value: unknown): string {
     if (typeof item !== "object") return String(item);
     if (Array.isArray(item)) {
       if (depth >= 3) return `List with ${item.length} items`;
-      const preview = item.slice(0, 3).map((child) => summarize(child, depth + 1));
+      const preview = item
+        .slice(0, 3)
+        .map((child) => summarize(child, depth + 1));
       return `List (${item.length} items: ${preview.join("; ")}${item.length > preview.length ? "; …" : ""})`;
     }
     const entries = Object.entries(item as Record<string, unknown>);
