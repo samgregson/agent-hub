@@ -126,6 +126,7 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
     surface.getByRole("region", { name: "Function contract" }),
   ).toContainText("Load in kilonewtons.");
   await surface.getByLabel("load · required").fill("4");
+  await surface.getByText("Advanced: optional Function parameters").click();
   await surface.getByLabel("Parameters (JSON object)").fill('{"factor":2}');
   await surface.getByRole("button", { name: "Preview output" }).click();
   await expect.poll(() => slowPreviewRequested).toBe(true);
@@ -141,7 +142,7 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
     "Runtime identity: deno:2.9.7;pyodide:314.0.7",
   );
   await expect(preview).toContainText("Source SHA-256: sha256:source-2");
-  await preview.getByText("Captured source and inputs").click();
+  await preview.getByText("Technical details and full values").click();
   await expect(preview).toContainText(source);
   await expect(preview).toContainText('"load": 4');
   await expect(preview).toContainText('"factor": 2');

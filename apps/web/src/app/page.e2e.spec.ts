@@ -826,6 +826,19 @@ test("a Project Workflow can be created from Library and Functions", async ({
     });
   });
   await page.route(
+    `**/api/projects/${project.id}/datasets/loads`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          id: "loads",
+          name: "Loads",
+          version: 2,
+          records: [{ value: { load: 5 } }],
+        },
+      });
+    },
+  );
+  await page.route(
     `**/api/projects/${project.id}/files/index`,
     async (route) => {
       await route.fulfill({ json: { files: [] } });
@@ -979,13 +992,18 @@ test("a Project Workflow can be created from Library and Functions", async ({
     targetPort: "factor",
   });
   expect(graph.outputs[0]).toMatchObject({ node: "call-2", port: "result" });
+  const workflowGraph = page.getByRole("region", { name: "Workflow graph" });
   await expect(
-    page.getByRole("list", { name: "Workflow dependencies" }),
-  ).toContainText("Workflow Input · input1");
+    workflowGraph.getByRole("button", { name: "Inspect input1" }),
+  ).toBeVisible();
   await expect(
-    page.getByRole("list", { name: "Workflow dependencies" }),
-  ).toContainText("Literal · 2");
+    workflowGraph.getByRole("button", { name: "Inspect Literal value" }),
+  ).toBeVisible();
   await page.getByLabel("Workflow Input input1").fill("test label");
+  await page.getByRole("button", { name: "Review next Run" }).click();
+  await expect(
+    page.getByRole("region", { name: "Review next Run" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Run Workflow" }).click();
   await expect
     .poll(() => runRequest?.workflowInputs)
@@ -1086,7 +1104,7 @@ test("Workflow editor exposes shared Project File inputs on MCP Map nodes", asyn
   );
 
   await page.goto("/");
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page.getByRole("button", { name: "Workflow graph" }).click();
   await page.getByRole("button", { name: "Create Workflow" }).click();
   await page.getByLabel("Library item or call").selectOption("Dataset · Loads");
   await page.getByRole("button", { name: "Add node" }).click();
@@ -1621,14 +1639,14 @@ test("Library opens a registered Dataset in its table viewer and saves through D
   await expect(viewer.getByRole("row", { name: /LC-1/ })).toHaveCount(0);
   await expect(viewer.getByRole("row", { name: /LC-2/ })).toBeVisible();
   await expect(viewer.getByRole("status")).toContainText(
-    "Showing 1 of 2 Records · View filter only",
+    "Showing 1 of 2 Records",
   );
   await viewer.getByLabel("Filter records in this view").fill("");
   await viewer
     .getByRole("row", { name: /LC-1/ })
-    .getByText("Inspect JSON")
+    .getByText("Inspect record")
     .click();
-  await expect(viewer.getByText('"unit": "kN"')).toBeVisible();
+  await expect(viewer.getByText("kN", { exact: true }).last()).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(viewer).toBeVisible();
   expect(
@@ -2271,7 +2289,7 @@ test("approval waits for the interrupting stream to close before resuming", asyn
     await page.getByLabel("Message").fill("Create a Python Function");
     await page.getByRole("button", { name: "Send" }).click();
     const approval = page.getByRole("region", {
-      name: "Approve protected action",
+      name: "Approve new Python Function",
     });
     await expect(approval).toContainText(
       "Create the proposed Python Function?",
@@ -2699,7 +2717,7 @@ test("composer blocks sending while an approval is pending", async ({
   await page.getByLabel("Message").fill("Create a Function");
   await page.getByRole("button", { name: "Send" }).click();
   const approval = page.getByRole("region", {
-    name: "Approve protected action",
+    name: "Approve new Python Function",
   });
   await expect(approval).toBeVisible();
   await expect(
