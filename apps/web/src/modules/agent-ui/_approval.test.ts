@@ -4,6 +4,10 @@ import test from "node:test";
 import {
   approvalLabel,
   approvalTarget,
+  functionApprovalName,
+  functionApprovalSummary,
+  functionApprovalTechnicalDetails,
+  isFunctionDefinitionApproval,
   isApprovalOnlyTool,
   proposedFileContent,
   resolvedApprovalReview,
@@ -71,5 +75,85 @@ test("resolved approvals retain the proposed action for audit", () => {
       replace_all: true,
     }),
     /Replace all matches\n--- Original text\nbefore\n\+\+\+ Proposed text\nafter/,
+  );
+});
+
+test("Function approvals expose a readable contract and retain technical details", () => {
+  const proposal = {
+    input_schema: {
+      description: "Calculates the area of a rectangle.",
+      examples: [{ length_m: 12, width_m: 5 }],
+      properties: {
+        length_m: {
+          description: "Length in metres.",
+          example: 12,
+          type: "number",
+        },
+        width_m: {
+          description: "Width in metres.",
+          example: 5,
+          type: "number",
+        },
+      },
+      required: ["length_m", "width_m"],
+      type: "object",
+    },
+    name: "Rectangle area",
+    output_schema: {
+      examples: [{ area_m2: 60 }],
+      properties: {
+        area_m2: {
+          description: "Area in square metres.",
+          example: 60,
+          type: "number",
+        },
+      },
+      required: ["area_m2"],
+      type: "object",
+    },
+    source:
+      'def transform(inputs, parameters): return {"area_m2": inputs["length_m"] * inputs["width_m"]}',
+  };
+
+  assert.equal(isFunctionDefinitionApproval("create_project_function"), true);
+  assert.equal(isFunctionDefinitionApproval("update_project_function"), true);
+  assert.equal(functionApprovalName(proposal), "Rectangle area");
+  assert.deepEqual(functionApprovalSummary(proposal), {
+    purpose: "Calculates the area of a rectangle.",
+    inputs: [
+      {
+        name: "length_m",
+        type: "number",
+        description: "Length in metres.",
+        required: true,
+        example: 12,
+      },
+      {
+        name: "width_m",
+        type: "number",
+        description: "Width in metres.",
+        required: true,
+        example: 5,
+      },
+    ],
+    outputs: [
+      {
+        name: "area_m2",
+        type: "number",
+        description: "Area in square metres.",
+        required: true,
+        example: 60,
+      },
+    ],
+    inputExample: "Object (length_m: 12; width_m: 5)",
+    outputExample: "Object (area_m2: 60)",
+  });
+  assert.match(
+    functionApprovalTechnicalDetails(proposal),
+    /def transform\(inputs, parameters\)/,
+  );
+  assert.equal(
+    approvalLabel("update_project_function"),
+    "Approve Python Function revision",
   );
 });

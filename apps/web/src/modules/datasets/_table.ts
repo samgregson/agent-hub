@@ -71,7 +71,11 @@ export function datasetColumnText(
 ): string | null {
   let current: unknown = value;
   for (const key of column.path) {
-    if (current === null || Array.isArray(current) || typeof current !== "object") {
+    if (
+      current === null ||
+      Array.isArray(current) ||
+      typeof current !== "object"
+    ) {
       return null;
     }
     current = (current as Record<string, unknown>)[key];
@@ -92,8 +96,8 @@ export function filterDatasetRecords<T extends DatasetTableRecord>(
       record.id,
       ...columns.map((column) =>
         typeof column === "string"
-          ? scalarText(record.value[column]) ?? ""
-          : datasetColumnText(record.value, column) ?? "",
+          ? (scalarText(record.value[column]) ?? "")
+          : (datasetColumnText(record.value, column) ?? ""),
       ),
     ].some((value) => value.toLowerCase().includes(needle)),
   );
