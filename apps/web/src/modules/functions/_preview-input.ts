@@ -89,3 +89,50 @@ export function exampleFunctionInputs(inputSchema: JsonSchema): string {
       : {};
   return JSON.stringify(objectExample, null, 2);
 }
+
+export function hasUnspecifiedCollectionItemShape(schema: JsonSchema): boolean {
+  function inspect(current: JsonSchema): boolean {
+    if (
+      Array.isArray(current.examples) ||
+      "example" in current ||
+      "default" in current ||
+      "const" in current
+    ) {
+      return false;
+    }
+    const properties = schemaObject(current.properties);
+    if (properties) {
+      for (const child of Object.values(properties)) {
+        const childSchema = schemaObject(child);
+        if (childSchema && inspect(childSchema)) return true;
+      }
+    }
+    const items = schemaObject(current.items);
+    if (items) {
+      const itemProperties = schemaObject(items.properties);
+      const itemType = items.type;
+      if (
+        (itemType === "object" || itemProperties !== null) &&
+        (!itemProperties || Object.keys(itemProperties).length === 0) &&
+        !Array.isArray(items.examples) &&
+        !("example" in items) &&
+        !("default" in items) &&
+        !("const" in items)
+      ) {
+        return true;
+      }
+      if (inspect(items)) return true;
+    }
+    for (const key of ["oneOf", "anyOf", "allOf"]) {
+      const choices = current[key];
+      if (Array.isArray(choices)) {
+        for (const choice of choices) {
+          const choiceSchema = schemaObject(choice);
+          if (choiceSchema && inspect(choiceSchema)) return true;
+        }
+      }
+    }
+    return false;
+  }
+  return inspect(schema);
+}

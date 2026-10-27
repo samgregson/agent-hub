@@ -44,6 +44,11 @@ import {
   isApprovalOnlyTool,
   proposedFileContent,
   resolvedApprovalReview,
+  functionApprovalName,
+  functionApprovalSummary,
+  functionApprovalTechnicalDetails,
+  isFunctionDefinitionApproval,
+  readableFunctionExample,
   unifiedFileDiff,
   type ProposedFileReview,
 } from "./_approval";
@@ -181,7 +186,7 @@ function ToolCall({
   toolCallId,
   toolName,
 }: ToolCallMessagePartProps & {
-  autoApprove?: boolean;
+  autoApprove?: boolean | null;
   approvalDisabled?: boolean;
   dock?: boolean;
 }) {
@@ -270,13 +275,18 @@ function ToolCall({
   if (approval) {
     if (waitingForDecision && !dock) return null;
     const label = approvalLabel(toolName);
+    const resolvedLabel = label.replace(/^Approve /, "");
     const target = approvalTarget(args);
+    const functionDefinition = isFunctionDefinitionApproval(toolName);
+    const functionSummary = functionApprovalSummary(args);
     const outcome = waitingForDecision
-      ? autoApprove
-        ? "Auto-approving"
-        : hasPendingInterrupt
-          ? "Needs approval"
-          : "Preparing approval"
+      ? autoApprove === null
+        ? "Restoring approval mode"
+        : autoApprove
+          ? "Auto-approving"
+          : hasPendingInterrupt
+            ? "Needs approval"
+            : "Preparing approval"
       : approval.resolution === "cancelled"
         ? "Cancelled"
         : approval.resolution === "expired"
@@ -291,18 +301,97 @@ function ToolCall({
       <section aria-label={label} className={styles.approvalCard}>
         <div className={styles.approvalHeading}>
           <strong>
-            {waitingForDecision ? label : label.replace(/^Approve /, "")}
+            {waitingForDecision
+              ? label
+              : resolvedLabel.charAt(0).toUpperCase() + resolvedLabel.slice(1)}
           </strong>
           <span className={styles.approvalStatus}>{outcome}</span>
         </div>
-        <p className={styles.approvalTarget}>{target.summary}</p>
+        <p className={styles.approvalTarget}>
+          {functionDefinition ? functionApprovalName(args) : target.summary}
+        </p>
+        {functionDefinition ? (
+          <>
+            <div className={styles.functionApprovalSummary}>
+              <section>
+                <strong>Purpose</strong>
+                <p>
+                  {functionSummary.purpose ??
+                    "Purpose was not included in this proposal."}
+                </p>
+              </section>
+              <section>
+                <strong>Inputs</strong>
+                {functionSummary.inputExample ? (
+                  <p>
+                    <strong>Whole input example:</strong>{" "}
+                    {functionSummary.inputExample}
+                  </p>
+                ) : null}
+                {functionSummary.inputs === null ? (
+                  <p>Input contract was not included in this proposal.</p>
+                ) : functionSummary.inputs.length === 0 ? (
+                  <p>No named input fields are declared.</p>
+                ) : (
+                  <ul>
+                    {functionSummary.inputs.map((field) => (
+                      <li key={field.name}>
+                        <strong>{field.name}</strong> · {field.type} ·{" "}
+                        {field.required ? "required" : "optional"}
+                        {field.description ? ` — ${field.description}` : ""}
+                        {field.example !== undefined
+                          ? ` · Example: ${readableFunctionExample(field.example)}`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              <section>
+                <strong>Outputs</strong>
+                {functionSummary.outputExample ? (
+                  <p>
+                    <strong>Whole output example:</strong>{" "}
+                    {functionSummary.outputExample}
+                  </p>
+                ) : null}
+                {functionSummary.outputs === null ? (
+                  <p>Output contract was not included in this proposal.</p>
+                ) : functionSummary.outputs.length === 0 ? (
+                  <p>No named output fields are declared.</p>
+                ) : (
+                  <ul>
+                    {functionSummary.outputs.map((field) => (
+                      <li key={field.name}>
+                        <strong>{field.name}</strong> · {field.type}
+                        {field.description ? ` — ${field.description}` : ""}
+                        {field.example !== undefined
+                          ? ` · Example: ${readableFunctionExample(field.example)}`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+            <details className={styles.approvalDetails}>
+              <summary>
+                Full proposal, including Python source and schemas
+              </summary>
+              <pre>{functionApprovalTechnicalDetails(args)}</pre>
+            </details>
+          </>
+        ) : null}
         {approval.prompt ? <p>{approval.prompt}</p> : null}
         {waitingForDecision ? (
           <>
-            {autoApprove ? (
+            {autoApprove === true ? (
               <p role="status">This action will be approved automatically.</p>
             ) : null}
-            {!autoApprove && !hasPendingInterrupt ? (
+            {autoApprove === null ? (
+              <p role="status">Restoring this Thread’s approval mode…</p>
+            ) : null}
+            {autoApprove === false && !hasPendingInterrupt ? (
               <p role="status">Waiting for the approval request to be ready…</p>
             ) : null}
             {target.path ? (
@@ -329,12 +418,14 @@ function ToolCall({
                       : "Open proposed file in preview"}
                   </button>
                 ) : null}
-                <details className={styles.approvalDetails}>
-                  <summary>Review action details</summary>
-                  <pre>{JSON.stringify(args, null, 2)}</pre>
-                </details>
+                {functionDefinition ? null : (
+                  <details className={styles.approvalDetails}>
+                    <summary>Review action details</summary>
+                    <pre>{JSON.stringify(args, null, 2)}</pre>
+                  </details>
+                )}
               </>
-            ) : (
+            ) : functionDefinition ? null : (
               <details className={styles.approvalDetails}>
                 <summary>Review action details</summary>
                 <pre>{JSON.stringify(args, null, 2)}</pre>
@@ -346,7 +437,7 @@ function ToolCall({
                 pending, reload this thread and try again.
               </p>
             ) : null}
-            {!autoApprove ? (
+            {autoApprove === false ? (
               <div className={styles.approvalActions}>
                 <button
                   disabled={
@@ -400,7 +491,7 @@ function ToolCall({
               </div>
             ) : null}
           </>
-        ) : (
+        ) : functionDefinition ? null : (
           <details className={styles.approvalDetails}>
             <summary>Review proposed change</summary>
             <pre>{resolvedApprovalReview(toolName, args)}</pre>
@@ -673,7 +764,7 @@ function ApprovalDock({
   autoApprove,
   onAutoApproveChange,
 }: {
-  autoApprove: boolean;
+  autoApprove: boolean | null;
   onAutoApproveChange: (enabled: boolean) => void;
 }) {
   const aui = useAui();
@@ -710,6 +801,7 @@ function ApprovalDock({
     matchingApprovals.every((approval) => approval !== undefined);
 
   useEffect(() => {
+    if (autoApprove === null) return;
     if (!autoApprove) {
       attemptedAutoApproval.current = null;
       return;
@@ -798,7 +890,7 @@ function ComposerArea({
   onAutoApproveChange,
   onSubmit,
 }: {
-  autoApprove: boolean;
+  autoApprove: boolean | null;
   onAutoApproveChange: (enabled: boolean) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -847,12 +939,22 @@ function ComposerArea({
           <label className={styles.approvalMode}>
             <span>Approval</span>
             <select
-              aria-label="Approval mode"
+              aria-label="Approval mode for this Thread"
+              disabled={autoApprove === null}
               onChange={(event) =>
                 onAutoApproveChange(event.target.value === "auto")
               }
-              value={autoApprove ? "auto" : "manual"}
+              value={
+                autoApprove === null
+                  ? "loading"
+                  : autoApprove
+                    ? "auto"
+                    : "manual"
+              }
             >
+              {autoApprove === null ? (
+                <option value="loading">Restoring…</option>
+              ) : null}
               <option value="manual">Ask first</option>
               <option value="auto">Auto-approve</option>
             </select>
@@ -1017,14 +1119,41 @@ export function AgentChat({
   threadId: string;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [autoApprovalSetting, setAutoApprovalSetting] = useState({
-    threadId,
-    enabled: false,
-  });
+  const [autoApprovalSetting, setAutoApprovalSetting] = useState<{
+    projectId: string;
+    threadId: string;
+    mode: "manual" | "auto" | null;
+  }>({ projectId, threadId, mode: null });
+  const approvalModeStorageKey = `agent-hub:approval-mode:${encodeURIComponent(projectId)}:${encodeURIComponent(threadId)}`;
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      let mode: "manual" | "auto" = "manual";
+      try {
+        if (window.sessionStorage.getItem(approvalModeStorageKey) === "auto") {
+          mode = "auto";
+        }
+      } catch {
+        // Storage may be unavailable; keep this Thread's default in memory.
+      }
+      setAutoApprovalSetting({ projectId, threadId, mode });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [approvalModeStorageKey, projectId, threadId]);
   const autoApprove =
-    autoApprovalSetting.threadId === threadId && autoApprovalSetting.enabled;
-  const setAutoApprove = (enabled: boolean) =>
-    setAutoApprovalSetting({ threadId, enabled });
+    autoApprovalSetting.projectId !== projectId ||
+    autoApprovalSetting.threadId !== threadId ||
+    autoApprovalSetting.mode === null
+      ? null
+      : autoApprovalSetting.mode === "auto";
+  const setAutoApprove = (enabled: boolean) => {
+    const mode = enabled ? "auto" : "manual";
+    try {
+      window.sessionStorage.setItem(approvalModeStorageKey, mode);
+    } catch {
+      // Keep the selection for the current mount if storage is unavailable.
+    }
+    setAutoApprovalSetting({ projectId, threadId, mode });
+  };
   const [approvalHistory, setApprovalHistory] = useState<
     Record<string, ResolvedApproval>
   >({});

@@ -49,7 +49,7 @@ import { LibraryCatalog } from "./_library-catalog";
 import { WorkflowOverview } from "@/modules/workflows";
 
 const activityLabels = {
-  workflows: "Workflow",
+  workflows: "Workflow graph",
   artifacts: "Library",
   chats: "Chats",
   functions: "Functions",
@@ -103,6 +103,9 @@ export function ProjectWorkspace() {
   );
   const [error, setError] = useState<string | null>(null);
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
+  const [projectsWithWorkflows, setProjectsWithWorkflows] = useState<
+    Set<string>
+  >(() => new Set());
   const newProjectNameInput = useRef<HTMLInputElement>(null);
   const projectPicker = useRef<HTMLSelectElement>(null);
   const workflowAvailabilityByProject = useRef(
@@ -176,6 +179,15 @@ export function ProjectWorkspace() {
     }
     let active = true;
     void availability.then((hasWorkflows) => {
+      if (active) {
+        setProjectsWithWorkflows((current) => {
+          if (current.has(projectId) === hasWorkflows) return current;
+          const next = new Set(current);
+          if (hasWorkflows) next.add(projectId);
+          else next.delete(projectId);
+          return next;
+        });
+      }
       if (
         active &&
         hasWorkflows &&
@@ -411,6 +423,17 @@ export function ProjectWorkspace() {
             </select>
           </label>
         </div>
+        {selectedProject &&
+        selectedActivity !== "workflows" &&
+        projectsWithWorkflows.has(selectedProject.id) ? (
+          <button
+            className={styles.mobileWorkflowShortcut}
+            onClick={() => handleSelectActivity("workflows")}
+            type="button"
+          >
+            Workflow graph
+          </button>
+        ) : null}
         <button
           aria-controls="mobile-project-navigation"
           aria-expanded={isMobileNavigationOpen}
@@ -419,7 +442,7 @@ export function ProjectWorkspace() {
           onClick={() => setIsMobileNavigationOpen(true)}
           type="button"
         >
-          Navigation
+          Menu
         </button>
         <span className={styles.foundation}>
           Foundation · Project workspace
@@ -679,6 +702,17 @@ export function ProjectWorkspace() {
                   : `${activityLabels[selectedActivity]} will appear in this Project workspace.`
                 : "Projects keep conversations, files, sources, Plugins, and Artifacts together."}
             </p>
+            {selectedProject &&
+            selectedActivity === "chats" &&
+            projectsWithWorkflows.has(selectedProject.id) ? (
+              <button
+                className={styles.workflowEntryAction}
+                onClick={() => handleSelectActivity("workflows")}
+                type="button"
+              >
+                View Workflow graph
+              </button>
+            ) : null}
             {error ? <p className={styles.error}>{error}</p> : null}
           </div>
         )}

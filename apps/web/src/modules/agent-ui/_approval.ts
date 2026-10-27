@@ -5,7 +5,170 @@ const approvalOnlyTools = new Set([
   "create_project_dataset",
   "update_project_dataset",
   "delete_project_dataset",
+  "create_project_function",
+  "update_project_function",
+  "delete_project_function",
 ]);
+
+export function isFunctionApprovalTool(toolName: string): boolean {
+  return [
+    "create_project_function",
+    "update_project_function",
+    "delete_project_function",
+  ].includes(toolName);
+}
+
+export interface FunctionApprovalField {
+  name: string;
+  type: string;
+  description: string;
+  required: boolean;
+  example?: unknown;
+}
+
+export interface FunctionApprovalSummary {
+  purpose: string | null;
+  inputs: FunctionApprovalField[] | null;
+  outputs: FunctionApprovalField[] | null;
+  inputExample: string | null;
+  outputExample: string | null;
+}
+
+export function readableFunctionExample(value: unknown): string {
+  const summarize = (item: unknown, depth = 0): string => {
+    if (item === null) return "none";
+    if (typeof item === "string")
+      return item.length > 60 ? `“${item.slice(0, 57)}…”` : `“${item}”`;
+    if (typeof item !== "object") return String(item);
+    if (Array.isArray(item)) {
+      if (depth >= 3) return `List with ${item.length} items`;
+      const preview = item.slice(0, 3).map((child) => summarize(child, depth + 1));
+      return `List (${item.length} items: ${preview.join("; ")}${item.length > preview.length ? "; …" : ""})`;
+    }
+    const entries = Object.entries(item as Record<string, unknown>);
+    if (depth >= 3) return `Object with ${entries.length} fields`;
+    const preview = entries
+      .slice(0, 3)
+      .map(([key, child]) => `${key}: ${summarize(child, depth + 1)}`);
+    return `Object (${preview.join("; ")}${entries.length > preview.length ? "; …" : ""})`;
+  };
+  const summary = summarize(value);
+  return summary.length > 180 ? `${summary.slice(0, 177)}…` : summary;
+}
+
+function readableSchemaExample(schema: unknown): string | null {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return null;
+  }
+  const record = schema as Record<string, unknown>;
+  const example =
+    Array.isArray(record.examples) && record.examples.length > 0
+      ? record.examples[0]
+      : record.example;
+  if (example === undefined) return null;
+  return readableFunctionExample(example);
+}
+
+function schemaFields(schema: unknown): FunctionApprovalField[] | null {
+  if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+    return null;
+  }
+  const record = schema as Record<string, unknown>;
+  if (
+    typeof record.properties !== "object" ||
+    record.properties === null ||
+    Array.isArray(record.properties)
+  ) {
+    return [];
+  }
+  const required = Array.isArray(record.required) ? record.required : [];
+  return Object.entries(record.properties as Record<string, unknown>).flatMap(
+    ([name, value]) => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return [];
+      }
+      const field = value as Record<string, unknown>;
+      const type = Array.isArray(field.type)
+        ? field.type.join(" or ")
+        : String(field.type ?? "value");
+      const example = Array.isArray(field.examples)
+        ? field.examples[0]
+        : field.example;
+      return [
+        {
+          name,
+          type,
+          description:
+            typeof field.description === "string" ? field.description : "",
+          required: required.includes(name),
+          ...(example !== undefined ? { example } : {}),
+        },
+      ];
+    },
+  );
+}
+
+export function functionApprovalSummary(
+  args: unknown,
+): FunctionApprovalSummary {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return {
+      purpose: null,
+      inputs: null,
+      outputs: null,
+      inputExample: null,
+      outputExample: null,
+    };
+  }
+  const fields = args as Record<string, unknown>;
+  const inputSchema = fields.input_schema;
+  const outputSchema = fields.output_schema;
+  const purpose =
+    typeof inputSchema === "object" &&
+    inputSchema !== null &&
+    !Array.isArray(inputSchema) &&
+    typeof (inputSchema as Record<string, unknown>).description === "string"
+      ? String((inputSchema as Record<string, unknown>).description)
+      : null;
+  return {
+    purpose,
+    inputs: schemaFields(inputSchema),
+    outputs: schemaFields(outputSchema),
+    inputExample: readableSchemaExample(inputSchema),
+    outputExample: readableSchemaExample(outputSchema),
+  };
+}
+
+export function isFunctionDefinitionApproval(toolName: string): boolean {
+  return (
+    toolName === "create_project_function" ||
+    toolName === "update_project_function"
+  );
+}
+
+export function functionApprovalName(args: unknown): string {
+  if (
+    typeof args === "object" &&
+    args !== null &&
+    !Array.isArray(args) &&
+    typeof (args as Record<string, unknown>).name === "string"
+  ) {
+    return String((args as Record<string, unknown>).name);
+  }
+  if (
+    typeof args === "object" &&
+    args !== null &&
+    !Array.isArray(args) &&
+    typeof (args as Record<string, unknown>).function_id === "string"
+  ) {
+    return `Function ${String((args as Record<string, unknown>).function_id)}`;
+  }
+  return "Python Function";
+}
+
+export function functionApprovalTechnicalDetails(args: unknown): string {
+  return JSON.stringify(args, null, 2) ?? "No proposal details available.";
+}
 
 export interface ProposedFileReview {
   kind: "diff" | "preview";
@@ -15,6 +178,12 @@ export interface ProposedFileReview {
 }
 
 export function approvalLabel(toolName: string): string {
+  if (toolName === "create_project_function")
+    return "Approve new Python Function";
+  if (toolName === "update_project_function")
+    return "Approve Python Function revision";
+  if (toolName === "delete_project_function")
+    return "Approve Python Function deletion";
   if (toolName === "write_file" || toolName === "edit_file") {
     return "Approve Project File change";
   }

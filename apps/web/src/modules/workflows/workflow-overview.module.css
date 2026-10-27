@@ -358,6 +358,61 @@
   font-size: 14px;
 }
 
+.output h4 {
+  margin: 18px 0 8px;
+  color: var(--text-strong);
+  font-size: var(--font-size-label);
+}
+
+.bindingReviewList,
+.bindingValueList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bindingReviewList > li {
+  min-width: 0;
+  padding: 10px;
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+}
+
+.bindingReviewList p {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.bindingValueList > li {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.3fr);
+  align-items: start;
+  gap: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.bindingValueList strong,
+.bindingValueList code {
+  overflow-wrap: anywhere;
+}
+
+.bindingUnavailable {
+  color: var(--danger);
+}
+
+.output details {
+  margin-top: 8px;
+}
+
+.output summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--font-size-label);
+}
+
 .output p {
   margin: 6px 0 14px;
   font-size: var(--font-size-label);
@@ -379,126 +434,34 @@
   overflow-wrap: anywhere;
 }
 
-.graphCanvas {
-  position: relative;
+.graphExperience {
   display: grid;
-  grid-auto-rows: 120px;
-  grid-template-columns: repeat(auto-fit, 196px);
-  column-gap: 46px;
-  max-width: 100%;
-  overflow-x: auto;
-  padding: 0 2px 10px;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
 }
 
-.graphEdges {
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-  overflow: visible;
-  color: var(--accent);
-  pointer-events: none;
+.graphWithInspector {
+  grid-template-columns: minmax(0, 1.6fr) minmax(310px, 0.9fr);
 }
 
-.graphEdges path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-}
-
-.graphNode {
-  z-index: 1;
-  display: grid;
-  width: 196px;
-  min-height: 104px;
-  align-self: center;
-  align-content: start;
-  gap: 8px;
-  padding: 14px;
+.graphInspector {
+  min-width: 0;
+  max-height: clamp(450px, 57vh, 720px);
+  overflow: auto;
+  padding: 0 16px 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
-  background: var(--surface);
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.graphNode[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: var(--surface-selected);
-}
-
-.graphNode strong {
-  overflow-wrap: anywhere;
-  color: var(--text-strong);
-}
-
-.nodeType,
-.nodeStatus {
-  color: var(--text-subtle);
-  font-size: 11px;
-}
-
-.nodeType {
-  color: var(--accent);
-  font-weight: 750;
-}
-
-.edgeList {
-  display: grid;
-  gap: 8px;
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-  display: none;
-}
-
-.edgeList li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-subtle);
-  font-size: var(--font-size-label);
-}
-
-.edgeList code {
-  color: var(--text-muted);
-  font:
-    11px ui-monospace,
-    monospace;
-}
-
-.edgeArrow {
-  width: 20px;
-  height: 1px;
-  background: var(--accent);
-}
-
-.lineage {
-  padding-top: 24px;
-  border-top: 1px solid var(--line-subtle);
-}
-
-.lineage .sectionHeading button {
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
   background: var(--surface-raised);
-  color: var(--text-subtle);
-  cursor: pointer;
 }
 
-.lineageSources {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
-  gap: 14px;
-}
-
-.lineageSources > div {
-  display: grid;
-  align-content: start;
-  gap: 8px;
+.graphInspector .lineageActions {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  justify-content: flex-end;
+  padding: 12px 0;
+  background: var(--surface-raised);
 }
 
 .empty {
@@ -586,38 +549,12 @@
     max-width: none;
   }
 
-  .graphCanvas {
-    order: 2;
-    display: flex;
-    height: auto !important;
-    width: 100% !important;
-    flex-direction: column;
-    gap: 12px;
-    overflow: visible;
+  .graphWithInspector {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .graphSection {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .graphEdges {
-    display: none;
-  }
-
-  .graphNode {
-    width: 100%;
-    min-height: 90px;
-  }
-
-  .edgeList li {
-    display: grid;
-    grid-template-columns: 1fr auto 18px 1fr auto;
-  }
-
-  .edgeList {
-    display: grid;
-    order: 1;
+  .graphInspector {
+    max-height: none;
   }
 }
 

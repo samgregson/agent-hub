@@ -147,6 +147,7 @@
 }
 
 .mobileNavigationToggle,
+.mobileWorkflowShortcut,
 .mobileNavigationDrawer,
 .mobileNavigationBackdrop,
 .mobileReturnToChat {
@@ -530,6 +531,25 @@
   padding: clamp(28px, 6vw, 64px);
 }
 
+.workflowEntryAction {
+  justify-self: start;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--font-size-label);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.workflowEntryAction:hover,
+.workflowEntryAction:focus-visible {
+  filter: brightness(1.08);
+}
+
 .chat h1 {
   margin: 12px 0 20px;
   font-size: clamp(32px, 4vw, 54px);
@@ -573,6 +593,11 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .shell.workflowOpen {
+    grid-template-areas: "title" "chat";
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .shell.explorerOpen .chat {
     display: block;
   }
@@ -601,6 +626,28 @@
     color: var(--accent-ink);
     font-size: var(--font-size-label);
     font-weight: 800;
+  }
+
+  .mobileWorkflowShortcut {
+    display: inline-flex;
+    min-height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-control);
+    background: var(--surface-raised);
+    color: var(--text-strong);
+    font-size: var(--font-size-label);
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .mobileWorkflowShortcut:hover,
+  .mobileWorkflowShortcut:focus-visible {
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .mobileNavigationToggle::before {
@@ -739,7 +786,8 @@
 
   .titlebar {
     min-height: 44px;
-    gap: 8px;
+    gap: 6px;
+    padding: 0 10px;
   }
 
   .projectPicker {
@@ -750,6 +798,17 @@
   .projectPicker select {
     width: 100%;
     min-width: 0;
+    padding-right: 22px;
+    padding-left: 8px;
+    font-size: 12px;
+  }
+
+  .mobileNavigationToggle,
+  .mobileWorkflowShortcut {
+    min-height: 40px;
+    padding-right: 8px;
+    padding-left: 8px;
+    font-size: 12px;
   }
 
   .newProjectDialogBackdrop {
