@@ -67,7 +67,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     "plugin_id": "foundation-fixture",
                     "tool_name": "create_status_artifact",
-                    "arguments_json": '{"title":"Bridge status"}',
+                    "arguments": {"title": "Bridge status"},
                 },
             )
         if command == "foundation:edit-artifact":
@@ -92,7 +92,7 @@ class Handler(BaseHTTPRequestHandler):
                         "artifact_id": document["artifact"]["id"],
                         "expected_version": document["artifact"]["documentVersion"],
                         "tool_name": "set_status_artifact_status",
-                        "arguments_json": '{"status":"unavailable"}',
+                        "arguments": {"status": "unavailable"},
                     },
                 )
         if tool_results:

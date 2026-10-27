@@ -1,6 +1,8 @@
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Self, cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,6 +10,7 @@ from deepagents.middleware._fs_interrupt import _build_interrupt_on_from_permiss
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 import agent_hub_api.modules.agent_execution._deep_agent as deep_agent
 from agent_hub_api.modules.agent_execution._deep_agent import (
@@ -36,6 +39,74 @@ from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowRunModule,
 )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_open_calls_serialize_checkpointer_setup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_calls = 0
+    active_setups = 0
+    max_active_setups = 0
+    database_lock = asyncio.Lock()
+
+    class Checkpointer:
+        async def execute(self, query: str, _params: object) -> None:
+            if "pg_advisory_lock" in query:
+                await database_lock.acquire()
+            elif "pg_advisory_unlock" in query:
+                database_lock.release()
+
+        async def setup(self) -> None:
+            nonlocal setup_calls
+            nonlocal active_setups
+            nonlocal max_active_setups
+            setup_calls += 1
+            active_setups += 1
+            max_active_setups = max(max_active_setups, active_setups)
+            await asyncio.sleep(0.01)
+            active_setups -= 1
+
+    @asynccontextmanager
+    async def from_conn_string(_connection_string: str) -> Any:
+        yield Checkpointer()
+
+    class FakeConnection:
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def execute(self, query: str, params: object) -> None:
+            await Checkpointer().execute(query, params)
+
+    async def connect(*_args: Any, **_kwargs: Any) -> FakeConnection:
+        return FakeConnection()
+
+    monkeypatch.setattr(AsyncPostgresSaver, "from_conn_string", staticmethod(from_conn_string))
+    monkeypatch.setattr(deep_agent, "AsyncConnection", SimpleNamespace(connect=connect))
+    monkeypatch.setattr(deep_agent, "ChatOpenAI", lambda **_kwargs: object())
+
+    def make_runner() -> PostgresDeepAgentRunner:
+        runner = cast(Any, object.__new__(PostgresDeepAgentRunner))
+        runner._settings = SimpleNamespace(
+            openai_api_key="test-key",
+            openai_model="test-model",
+            database_url="postgresql://unused",
+        )
+        runner._stack = None
+        runner._checkpointer = None
+        runner._model = None
+        runner._open_lock = asyncio.Lock()
+        return cast(PostgresDeepAgentRunner, runner)
+
+    first = make_runner()
+    second = make_runner()
+    await asyncio.gather(first.open(), first.open(), second.open())
+
+    assert setup_calls == 2
+    assert max_active_setups == 1
 
 
 def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:
