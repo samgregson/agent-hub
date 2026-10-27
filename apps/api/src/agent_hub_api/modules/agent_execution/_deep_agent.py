@@ -21,6 +21,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from psycopg import AsyncConnection
 
 from agent_hub_api.modules.agent_execution._ag_ui import (
     AgentHubLangGraphAgent,
@@ -150,6 +151,8 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
     )
 )
 
+_CHECKPOINTER_SETUP_LOCK_ID = 0x4147454E54485542
+
 
 def _without_image_data(value: Any) -> Any:
     """Keep image metadata in ordinary tool output and load pixels only on request."""
@@ -242,7 +245,19 @@ class PostgresDeepAgentRunner:
             checkpointer = await stack.enter_async_context(
                 AsyncPostgresSaver.from_conn_string(str(self._settings.database_url))
             )
-            await checkpointer.setup()
+            connection = await AsyncConnection.connect(
+                str(self._settings.database_url), autocommit=True
+            )
+            async with connection:
+                await connection.execute(
+                    "SELECT pg_advisory_lock(%s)", (_CHECKPOINTER_SETUP_LOCK_ID,)
+                )
+                try:
+                    await checkpointer.setup()
+                finally:
+                    await connection.execute(
+                        "SELECT pg_advisory_unlock(%s)", (_CHECKPOINTER_SETUP_LOCK_ID,)
+                    )
             model = ChatOpenAI(
                 api_key=self._settings.openai_api_key,
                 model=self._settings.openai_model,
