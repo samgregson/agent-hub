@@ -70,9 +70,7 @@ class FunctionExecutionError(Exception):
         traceback = self.diagnostic.get("traceback") if self.diagnostic else None
         stderr = self.diagnostic.get("stderr") if self.diagnostic else None
         details = [
-            value
-            for value in (message, traceback, stderr)
-            if isinstance(value, str) and value
+            value for value in (message, traceback, stderr) if isinstance(value, str) and value
         ]
         details_text = "\n".join(details)
         super().__init__(f"{code}: {details_text}" if details_text else code)
