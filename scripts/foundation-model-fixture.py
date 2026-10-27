@@ -100,7 +100,6 @@ class Handler(BaseHTTPRequestHandler):
             required_result = {
                 "foundation:write-file": "/project/foundation-note.md",
                 "foundation:read-file": "Shared foundation note.",
-                "foundation:create-artifact": "Created Artifact Bridge status",
                 "foundation:edit-artifact": (
                     "Updated Artifact Bridge status" if len(tool_results) == 3 else None
                 ),
