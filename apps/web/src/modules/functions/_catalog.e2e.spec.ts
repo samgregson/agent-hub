@@ -10,7 +10,21 @@ const project = {
 const source =
   "def transform(inputs, parameters):\n    return {'value': inputs['load'] * parameters['factor']}\n";
 
-async function prepareFunctionWorkbench(page: Page) {
+async function prepareFunctionWorkbench(
+  page: Page,
+  inputSchema: Record<string, unknown> = {
+    type: "object",
+    description: "Double one load value and return the result.",
+    properties: {
+      load: {
+        type: "number",
+        minimum: 0,
+        description: "Load in kilonewtons.",
+      },
+    },
+    required: ["load"],
+  },
+) {
   await page.route("**/api/projects", (route) =>
     route.fulfill({ json: [project] }),
   );
@@ -27,12 +41,13 @@ async function prepareFunctionWorkbench(page: Page) {
           id: "function-1",
           name: "Double load",
           source,
-          inputSchema: {
+          inputSchema,
+          outputSchema: {
             type: "object",
-            properties: { load: { type: "number" } },
-            required: ["load"],
+            properties: {
+              value: { type: "number", description: "Calculated result." },
+            },
           },
-          outputSchema: { type: "object" },
           runtime: "deno:2.9.7;pyodide:314.0.7",
           packageHash: "package-hash",
           revision: 2,
@@ -62,6 +77,8 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
 }) => {
   const previews: Array<Record<string, unknown>> = [];
   let previewCount = 0;
+  let releaseSlowPreview = () => {};
+  let slowPreviewRequested = false;
   await prepareFunctionWorkbench(page);
   await page.route(
     `**/api/projects/${project.id}/functions/function-1/preview`,
@@ -69,6 +86,10 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
       previews.push(route.request().postDataJSON() as Record<string, unknown>);
       previewCount += 1;
       if (previewCount === 1) {
+        await new Promise<void>((resolve) => {
+          releaseSlowPreview = resolve;
+          slowPreviewRequested = true;
+        });
         await route.fulfill({
           json: {
             output: { value: 8 },
@@ -78,9 +99,19 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
         });
         return;
       }
+      if (previewCount === 2) {
+        await route.fulfill({
+          status: 504,
+          json: { detail: "Preview exceeded the time limit." },
+        });
+        return;
+      }
       await route.fulfill({
-        status: 504,
-        json: { detail: "Preview exceeded the time limit." },
+        json: {
+          output: { value: 10 },
+          runtime: "deno:2.9.7;pyodide:314.0.7",
+          sourceHash: "sha256:source-2",
+        },
       });
     },
   );
@@ -88,9 +119,21 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
   await expect(
     surface.getByRole("heading", { name: "Double load", exact: true }),
   ).toBeVisible();
-  await surface.getByLabel("Function inputs (JSON object)").fill('{"load":4}');
+  await expect(
+    surface.getByRole("region", { name: "Function contract" }),
+  ).toContainText("Double one load value and return the result.");
+  await expect(
+    surface.getByRole("region", { name: "Function contract" }),
+  ).toContainText("Load in kilonewtons.");
+  await surface.getByLabel("load · required").fill("4");
   await surface.getByLabel("Parameters (JSON object)").fill('{"factor":2}');
   await surface.getByRole("button", { name: "Preview output" }).click();
+  await expect.poll(() => slowPreviewRequested).toBe(true);
+  await page.waitForTimeout(5_200);
+  await expect(surface.getByRole("status")).toContainText(
+    "taking longer than usual",
+  );
+  releaseSlowPreview();
 
   const preview = surface.getByRole("region", { name: "Preview output" });
   await expect(preview).toContainText("Preview · transient, not saved");
@@ -103,16 +146,95 @@ test("Function preview shows its captured source, inputs, and host runtime", asy
   await expect(preview).toContainText('"load": 4');
   await expect(preview).toContainText('"factor": 2');
   await expect(preview).toContainText('"value": 8');
-  expect(previews).toEqual([
-    { inputs: { load: 4 }, parameters: { factor: 2 } },
-  ]);
-
-  await surface.getByLabel("Function inputs (JSON object)").fill('{"load":5}');
+  await surface.getByLabel("load · required").fill("5");
   await expect(preview).toHaveCount(0);
   await surface.getByRole("button", { name: "Preview output" }).click();
   await expect(surface.locator("p[role=alert]")).toContainText(
     "Preview exceeded the time limit.",
   );
+  await expect(surface.getByLabel("load · required")).toHaveValue("5");
+  await surface.getByRole("button", { name: "Retry preview" }).click();
+  await expect(
+    surface.getByRole("region", { name: "Preview output" }),
+  ).toContainText('"value": 10');
+  expect(previews).toEqual([
+    { inputs: { load: 4 }, parameters: { factor: 2 } },
+    { inputs: { load: 5 }, parameters: { factor: 2 } },
+    { inputs: { load: 5 }, parameters: { factor: 2 } },
+  ]);
+});
+
+test("Function preview explains invalid schema-driven values beside the field", async ({
+  page,
+}) => {
+  let previewCalls = 0;
+  await prepareFunctionWorkbench(page);
+  await page.route(
+    `**/api/projects/${project.id}/functions/function-1/preview`,
+    async (route) => {
+      previewCalls += 1;
+      await route.fulfill({
+        json: { output: { value: 0 }, runtime: "test", sourceHash: "hash" },
+      });
+    },
+  );
+  const surface = await openFunctions(page, false);
+  await surface.getByLabel("load · required").fill("-1");
+  await surface.getByRole("button", { name: "Preview output" }).click();
+  await expect(surface.getByText("Use 0 or more.")).toBeVisible();
+  expect(previewCalls).toBe(0);
+});
+
+test("Function preview form edits nested objects and arrays without JSON", async ({
+  page,
+}) => {
+  let capturedInputs: unknown;
+  await prepareFunctionWorkbench(page, {
+    type: "object",
+    description: "Summarize the named site and its loads.",
+    properties: {
+      site: {
+        type: "object",
+        description: "Site details.",
+        properties: {
+          name: { type: "string", description: "Name shown in the report." },
+        },
+        required: ["name"],
+      },
+      loads: {
+        type: "array",
+        description: "Loads to include.",
+        minItems: 1,
+        items: {
+          type: "number",
+          minimum: 0,
+          description: "Load in kilonewtons.",
+        },
+      },
+    },
+    required: ["site", "loads"],
+  });
+  await page.route(
+    `**/api/projects/${project.id}/functions/function-1/preview`,
+    async (route) => {
+      capturedInputs = route.request().postDataJSON().inputs;
+      await route.fulfill({
+        json: { output: { value: 1 }, runtime: "test", sourceHash: "hash" },
+      });
+    },
+  );
+  const surface = await openFunctions(page, false);
+  await surface.getByLabel("name · required").fill("North site");
+  await surface.getByRole("button", { name: "Add item" }).click();
+  await surface.getByLabel("Item 3 · required").fill("12.5");
+  await surface.getByRole("button", { name: "Preview output" }).click();
+  await expect(
+    surface.getByRole("region", { name: "Preview output" }),
+  ).toBeVisible();
+  expect(capturedInputs).toEqual({
+    site: { name: "North site" },
+    loads: [0, 1, 12.5],
+  });
 });
 
 test("Function preview workbench remains reachable at phone width", async ({

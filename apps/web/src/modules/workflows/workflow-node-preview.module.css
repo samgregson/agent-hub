@@ -1,0 +1,250 @@
+.preview {
+  container-type: inline-size;
+  margin: 0 0 32px;
+  padding: 22px 0 0;
+  border-top: 1px solid var(--line-subtle);
+  color: var(--text);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.header h2 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 18px;
+  letter-spacing: -0.015em;
+}
+
+.header p {
+  margin: 5px 0 0;
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+  overflow-wrap: anywhere;
+}
+
+.mapTag {
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  color: var(--text-subtle);
+  font-size: var(--font-size-label);
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(16px, 3vw, 32px);
+}
+
+.port {
+  display: grid;
+  align-content: start;
+  gap: 11px;
+  min-width: 0;
+}
+
+.portHeading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 28px;
+}
+
+.portHeading h3 {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.inputMark,
+.outputMark {
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+}
+
+.outputMark {
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.value {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.valueHeading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.valueHeading strong {
+  color: var(--text-strong);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.valueHeading span {
+  color: var(--text-subtle);
+  font-size: 11px;
+  text-align: right;
+}
+
+.fields {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.fields > div {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.fields dt {
+  color: var(--text-subtle);
+  overflow-wrap: anywhere;
+}
+
+.fields dd {
+  margin: 0;
+  color: var(--text);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.fields p,
+.truncation {
+  margin: 2px 0 0;
+  color: var(--text-subtle);
+  font-size: 11px;
+}
+
+.primitive {
+  margin: 0;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.valueList {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.valueList li {
+  overflow-wrap: anywhere;
+}
+
+.tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+
+.tableWrap th,
+.tableWrap td {
+  max-width: 220px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableWrap th {
+  color: var(--text-subtle);
+  font-weight: 650;
+}
+
+.detail {
+  margin-top: 10px;
+}
+
+.detail summary {
+  width: fit-content;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: var(--font-size-label);
+}
+
+.detail summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.detail pre {
+  max-height: 260px;
+  margin: 8px 0 0;
+  overflow: auto;
+  padding: 12px;
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font:
+    12px/1.55 ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.state {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text-subtle);
+  line-height: 1.5;
+}
+
+.error {
+  padding: 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-control);
+  color: var(--danger);
+}
+
+.error p {
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .header {
+    flex-wrap: wrap;
+  }
+}
+
+@container (max-width: 560px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

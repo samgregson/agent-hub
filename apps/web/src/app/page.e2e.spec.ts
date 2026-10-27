@@ -260,6 +260,7 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
           definitionId: "filter-function",
           revision: 1,
           source: "def transform(record, parameters): return record",
+          sourceHash: "sha256:map-function",
           mapInput: "record",
           inputSchema: {
             type: "object",
@@ -289,6 +290,13 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
                 title: "Passed",
                 description: "Whether the item passed",
               },
+              check_status: {
+                type: "string",
+                title: "Check status",
+                description: "Outcome of the engineering check",
+              },
+              source_code: { type: "string", title: "Source code" },
+              source_hash: { type: "string", title: "Source hash" },
             },
           },
         },
@@ -322,7 +330,24 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
               itemId: "LC-1",
               input: { id: "LC-1", load: 12.5 },
               status: "succeeded",
-              output: { pass: true },
+              output: {
+                pass: true,
+                check_status: "passes",
+                source_code: "def calculate(): return 42",
+                source_hash: "sha256:fixture",
+              },
+            },
+            {
+              index: 1,
+              itemId: "LC-2",
+              input: { id: "LC-2", load: 20 },
+              status: "failed",
+              output: {
+                pass: false,
+                check_status: "fails",
+                source_code: "def calculate(): return 0",
+                source_hash: "sha256:failed",
+              },
             },
           ],
         },
@@ -522,21 +547,42 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     page.getByRole("region", { name: "Workflow graph" }),
   ).toContainText("Map");
   await page.getByRole("button", { name: "Inspect screen" }).click();
+  const mapResults = page.getByRole("region", { name: "Mapped item results" });
+  const mapTable = mapResults.getByRole("table");
+  await expect(mapTable).toContainText("LC-1");
+  await expect(mapTable).toContainText("LC-2");
+  await expect(mapTable).toContainText("passes");
+  await expect(mapTable).toContainText("fails");
+  await expect(mapTable).toContainText("Yes");
+  await expect(
+    mapTable.getByRole("columnheader", { name: "Source code" }),
+  ).toHaveCount(0);
+  await expect(
+    mapTable.getByRole("columnheader", { name: "Source hash" }),
+  ).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Node lineage" }),
   ).toContainText("LC-1");
-  await expect(
-    page.getByRole("region", { name: "Node lineage" }),
-  ).toContainText("Applied load");
   await page
     .getByRole("region", { name: "Mapped item results" })
     .getByRole("button", { name: "Preview" })
+    .first()
     .click();
   await expect(
     page.getByRole("region", { name: "Node lineage" }),
   ).toContainText("Inputs");
   await expect(page.getByRole("dialog", { name: "LC-1" })).toContainText(
     "12.5",
+  );
+  await expect(page.getByRole("dialog", { name: "LC-1" })).toContainText(
+    "Applied load",
+  );
+  await page
+    .getByRole("dialog", { name: "LC-1" })
+    .getByText("Technical details and provenance")
+    .click();
+  await expect(page.getByRole("dialog", { name: "LC-1" })).toContainText(
+    "sha256:map-function",
   );
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
@@ -556,6 +602,7 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await page
     .getByRole("region", { name: "Mapped item results" })
     .getByRole("button", { name: "Preview" })
+    .first()
     .click();
   await page.getByRole("button", { name: "Open MCP App" }).click();
   const mcpPreview = page.frameLocator(
@@ -646,6 +693,17 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(
     page.getByRole("list", { name: "Workflow dependencies" }),
   ).toContainText("calculate");
+  await page.getByRole("button", { name: "Inspect screen" }).click();
+  await expect(
+    page.getByRole("region", { name: "Mapped item results" }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth === window.innerWidth,
+      ),
+    )
+    .toBe(true);
   await page.getByRole("button", { name: "Edit Workflow" }).click();
   await expect(
     page.getByRole("region", { name: "Edit Workflow Definition" }),
@@ -804,6 +862,21 @@ test("a Project Workflow can be created from Library and Functions", async ({
   await page.getByLabel("Value comes from").nth(2).selectOption("literal");
   await page.getByLabel("Input port").nth(2).fill("factor");
   await page.getByLabel("Literal for binding 3").fill("2");
+  await expect(
+    page.getByText(
+      "Dataset · Loads · whole value → Function · Calculate loads · Map item items",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Workflow Input · input1 · whole value → Function · Calculate loads · Shared input label",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "Literal value · whole value → Function · Calculate loads · Shared input factor",
+    ),
+  ).toBeVisible();
   await page
     .getByRole("region", { name: "Workflow outputs editor" })
     .getByLabel("From node")

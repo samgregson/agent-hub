@@ -694,9 +694,7 @@ class PostgresDeepAgentRunner:
                     "Correct graph_json using the named node, reference, schema, or binding, then "
                     "retry once.",
                 )
-            return json.dumps(
-                {"workflowId": item.id, "name": item.name, "version": item.version}
-            )
+            return json.dumps({"workflowId": item.id, "name": item.name, "version": item.version})
 
         @tool
         async def revise_project_workflow(
@@ -730,9 +728,7 @@ class PostgresDeepAgentRunner:
                     "Call list_project_workflows, then retry with the exact Workflow ID and "
                     "current version returned by that tool.",
                 )
-            return json.dumps(
-                {"workflowId": item.id, "name": item.name, "version": item.version}
-            )
+            return json.dumps({"workflowId": item.id, "name": item.name, "version": item.version})
 
         tools: list[BaseTool] = [
             list_project_workflows,
@@ -998,7 +994,11 @@ class PostgresDeepAgentRunner:
             """Create a saved Python Function after approval. It can be used by Workflow nodes.
 
             source defines transform(inputs, parameters). Pass input_schema and output_schema
-            as JSON Schema objects. Workflow edges provide the named inputs.
+            as JSON Schema objects. Put a concise statement of what the Function does in
+            input_schema.description. Describe every input and output property in its own
+            description, including units and expected shape when known. Include types, required
+            fields, useful numeric/string bounds, and an example that satisfies the contract.
+            Workflow edges provide the named inputs.
             """
             try:
                 item = await functions.define(
@@ -1035,7 +1035,12 @@ class PostgresDeepAgentRunner:
             input_schema: dict[str, Any],
             output_schema: dict[str, Any],
         ) -> str:
-            """Revise a saved Python Function after approval and return its current revision."""
+            """Revise a saved Python Function after approval and return its current revision.
+
+            Keep input_schema.description useful as the Function purpose. Describe every input
+            and output property, including units and expected shape when known; include types,
+            required fields, useful bounds, and examples that satisfy the declared contract.
+            """
             try:
                 item = await functions.revise(
                     access,
