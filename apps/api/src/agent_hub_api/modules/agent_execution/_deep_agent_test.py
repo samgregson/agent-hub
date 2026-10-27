@@ -1,4 +1,6 @@
+import asyncio
 import json
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -8,6 +10,7 @@ from deepagents.middleware._fs_interrupt import _build_interrupt_on_from_permiss
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 import agent_hub_api.modules.agent_execution._deep_agent as deep_agent
 from agent_hub_api.modules.agent_execution._deep_agent import (
@@ -36,6 +39,43 @@ from agent_hub_api.modules.workflows import (
     WorkflowDefinitionModule,
     WorkflowRunModule,
 )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_open_calls_initialize_the_checkpointer_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_calls = 0
+
+    class Checkpointer:
+        async def setup(self) -> None:
+            nonlocal setup_calls
+            setup_calls += 1
+            await asyncio.sleep(0.01)
+
+    checkpointer = Checkpointer()
+
+    @classmethod
+    @asynccontextmanager
+    async def from_conn_string(cls: object, _connection_string: str) -> Any:
+        yield checkpointer
+
+    monkeypatch.setattr(AsyncPostgresSaver, "from_conn_string", from_conn_string)
+    monkeypatch.setattr(deep_agent, "ChatOpenAI", lambda **_kwargs: object())
+    runner = object.__new__(PostgresDeepAgentRunner)
+    runner._settings = SimpleNamespace(
+        openai_api_key="test-key",
+        openai_model="test-model",
+        database_url="postgresql://unused",
+    )
+    runner._stack = None
+    runner._checkpointer = None
+    runner._model = None
+    runner._open_lock = asyncio.Lock()
+
+    await asyncio.gather(runner.open(), runner.open())
+
+    assert setup_calls == 1
 
 
 def test_project_file_writes_interrupt_but_scratch_writes_do_not() -> None:

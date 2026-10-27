@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack
@@ -221,32 +222,34 @@ class PostgresDeepAgentRunner:
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
         self._model: ChatOpenAI | None = None
+        self._open_lock = asyncio.Lock()
 
     async def open(self) -> None:
-        if self._stack is not None:
-            return
-        if self._settings.openai_api_key is None:
-            raise RuntimeError("AGENT_HUB_OPENAI_API_KEY is required to run the agent")
+        async with self._open_lock:
+            if self._stack is not None:
+                return
+            if self._settings.openai_api_key is None:
+                raise RuntimeError("AGENT_HUB_OPENAI_API_KEY is required to run the agent")
 
-        try:
-            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-        except ImportError as error:
-            raise RuntimeError(
-                "langgraph-checkpoint-postgres must be installed to run the agent"
-            ) from error
+            try:
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+            except ImportError as error:
+                raise RuntimeError(
+                    "langgraph-checkpoint-postgres must be installed to run the agent"
+                ) from error
 
-        stack = AsyncExitStack()
-        checkpointer = await stack.enter_async_context(
-            AsyncPostgresSaver.from_conn_string(str(self._settings.database_url))
-        )
-        await checkpointer.setup()
-        model = ChatOpenAI(
-            api_key=self._settings.openai_api_key,
-            model=self._settings.openai_model,
-        )
-        self._checkpointer = checkpointer
-        self._model = model
-        self._stack = stack
+            stack = AsyncExitStack()
+            checkpointer = await stack.enter_async_context(
+                AsyncPostgresSaver.from_conn_string(str(self._settings.database_url))
+            )
+            await checkpointer.setup()
+            model = ChatOpenAI(
+                api_key=self._settings.openai_api_key,
+                model=self._settings.openai_model,
+            )
+            self._checkpointer = checkpointer
+            self._model = model
+            self._stack = stack
 
     async def _agent_for(
         self,
