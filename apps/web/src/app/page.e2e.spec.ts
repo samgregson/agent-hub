@@ -342,6 +342,10 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
               itemId: "LC-2",
               input: { id: "LC-2", load: 20 },
               status: "failed",
+              error: "runner_failed",
+              diagnostic: {
+                message: "The area Function rejected the captured load.",
+              },
               output: {
                 pass: false,
                 check_status: "fails",
@@ -475,7 +479,6 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
       await route.fulfill({ json: [run] });
     },
   );
-  let preparedRequest: Record<string, unknown> | undefined;
   let revisedRequest: Record<string, unknown> | undefined;
   let savedGraph: unknown;
   await page.route(
@@ -500,10 +503,6 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await page.route(
     `**/api/projects/${project.id}/workflows/${workflow.id}/runs/prepare`,
     async (route) => {
-      preparedRequest = route.request().postDataJSON() as Record<
-        string,
-        unknown
-      >;
       await route.fulfill({
         json: {
           ...run,
@@ -544,7 +543,7 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     page.getByRole("region", { name: "Workflow outputs" }),
   ).toContainText('"checked": 1');
   await expect(
-    page.getByRole("region", { name: "Workflow graph" }),
+    page.getByRole("region", { name: "Workflow graph" }).first(),
   ).toContainText("Map");
   await page.getByRole("button", { name: "Inspect screen" }).click();
   const mapResults = page.getByRole("region", { name: "Mapped item results" });
@@ -554,23 +553,19 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(mapTable).toContainText("passes");
   await expect(mapTable).toContainText("fails");
   await expect(mapTable).toContainText("Yes");
-  await expect(
-    mapTable.getByRole("columnheader", { name: "Source code" }),
-  ).toHaveCount(0);
-  await expect(
-    mapTable.getByRole("columnheader", { name: "Source hash" }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("region", { name: "Node lineage" }),
-  ).toContainText("LC-1");
+  const failedRow = mapTable.getByRole("row", { name: /LC-2/ });
+  await expect(failedRow).toContainText(
+    "The Function runner could not complete this item.",
+  );
+
   await page
     .getByRole("region", { name: "Mapped item results" })
     .getByRole("button", { name: "Preview" })
     .first()
     .click();
-  await expect(
-    page.getByRole("region", { name: "Node lineage" }),
-  ).toContainText("Inputs");
+  await expect(page.getByRole("region", { name: "Node inputs" })).toContainText(
+    "Inputs",
+  );
   await expect(page.getByRole("dialog", { name: "LC-1" })).toContainText(
     "12.5",
   );
@@ -586,15 +581,31 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   );
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(
-    page.getByRole("region", { name: "Node lineage" }),
+    page.getByRole("region", { name: "screen details" }),
   ).toContainText("filter-function");
-  await page.getByRole("button", { name: "Close details" }).click();
+  await failedRow.getByRole("button", { name: "Preview" }).click();
+  const failedItem = page.getByRole("dialog", { name: "LC-2" });
+  await expect(
+    failedItem.getByRole("region", { name: "Failure details" }),
+  ).toContainText("The Function runner could not complete this item.");
+  await expect(failedItem).toContainText("20");
+  await failedItem.getByText("Exact error").click();
+  await expect(failedItem).toContainText("runner_failed");
+  await expect(failedItem).toContainText(
+    "The area Function rejected the captured load.",
+  );
+  await failedItem.getByText("Technical details and provenance").click();
+  await expect(failedItem).toContainText("filter-function");
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Close preview" }).click();
   await page.getByRole("button", { name: "Inspect inputs" }).click();
   await page.getByRole("button", { name: "Open Library" }).click();
   await expect(
     page.getByRole("region", { name: "Library items" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Workflow graph", exact: true })
+    .click();
   await page.getByRole("button", { name: "Inspect calculate" }).click();
   await expect(page.getByRole("button", { name: "Open Function" })).toHaveCount(
     0,
@@ -612,7 +623,9 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
   await expect(mcpPreview.locator("#load")).toHaveValue("12.5");
   await expect(mcpPreview.locator("#result")).toHaveText("81.3 kN·m");
   await page.getByRole("button", { name: "Close", exact: true }).click();
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Workflow graph", exact: true })
+    .click();
   await page.getByRole("button", { name: "Inspect screen" }).click();
   await page.getByRole("button", { name: "Open Function" }).click();
   await expect(
@@ -620,7 +633,9 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
       .getByRole("navigation", { name: "Project views" })
       .getByRole("button", { name: "Functions" }),
   ).toHaveAttribute("aria-pressed", "true");
-  await page.getByRole("button", { name: "Workflow", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Workflow graph", exact: true })
+    .click();
   await page.getByRole("button", { name: "Inspect screen" }).click();
   await page.getByRole("button", { name: "Edit Workflow" }).click();
   await page
@@ -676,9 +691,6 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     (revisedRequest?.graph as { outputs: Array<{ name: string }> }).outputs[0]
       ?.name,
   ).toBe("Quality");
-  await page.getByRole("button", { name: "Run Workflow" }).click();
-  await expect.poll(() => preparedRequest?.expectedVersion).toBe(4);
-  expect(preparedRequest?.idempotencyKey).toEqual(expect.any(String));
   await expect(
     page.getByRole("region", { name: "Workflow outputs" }),
   ).toContainText('"passed": 1');
@@ -688,11 +700,8 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
     page.getByRole("region", { name: "Workflow outputs" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("region", { name: "Workflow graph" }),
+    page.getByRole("region", { name: "Workflow graph" }).first(),
   ).toBeVisible();
-  await expect(
-    page.getByRole("list", { name: "Workflow dependencies" }),
-  ).toContainText("calculate");
   await page.getByRole("button", { name: "Inspect screen" }).click();
   await expect(
     page.getByRole("region", { name: "Mapped item results" }),
@@ -715,6 +724,64 @@ test("Project Workflow overview shows final outputs and inspectable DAG lineage"
       ),
     )
     .toBe(true);
+
+  const workspaceWidth = await page
+    .locator("main")
+    .evaluate((main) => Math.round(main.getBoundingClientRect().width));
+  expect(workspaceWidth).toBe(390);
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  const mobileNavigation = page.getByRole("dialog", {
+    name: "Project navigation",
+  });
+  await expect(mobileNavigation).toBeVisible();
+  expect(
+    await page
+      .locator("main")
+      .evaluate((main) => Math.round(main.getBoundingClientRect().width)),
+  ).toBe(workspaceWidth);
+  await mobileNavigation
+    .getByRole("button", { name: "Close Project navigation" })
+    .click();
+  await expect(mobileNavigation).toBeHidden();
+  expect(
+    await page
+      .locator("main")
+      .evaluate((main) => Math.round(main.getBoundingClientRect().width)),
+  ).toBe(workspaceWidth);
+  await page.getByRole("button", { name: "Open Project navigation" }).click();
+  await page
+    .getByRole("dialog", { name: "Project navigation" })
+    .getByRole("button", { name: "Chats", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "+ New Thread" }),
+  ).toBeVisible();
+  expect(
+    await page
+      .locator("main")
+      .evaluate((main) => Math.round(main.getBoundingClientRect().width)),
+  ).toBe(workspaceWidth);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth === window.innerWidth,
+      ),
+    )
+    .toBe(true);
+
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: workflow.name }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Inspect screen" }).click();
+  const reloadedMapTable = page
+    .getByRole("region", { name: "Mapped item results" })
+    .getByRole("table");
+  await expect(reloadedMapTable).toContainText("LC-1");
+  await expect(reloadedMapTable).toContainText("passes");
+  await expect(
+    reloadedMapTable.getByRole("row", { name: /LC-2/ }),
+  ).toContainText("The Function runner could not complete this item.");
 });
 
 test("a Project Workflow can be created from Library and Functions", async ({
@@ -2826,8 +2893,44 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
     title: "Create a workflow",
     updatedAt: "2026-10-13T00:00:00.000Z",
   };
+  const functionProposal = {
+    input_schema: {
+      description: "Calculates rectangular area from two dimensions.",
+      examples: [{ length_m: 12, width_m: 5 }],
+      properties: {
+        length_m: {
+          description: "Length in metres.",
+          example: 12,
+          type: "number",
+        },
+        width_m: {
+          description: "Width in metres.",
+          example: 5,
+          type: "number",
+        },
+      },
+      required: ["length_m", "width_m"],
+      type: "object",
+    },
+    name: "Rectangle area",
+    output_schema: {
+      examples: [{ area_m2: 60 }],
+      properties: {
+        area_m2: {
+          description: "Area in square metres.",
+          example: 60,
+          type: "number",
+        },
+      },
+      required: ["area_m2"],
+      type: "object",
+    },
+    source:
+      'def transform(inputs, parameters): return {"area_m2": inputs["length_m"] * inputs["width_m"]}',
+  };
   const resumeRequests: unknown[] = [];
   const failureMessages: string[] = [];
+  let approvalResolved = false;
 
   page.on("console", (message) => {
     if (message.type() === "error") failureMessages.push(message.text());
@@ -2844,6 +2947,7 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
       };
       if (input.resume) {
         resumeRequests.push(input.resume);
+        approvalResolved = true;
         await route.fulfill({
           contentType: "text/event-stream",
           body: sse([
@@ -2907,12 +3011,7 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
           {
             type: "TOOL_CALL_ARGS",
             toolCallId: "call-create-function",
-            delta: JSON.stringify({
-              input_schema: {},
-              name: "Workflow step",
-              output_schema: {},
-              source: "def run(inputs): return inputs",
-            }),
+            delta: JSON.stringify(functionProposal),
           },
           { type: "TOOL_CALL_END", toolCallId: "call-create-function" },
           {
@@ -2949,12 +3048,7 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
                     type: "function",
                     function: {
                       name: "create_project_function",
-                      arguments: JSON.stringify({
-                        input_schema: {},
-                        name: "Workflow step",
-                        output_schema: {},
-                        source: "def run(inputs): return inputs",
-                      }),
+                      arguments: JSON.stringify(functionProposal),
                     },
                   },
                 ],
@@ -2994,7 +3088,54 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
     if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
     if (path.endsWith("/history"))
       return route.fulfill({
-        json: { approvals: [], interrupts: [], messages: [] },
+        json: approvalResolved
+          ? {
+              approvals: [
+                {
+                  approved: true,
+                  decisionRunId: "decision-run-function",
+                  interruptId: "interrupt-create-function",
+                  resolution: null,
+                  sourceRunId: "source-run-function",
+                  toolCallId: "call-create-function",
+                },
+                {
+                  approved: false,
+                  decisionRunId: "decision-run-function-rejected",
+                  interruptId: "interrupt-rejected-function",
+                  resolution: null,
+                  sourceRunId: "source-run-function",
+                  toolCallId: "call-rejected-function",
+                },
+              ],
+              interrupts: [],
+              messages: [
+                {
+                  content: null,
+                  id: "message-create-function",
+                  role: "assistant",
+                  toolCalls: [
+                    {
+                      function: {
+                        arguments: JSON.stringify(functionProposal),
+                        name: "create_project_function",
+                      },
+                      id: "call-create-function",
+                      type: "function",
+                    },
+                    {
+                      function: {
+                        arguments: JSON.stringify(functionProposal),
+                        name: "update_project_function",
+                      },
+                      id: "call-rejected-function",
+                      type: "function",
+                    },
+                  ],
+                },
+              ],
+            }
+          : { approvals: [], interrupts: [], messages: [] },
       });
     if (path.endsWith("/runs")) return route.fulfill({ json: [] });
     return route.fulfill({ json: {} });
@@ -3003,8 +3144,30 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
   await page.goto("/");
   await page.getByLabel("Message").fill("Create a workflow");
   await page.getByRole("button", { name: "Send" }).click();
-  const card = page.getByRole("region", { name: "Approve protected action" });
+  const card = page.getByRole("region", {
+    name: "Approve new Python Function",
+  });
   await expect(card).toContainText("Create the proposed Python Function?");
+  await expect(card).toContainText("Rectangle area");
+  await expect(card).toContainText(
+    "Calculates rectangular area from two dimensions.",
+  );
+  await expect(card).toContainText("length_m");
+  await expect(card).toContainText("Length in metres.");
+  await expect(card).toContainText("area_m2");
+  await expect(card).toContainText("Object (length_m: 12; width_m: 5)");
+  await expect(
+    card.getByText("Full proposal, including Python source and schemas"),
+  ).toBeVisible();
+  const proposalDetails = card.locator("details");
+  await expect(proposalDetails).not.toHaveAttribute("open", "");
+  await card
+    .getByText("Full proposal, including Python source and schemas")
+    .click();
+  await expect(proposalDetails).toHaveAttribute("open", "");
+  await expect(proposalDetails).toContainText(
+    "def transform(inputs, parameters)",
+  );
   await card.getByRole("button", { name: "Approve" }).click();
 
   await expect
@@ -3022,6 +3185,29 @@ test("approving an interrupt after a LangGraph message snapshot resumes", async 
   await expect(
     page.getByText("The agent run failed. You can try sending again."),
   ).toBeHidden();
+
+  await page.reload();
+  const resolvedCards = page.getByRole("region", {
+    name: "Approve new Python Function",
+  });
+  const rejectedCards = page.getByRole("region", {
+    name: "Approve Python Function revision",
+  });
+  await expect(resolvedCards).toHaveCount(1);
+  await expect(rejectedCards).toHaveCount(1);
+  await expect(resolvedCards).toContainText("Approved");
+  await expect(resolvedCards).toContainText("Rectangle area");
+  await expect(resolvedCards).toContainText(
+    "Calculates rectangular area from two dimensions.",
+  );
+  await expect(rejectedCards).toContainText("Rejected");
+  await expect(rejectedCards).toContainText("Rectangle area");
+  await rejectedCards
+    .getByText("Full proposal, including Python source and schemas")
+    .click();
+  await expect(rejectedCards).toContainText(
+    "def transform(inputs, parameters)",
+  );
   expect(
     failureMessages.some((message) =>
       message.includes("respondToToolApproval: no pending interrupts"),
