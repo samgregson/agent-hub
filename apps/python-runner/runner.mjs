@@ -33,6 +33,8 @@ export async function runFunction(request, limits = {}) {
   const child = new Deno.Command(Deno.execPath(), {
     args: [
       "run",
+      "--lock=/app/deno.lock",
+      "--frozen-lockfile",
       "--cached-only",
       "--no-prompt",
       "--allow-read=/app,/deno-dir,/tmp",
