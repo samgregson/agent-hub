@@ -199,12 +199,7 @@ def create_plugin_gateway_router(
             media_type="text/html",
             headers={
                 "Cache-Control": "no-store",
-                "Content-Security-Policy": (
-                    "default-src 'none'; base-uri 'none'; connect-src 'none'; "
-                    "font-src data:; form-action 'none'; frame-ancestors 'self'; "
-                    "frame-src 'none'; img-src data:; script-src 'unsafe-inline'; "
-                    "style-src 'unsafe-inline'"
-                ),
+                "Content-Security-Policy": resource.content_security_policy,
                 "Referrer-Policy": "no-referrer",
                 "X-Content-Type-Options": "nosniff",
             },

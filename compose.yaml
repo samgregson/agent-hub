@@ -100,6 +100,22 @@ services:
     ports:
       - "8003:8000"
 
+  ifc-viewer:
+    build:
+      context: ./plugins/ifc-viewer
+      dockerfile: Dockerfile
+    read_only: true
+    user: "65534:65534"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 1g
+    cpus: 1
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    ports:
+      - "8004:8000"
+
   web:
     build:
       context: .

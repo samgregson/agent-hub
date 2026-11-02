@@ -1,0 +1,23 @@
+[project]
+name = "agent-hub-ifc-viewer"
+version = "0.1.0"
+description = "Standalone IFC inspection, metadata overlays and MCP App viewer"
+requires-python = ">=3.12,<3.15"
+dependencies = ["fastmcp==4.0.4", "ifcopenshell==0.8.5"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff==0.16.7"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_hub_ifc_viewer"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"

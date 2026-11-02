@@ -21,6 +21,7 @@ from agent_hub_api.modules.identity import (
     IdentityUnavailable,
     RequestContext,
 )
+from agent_hub_api.modules.plugin_gateway import PluginCallLimitExceeded, PluginTransportError
 from agent_hub_api.modules.projects import ProjectAccess
 
 from ._application import (
@@ -311,6 +312,45 @@ def create_workflow_router(
             except WorkflowNotFound as error:
                 raise HTTPException(status_code=404, detail="Run is unavailable.") from error
             return _run_response(item)
+
+        @router.get("/{workflow_id}/runs/{run_id}/outputs/{output_name}/app")
+        async def output_app(
+            project_id: str,
+            workflow_id: str,
+            run_id: str,
+            output_name: str,
+            request_context: Context,
+        ) -> Response:
+            try:
+                resource = await runs.app_resource(
+                    ProjectAccess(request_context.subject),
+                    project_id,
+                    workflow_id,
+                    run_id,
+                    output_name,
+                )
+            except WorkflowNotFound as error:
+                raise HTTPException(status_code=404, detail="Output is unavailable.") from error
+            except WorkflowValidationError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            except PluginCallLimitExceeded as error:
+                raise HTTPException(
+                    status_code=429, detail="The Plugin is busy; retry later."
+                ) from error
+            except PluginTransportError as error:
+                raise HTTPException(
+                    status_code=502, detail="The App could not be loaded."
+                ) from error
+            return Response(
+                content=resource.html,
+                media_type="text/html",
+                headers={
+                    "Cache-Control": "no-store",
+                    "Content-Security-Policy": resource.content_security_policy,
+                    "Referrer-Policy": "no-referrer",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
 
         @router.get("/{workflow_id}/runs/{run_id}/outputs/{output_name}/image")
         async def load_image(

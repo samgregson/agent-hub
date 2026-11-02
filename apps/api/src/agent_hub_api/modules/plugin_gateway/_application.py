@@ -4,13 +4,15 @@ import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from dataclasses import dataclass, replace
+from typing import Protocol
 
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema import ValidationError as JsonSchemaValidationError
 from langchain_core.tools import BaseTool, StructuredTool
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
-from pydantic import BaseModel, create_model
+from referencing import Registry
 
 from agent_hub_api.modules.observability import trace_plugin_operation
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule
@@ -37,6 +39,7 @@ class PluginManifest:
     tools: tuple[PluginTool, ...]
     app_resource_uri: str | None = None
     app_tool_names: tuple[str, ...] = ()
+    app_allow_wasm: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +64,17 @@ class PluginUiResource:
 
     uri: str
     html: str
+    allow_wasm: bool = False
+
+    @property
+    def content_security_policy(self) -> str:
+        wasm = " 'wasm-unsafe-eval'" if self.allow_wasm else ""
+        return (
+            "default-src 'none'; base-uri 'none'; connect-src 'none'; "
+            "font-src data:; form-action 'none'; frame-ancestors 'self'; "
+            f"frame-src 'none'; img-src data:; script-src 'unsafe-inline'{wasm}; "
+            "style-src 'unsafe-inline'"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +159,13 @@ class PluginClient(Protocol):
 
 
 PluginResultRecorder = Callable[
-    [PluginManifest, PluginTool, Mapping[str, object], PluginToolResult], Awaitable[None]
+    [
+        PluginManifest,
+        PluginTool,
+        Mapping[str, object],
+        PluginToolResult,
+    ],
+    Awaitable[Mapping[str, object] | None],
 ]
 
 
@@ -364,7 +384,9 @@ class PluginGatewayModule:
         await budget.reserve()
         try:
             async with trace_plugin_operation("mcp.app_resource", plugin_id):
-                return await client.read_ui_resource(resource_uri)
+                resource = await client.read_ui_resource(resource_uri)
+                # Only deployment review grants WASM; never trust a server's request.
+                return replace(resource, allow_wasm=self._catalog[plugin_id].app_allow_wasm)
         finally:
             await budget.release()
 
@@ -394,7 +416,10 @@ class PluginGatewayModule:
             await budget.release()
 
     async def agent_tools(
-        self, project_id: str, *, on_success: PluginResultRecorder | None = None
+        self,
+        project_id: str,
+        *,
+        on_success: PluginResultRecorder | None = None,
     ) -> tuple[BaseTool, ...]:
         """Return only currently enabled capabilities for an authorized Run.
 
@@ -423,6 +448,35 @@ class PluginGatewayModule:
                 for plugin_tool in manifest.tools
                 if plugin_tool.agent_visible and plugin_tool.name in discovered
             )
+        return tuple(tools)
+
+    async def programmatic_tools(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+    ) -> tuple[BaseTool, ...]:
+        """Expose only reviewed, server-declared read-only tools without auto-saving results."""
+        await self._projects.load(access, project_id)
+        enabled = set(await self._enablements.enabled_plugin_ids(project_id))
+        tools = []
+        for manifest in self._catalog.values():
+            if manifest.id not in enabled:
+                continue
+            try:
+                discovered = {tool.name: tool for tool in await self._discover(manifest)}
+            except PluginTransportError:
+                continue
+            for target in manifest.tools:
+                contract = discovered.get(target.name)
+                if (
+                    target.agent_visible
+                    and target.read_only
+                    and contract is not None
+                    and contract.read_only
+                ):
+                    tools.append(
+                        _programmatic_tool(self, access, project_id, manifest, target, contract)
+                    )
         return tuple(tools)
 
     async def _discover(self, manifest: PluginManifest) -> tuple[PluginDiscoveredTool, ...]:
@@ -559,11 +613,24 @@ def create_postgres_plugin_gateway(
         app_resource_uri="ui://agent-hub-calculation-source-object/report.html",
         app_tool_names=(),
     )
+    ifc_viewer = PluginManifest(
+        id="ifc-viewer",
+        name="IFC viewer",
+        version="0.1.0",
+        endpoint="http://ifc-viewer:8000/mcp",
+        tools=(
+            PluginTool(name="get_ifc_guide", read_only=True, repeat_safe=True),
+            PluginTool(name="inspect_ifc_objects", read_only=True, repeat_safe=True),
+            PluginTool(name="prepare_ifc_view", read_only=True, repeat_safe=True),
+        ),
+        app_resource_uri="ui://agent-hub-ifc-viewer/view.html",
+        app_allow_wasm=True,
+    )
     from agent_hub_api.modules.plugin_gateway._mcp import McpPluginClient
 
     return PluginGatewayModule(
         projects,
-        catalog=(fixture, reference_calculation, calculation_source_object),
+        catalog=(fixture, reference_calculation, calculation_source_object, ifc_viewer),
         enablements=PostgresPluginEnablementStore(settings),
         clients={
             fixture.id: McpPluginClient(
@@ -584,11 +651,27 @@ def create_postgres_plugin_gateway(
                 max_result_bytes=settings.plugin_result_max_bytes,
                 allow_private_network=True,
             ),
+            ifc_viewer.id: McpPluginClient(
+                endpoint=ifc_viewer.endpoint,
+                timeout_seconds=settings.plugin_tool_timeout_seconds,
+                max_result_bytes=settings.plugin_result_max_bytes,
+                max_ui_resource_bytes=12_000_000,
+                allow_private_network=True,
+            ),
         },
         discovery_cache_seconds=settings.plugin_discovery_cache_seconds,
         max_concurrent_calls=settings.plugin_max_concurrent_calls,
         max_calls_per_minute=settings.plugin_max_calls_per_minute,
     )
+
+
+def _validate_arguments(schema: Mapping[str, object], arguments: Mapping[str, object]) -> None:
+    # A Plugin's schema may refer to its own definitions, never fetch remote schemas.
+    try:
+        Draft202012Validator(schema, registry=Registry()).validate(arguments)
+    except JsonSchemaValidationError as error:
+        location = "/" + "/".join(str(part) for part in error.path)
+        raise ValueError(f"MCP input is invalid at {location} ({error.validator}).") from None
 
 
 def _agent_tool(
@@ -601,6 +684,10 @@ def _agent_tool(
 ) -> BaseTool:
     async def invoke(**arguments: object) -> str:
         try:
+            _validate_arguments(discovered.input_schema or {}, arguments)
+        except Exception:
+            return "Plugin tool input does not match its declared schema."
+        try:
             result = await gateway._call_enabled(
                 project_id,
                 manifest.id,
@@ -609,11 +696,20 @@ def _agent_tool(
             )
         except Exception as error:
             return f"Plugin tool failed: {error}"
+        saved = None
         if result.structured_content is not None and on_success is not None:
-            await on_success(manifest, plugin_tool, arguments, result)
-        if result.content:
-            return "\n".join(result.content)
-        return json.dumps(result.structured_content, sort_keys=True)
+            saved = await on_success(manifest, plugin_tool, arguments, result)
+        text = (
+            "\n".join(result.content)
+            if result.content
+            else json.dumps(
+                result.structured_content,
+                sort_keys=True,
+            )
+        )
+        if saved is not None:
+            text += "\nSaved structured result: " + json.dumps(dict(saved), sort_keys=True)
+        return text
 
     return StructuredTool.from_function(
         coroutine=invoke,
@@ -621,36 +717,45 @@ def _agent_tool(
         description=discovered.description
         or plugin_tool.description
         or f"Run {plugin_tool.name} from {manifest.name}.",
-        args_schema=_input_model(manifest, plugin_tool, discovered),
+        args_schema=dict(discovered.input_schema or {"type": "object", "properties": {}}),
     )
 
 
-def _input_model(
-    manifest: PluginManifest, plugin_tool: PluginTool, discovered: PluginDiscoveredTool
-) -> type[BaseModel]:
-    schema = discovered.input_schema or {}
-    declared_required = schema.get("required", [])
-    required = set(declared_required) if isinstance(declared_required, list) else set()
-    properties = schema.get("properties", {})
-    fields: dict[str, tuple[type[Any], Any]] = {}
-    if isinstance(properties, Mapping):
-        for name, definition in properties.items():
-            if not isinstance(name, str) or not isinstance(definition, Mapping):
-                continue
-            declared_type = definition.get("type")
-            value_type = (
-                {
-                    "number": float,
-                    "integer": int,
-                    "boolean": bool,
-                    "object": dict[str, Any],
-                    "array": list[Any],
-                }.get(declared_type, str)
-                if isinstance(declared_type, str)
-                else str
-            )
-            fields[name] = (value_type, ... if name in required else None)
-    return cast(
-        type[BaseModel],
-        create_model(f"{manifest.id}_{plugin_tool.name}_Input", **cast(Any, fields)),
+def _programmatic_tool(
+    gateway: PluginGatewayModule,
+    access: ProjectAccess,
+    project_id: str,
+    manifest: PluginManifest,
+    plugin_tool: PluginTool,
+    discovered: PluginDiscoveredTool,
+) -> BaseTool:
+    async def invoke(**arguments: object) -> dict[str, object]:
+        # Recheck the current catalog, Project and server contract on each invocation.
+        await gateway._projects.load(access, project_id)
+        current = gateway._catalog.get(manifest.id)
+        if current is None:
+            raise PluginToolNotAllowed("This Plugin is unavailable for PTC.")
+        permitted = next((tool for tool in current.tools if tool.name == plugin_tool.name), None)
+        if permitted is None or not permitted.agent_visible or not permitted.read_only:
+            raise PluginToolNotAllowed("This tool is not approved for read-only PTC.")
+        discovered_tools = await gateway._discover(current)
+        contract = next((tool for tool in discovered_tools if tool.name == plugin_tool.name), None)
+        if contract is None or not contract.read_only:
+            raise PluginToolNotAllowed("The server does not declare this tool read-only.")
+        _validate_arguments(contract.input_schema or {}, arguments)
+        result = await gateway._call_enabled(project_id, current.id, plugin_tool.name, arguments)
+        # Deliberately no result recorder: PTC never creates a saved Artifact.
+        return {
+            "content": list(result.content),
+            "structuredContent": dict(result.structured_content)
+            if result.structured_content is not None
+            else None,
+        }
+
+    return StructuredTool.from_function(
+        coroutine=invoke,
+        name=f"{manifest.id.replace('-', '_')}__{plugin_tool.name}",
+        description=(discovered.description or plugin_tool.description or plugin_tool.name)
+        + " Returns {content, structuredContent}; PTC results are unsaved.",
+        args_schema=dict(discovered.input_schema or {"type": "object", "properties": {}}),
     )

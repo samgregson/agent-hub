@@ -816,3 +816,17 @@
     padding: 12px;
   }
 }
+
+@media (min-width: 1025px) {
+  .shell.libraryPreviewOpen {
+    grid-template-areas: "title title title" "rail navigator artifact";
+    grid-template-columns: 112px minmax(
+        208px,
+        min(var(--navigator-width, 256px), 34vw)
+      ) minmax(0, 1fr);
+  }
+
+  .shell.libraryPreviewOpen .chat {
+    display: none;
+  }
+}

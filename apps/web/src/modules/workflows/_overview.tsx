@@ -9,6 +9,7 @@ import {
   type GraphCanvasNode,
 } from "./_graph-canvas";
 import { WorkflowMapResults } from "./_map-results";
+import { WorkflowOutputApp } from "./_output-app";
 import {
   WorkflowNodePreview,
   type WorkflowNodePreviewSource,
@@ -1850,8 +1851,19 @@ export function WorkflowOverview({
                 : null;
               const imageKey = `${selectedRun.id}:${output.name}`;
               const imageUrl = `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow?.id ?? "")}/runs/${encodeURIComponent(selectedRun.id)}/outputs/${encodeURIComponent(output.name)}/image`;
+              const appUrl = imageUrl.replace(/\/image$/, "/app");
+              const progress = progressByNode[output.node];
+              const canPreviewApp =
+                outputNode?.kind === "mcp" &&
+                outputNode.shape !== "map" &&
+                output.port === "result" &&
+                progress?.status === "succeeded" &&
+                isRecord(outputValue);
               return (
-                <article className={styles.output} key={output.name}>
+                <article
+                  className={`${styles.output} ${canPreviewApp ? styles.appOutput : ""}`}
+                  key={output.name}
+                >
                   <div>
                     <h3>{output.name}</h3>
                     <p>
@@ -1864,6 +1876,14 @@ export function WorkflowOverview({
                       node={outputNode}
                       projectId={projectId}
                       target={snapshotTargets[output.node] ?? {}}
+                    />
+                  ) : canPreviewApp ? (
+                    <WorkflowOutputApp
+                      key={appUrl}
+                      appUrl={appUrl}
+                      title={output.name}
+                      inputs={isRecord(progress?.inputs) ? progress.inputs : {}}
+                      output={outputValue as Record<string, unknown>}
                     />
                   ) : image ? (
                     <>

@@ -70,8 +70,8 @@ Use `pnpm` for the JavaScript workspace and `uv` for Python project and lockfile
 | Project Virtual Filesystem | Agent Hub                                       | Project-scoped PostgreSQL records exposed through a Deep Agents backend              |
 | Artifact Document          | Agent Hub envelope and Plugin payload semantics | One canonical current document in the Project VFS plus an indexed catalog projection |
 | Dataset                    | Agent Hub Dataset Module                        | Registered typed Project VFS document plus query projection                          |
-| Workflow Definition / Run  | Agent Hub Workflow Module                       | Project-scoped graph and immutable execution snapshots                                |
-| Function                   | Agent Hub Function Module                       | Project-scoped Python source and contracts                                            |
+| Workflow Definition / Run  | Agent Hub Workflow Module                       | Project-scoped graph and immutable execution snapshots                               |
+| Function                   | Agent Hub Function Module                       | Project-scoped Python source and contracts                                           |
 | Plugin definition          | Deployment-controlled catalog                   | Version-controlled manifest                                                          |
 | Plugin enablement          | Agent Hub Project configuration                 | Application tables                                                                   |
 | Plugin/provider secret     | Secret boundary                                 | Encrypted server-side storage or external secret reference                           |
@@ -271,3 +271,27 @@ Minimum operational signals are Run counts/duration/outcome, active and interrup
 - Production calculation, units, diagramming, and engineering assurance.
 
 These are scoped deferrals, not unresolved foundation decisions.
+
+## IFC Plugin
+
+The independently deployed `plugins/ifc-viewer` service exposes IFC object
+inspection and metadata-overlay view preparation over MCP. The host only knows
+its catalog metadata. Calculations retain IFC GlobalIds through Workflow Map;
+metadata rows join results back to geometry through the same stable identifiers.
+Its React Three Fiber/Drei UI and web-ifc parser run entirely in the sandbox.
+Only this reviewed catalog entry permits WASM compilation; it cannot fetch
+network resources. See ADR 0015 and the Plugin README for transport bounds.
+
+Plugin-specific agent recipes stay inside each Plugin and can be exposed as
+Markdown MCP resources plus read-only guide tools. The agent loads a relevant
+guide on demand. Host tool adapters preserve the original MCP input schema and
+return saved Artifact references alongside concise tool messages. See ADR 0016.
+
+The main agent uses native QuickJS middleware for read-only programmatic tool
+calling. An explicit allowlist bridges authorized raw Project reads, named read
+operations and MCP tools reviewed and declared read-only. PTC uses transient
+structured results without Artifact auto-saving. Filesystem writes, Artifact,
+Dataset and Function mutations, Workflow authoring/preparation/execution and
+subagents are excluded. Durable work remains on the existing approval-gated
+path. MCP schemas stay unchanged; there is no custom file-reference input format.
+See ADR 0017.

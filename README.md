@@ -40,3 +40,9 @@ Deep Agent; the key stays behind the same-origin web proxy and is never exposed
 to browser code.
 
 Production identity is supplied by the hosting platform. See [the platform identity contract](docs/deployment/identity.md) before exposing Agent Hub through an ingress.
+
+The standalone [IFC viewer MCP App](plugins/ifc-viewer/README.md) renders IFC models,
+inspects object properties, and colours metadata or mapped calculation results.
+
+See the [MCP App development guide](docs/architecture/mcp-app-development.md) for
+Plugin packaging, agent instructions, viewport layouts and embedded testing.

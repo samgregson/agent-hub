@@ -235,3 +235,37 @@ async def test_plugin_gateway_rejects_excess_rate_and_concurrent_calls() -> None
     with pytest.raises(PluginCallLimitExceeded, match="retry later"):
         await gateway.call(access, project.id, "foundation-fixture", "foundation_status", {})
     assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reviewed", [False, True])
+async def test_only_deployment_review_can_grant_wasm_to_an_app(reviewed: bool) -> None:
+    class WasmRequestClient(FixtureClient):
+        async def read_ui_resource(self, resource_uri: str) -> PluginUiResource:
+            return PluginUiResource(uri=resource_uri, html="<main>App</main>", allow_wasm=True)
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "App capability test")
+    uri = "ui://fixture/view.html"
+    gateway = PluginGatewayModule(
+        projects,
+        [
+            PluginManifest(
+                id="fixture",
+                name="Fixture",
+                version="1",
+                endpoint="http://fixture/mcp",
+                tools=(),
+                app_resource_uri=uri,
+                app_allow_wasm=reviewed,
+            )
+        ],
+        MemoryPluginEnablementStore(),
+        {"fixture": WasmRequestClient(calls=[])},
+    )
+    await gateway.enable(access, project.id, "fixture")
+    resource = await gateway.read_ui_resource(access, project.id, "fixture", uri)
+    assert ("'wasm-unsafe-eval'" in resource.content_security_policy) is reviewed
+    assert "connect-src 'none'" in resource.content_security_policy
+    assert "'unsafe-eval'" not in resource.content_security_policy

@@ -12,6 +12,7 @@
 
 - Read `FOUNDATION.md` before planning architecture or implementation.
 - Read `docs/architecture/code-structure.md` before adding or moving application code.
+- Read `docs/architecture/mcp-app-development.md` when adding or changing an MCP App.
 - Treat the repository shape in `FOUNDATION.md` as a proposal until the corresponding structure exists.
 - Read `CONTEXT.md` and relevant files under `docs/adr/` when they exist, following `docs/agents/domain.md`.
 - Read `docs/agents/issue-tracker.md` before creating or updating project work.

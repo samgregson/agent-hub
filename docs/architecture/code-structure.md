@@ -151,3 +151,12 @@ Every build ticket and review should answer:
 9. If ownership or an Interface changed, were the architecture document and an ADR updated?
 
 Arbitrary line-count limits are not an architectural control. Review ownership, Interface depth, dependency direction, and observable tests instead.
+
+## Independently deployable MCP Apps
+
+`plugins/<plugin>/` owns its server, UI, tests, dependency locks and container.
+No imports may cross that directory boundary in either direction: host to Plugin,
+Plugin to host, or Plugin to another Plugin, in frontend or backend code. Keep
+composition on MCP and portable data. `pnpm architecture:check` enforces these
+boundaries, including static/dynamic literal imports, exports, require, Python
+imports, workspace package dependencies and resolved TypeScript aliases. Computed imports are rejected because their target cannot be checked. See ADR 0015.

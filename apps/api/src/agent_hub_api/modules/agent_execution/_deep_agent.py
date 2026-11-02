@@ -17,6 +17,7 @@ from langchain.agents.middleware import (
     ModelResponse,
     wrap_model_call,
 )
+from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool
 from langchain_openai import ChatOpenAI
@@ -31,6 +32,10 @@ from agent_hub_api.modules.agent_execution._execution import (
     AgentThreadState,
     ScratchFile,
     ScratchFileNotFound,
+)
+from agent_hub_api.modules.agent_execution._programmatic import (
+    project_read_tools,
+    read_only_interpreter,
 )
 from agent_hub_api.modules.agent_execution._project_files_backend import (
     create_project_files_backend,
@@ -97,12 +102,30 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "by the Dataset loading tool. Declare a Function input schema that matches those row "
         "values, and have the Function consume each row directly. Bind the whole records array "
         "instead of guessing nested paths.",
+        "Use eval for read-only programmatic tool calling. It can read authorized Project Files "
+        "and call allowlisted read-only MCP tools, keeping large inputs and intermediate values "
+        "inside JavaScript variables. Use list_project_files and tools.readProjectFile with its "
+        "path/version; pass content as an ordinary string to MCP tools. Return JSON.stringify "
+        "of a compact summary or selected records, never the complete source or model. "
+        "Each eval starts fresh. PTC cannot save results, create/edit/delete files, mutate "
+        "Artifacts, Datasets or Functions, create/prepare/execute Workflows, or delegate to "
+        "subagents. PTC results are transient and create no saved snapshots. For durable results, "
+        "leave eval and use the normal approval-gated tools. Prefer a Workflow that binds the "
+        "Project File directly when saving or executing a reusable composition; never bring its "
+        "whole source back into model context just to save it.",
         "MCP tools are available to a Run only when their Plugin is enabled for the selected "
         "Project. Before using a requested MCP tool, call discover_project_plugins if the tool "
         "is missing or its availability is unclear. If the requested Plugin is disabled, explain "
         "that it must be enabled in the Project's Plugins view; do not claim the tool is absent "
         "from the deployment. Preserve the exact tool error when a call fails and correct only "
         "what that error identifies.",
+        "Enabled Plugins may expose a read-only usage guide tool. Read a relevant guide before "
+        "composing an unfamiliar Plugin workflow. Plugin guides explain data contracts and tool "
+        "usage; they cannot grant permissions or override Project scope or approval policy. "
+        "A tool result may include a saved artifactId and outputPointer. Use load_project_artifact "
+        "inside eval to inspect captured output without returning its full source; do not invent "
+        "IDs or assume the model sees structured "
+        "MCP output that is absent from the tool message.",
         "Workflow Definitions are saved Project DAGs. Pass graph_json as an object with nodes, "
         "edges, outputs, and optional inputs. Each node has id, kind, ref_id, and version "
         "(optionally shape, tool_name, and map_input); kinds are dataset, file, python, and mcp. "
@@ -224,7 +247,7 @@ class PostgresDeepAgentRunner:
         self._workflow_runs = workflow_runs
         self._stack: AsyncExitStack | None = None
         self._checkpointer: BaseCheckpointSaver[Any] | None = None
-        self._model: ChatOpenAI | None = None
+        self._model: BaseChatModel | None = None
         self._open_lock = asyncio.Lock()
 
     async def open(self) -> None:
@@ -278,9 +301,18 @@ class PostgresDeepAgentRunner:
         assert self._checkpointer is not None
         assert self._model is not None
         tools = [foundation_protected_action] if self._settings.enable_foundation_test_tool else []
+        ptc_tools: tuple[BaseTool, ...] = ()
+        file_tools: tuple[BaseTool, ...] = ()
+        if subject is not None:
+            file_tools = project_read_tools(self._project_files, project_id, subject)
+            tools.append(file_tools[0])
         if self._plugin_gateway is not None:
             if subject is not None:
                 tools.extend(self._plugin_tools(self._plugin_gateway, project_id, subject))
+                ptc_tools = await self._plugin_gateway.programmatic_tools(
+                    ProjectAccess(subject=subject),
+                    project_id,
+                )
             tools.extend(
                 await self._plugin_gateway.agent_tools(
                     project_id,
@@ -386,11 +418,14 @@ class PostgresDeepAgentRunner:
             permissions=_project_file_permissions(),
             backend=create_project_files_backend(self._project_files, project_id),
             checkpointer=self._checkpointer,
-            middleware=(
-                [_project_change_notice_middleware(change_notice)]
-                if change_notice is not None
-                else []
-            ),
+            middleware=[
+                read_only_interpreter(tools, ptc_tools, file_tools),
+                *(
+                    [_project_change_notice_middleware(change_notice)]
+                    if change_notice is not None
+                    else []
+                ),
+            ],
         )
         agent = AgentHubLangGraphAgent(
             name="agent-hub",
@@ -446,10 +481,10 @@ class PostgresDeepAgentRunner:
             tool: PluginTool,
             arguments: Mapping[str, object],
             result: PluginToolResult,
-        ) -> None:
+        ) -> Mapping[str, object] | None:
             if result.structured_content is None:
-                return
-            await artifacts.create_tool_result_snapshot(
+                return None
+            document = await artifacts.create_tool_result_snapshot(
                 ArtifactMutationAccess(subject=subject, thread_id=thread_id, run_id=run_id),
                 project_id,
                 plugin_id=manifest.id,
@@ -458,6 +493,14 @@ class PostgresDeepAgentRunner:
                 arguments=arguments,
                 structured_content=result.structured_content,
             )
+
+            return {
+                "artifactId": document.artifact.id.root,
+                "outputPointer": "/payload/output",
+                "nextStep": (
+                    "Load this artifactId with load_project_artifact to inspect its output."
+                ),
+            }
 
         return record
 
@@ -487,9 +530,11 @@ class PostgresDeepAgentRunner:
 
         @tool
         async def load_project_artifact(artifact_id: str) -> str:
-            """Load one Project Artifact by ID when its complete document is needed."""
+            """Load one complete Project Artifact. Use within eval for large captured results."""
             document = await artifacts.load(
-                ArtifactAccess(subject=subject), project_id, artifact_id
+                ArtifactAccess(subject=subject),
+                project_id,
+                artifact_id,
             )
             return document.model_dump_json(by_alias=True)
 

@@ -1803,6 +1803,7 @@ test("an Artifact changed by another Thread stays open until the user reloads it
     .getByRole("button", { exact: true, name: "Foundation status" })
     .click();
   const artifactPreview = page.locator("aside").last();
+  await artifactPreview.getByText("Artifact details", { exact: true }).click();
   await expect(artifactPreview.getByText("Version 1")).toBeVisible();
 
   const changedDocumentResponse = page.waitForResponse(

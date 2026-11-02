@@ -1,5 +1,5 @@
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -275,3 +275,26 @@ async def test_mcp_client_normalizes_a_malformed_app_resource(
 
     with pytest.raises(PluginTransportError, match="invalid response"):
         await client.read_ui_resource("ui://agent-hub-foundation/status.html")
+
+
+@pytest.mark.asyncio
+async def test_ui_resource_budget_is_independent_of_tool_result_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class LargeAppClient(FakeClient):
+        async def read_resource(self, _: str) -> object:
+            return type("ResourceResult", (), {"contents": [FakeContent("x" * 2048)]})()
+
+    monkeypatch.setattr(_mcp, "Client", LargeAppClient)
+    bounded = McpPluginClient(
+        endpoint="http://foundation-fixture:8000/mcp",
+        timeout_seconds=12,
+        max_result_bytes=1024,
+        allow_private_network=True,
+    )
+    with pytest.raises(PluginTransportError):
+        await bounded.read_ui_resource("ui://agent-hub-foundation/status.html")
+    client = replace(bounded, max_ui_resource_bytes=4096)
+    assert (
+        len((await client.read_ui_resource("ui://agent-hub-foundation/status.html")).html) == 2048
+    )

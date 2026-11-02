@@ -100,14 +100,12 @@ export function ArtifactDocumentPreview({
       {!document && !error ? <p>Opening Artifact…</p> : null}
       {document ? (
         <>
-          <header>
-            <strong>{document.artifact.title}</strong>
-            <code>{document.artifact.id}</code>
-            <span>Version {document.artifact.documentVersion}</span>
-          </header>
-          {document.artifact.summary ? (
-            <p>{document.artifact.summary}</p>
-          ) : null}
+          {imagePayload && (
+            <header>
+              <strong>{document.artifact.title}</strong>
+            </header>
+          )}
+
           {isStale ? (
             <p className={styles.error}>
               This Artifact changed in another Thread.{" "}
@@ -132,6 +130,20 @@ export function ArtifactDocumentPreview({
           <details className={styles.details}>
             <summary>Artifact details</summary>
             <dl>
+              <div>
+                <dt>Artifact ID</dt>
+                <dd>{document.artifact.id}</dd>
+              </div>
+              <div>
+                <dt>Document</dt>
+                <dd>Version {document.artifact.documentVersion}</dd>
+              </div>
+              {document.artifact.summary && (
+                <div>
+                  <dt>Summary</dt>
+                  <dd>{document.artifact.summary}</dd>
+                </div>
+              )}
               <div>
                 <dt>Type</dt>
                 <dd>{document.artifact.type}</dd>

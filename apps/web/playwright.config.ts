@@ -12,6 +12,14 @@ export default defineConfig({
     baseURL,
     browserName: "chromium",
     headless: true,
+    launchOptions: {
+      ...(process.env.AGENT_HUB_E2E_CHROMIUM_PATH
+        ? { executablePath: process.env.AGENT_HUB_E2E_CHROMIUM_PATH }
+        : {}),
+      ...(process.env.AGENT_HUB_IFC_SMOKE_ARTIFACT
+        ? { args: ["--enable-unsafe-swiftshader"] }
+        : {}),
+    },
   },
   webServer:
     process.env.AGENT_HUB_E2E_EXTERNAL === "1"

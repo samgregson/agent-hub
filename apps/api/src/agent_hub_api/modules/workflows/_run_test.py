@@ -279,3 +279,119 @@ async def test_prepared_run_route_round_trips_without_dispatching_calls() -> Non
         assert executed.status_code == 200
         assert executed.json()["status"] == "succeeded"
         assert executed.json()["execution"]["outputs"] == {"result": []}
+
+
+@pytest.mark.asyncio
+async def test_saved_mcp_output_app_enforces_scope_and_captured_version_without_execution() -> None:
+    from agent_hub_api.modules.plugin_gateway import (
+        MemoryPluginEnablementStore,
+        PluginDiscoveredTool,
+        PluginGatewayModule,
+        PluginManifest,
+        PluginTool,
+        PluginUiResource,
+    )
+
+    class AppClient:
+        async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+            return (
+                PluginDiscoveredTool(
+                    name="render",
+                    description="Render",
+                    read_only=True,
+                    app_resource_uri="ui://fixture/view.html",
+                ),
+            )
+
+        async def read_ui_resource(self, uri: str) -> PluginUiResource:
+            return PluginUiResource(uri, "<h1>Captured result</h1>")
+
+        async def call_tool(self, *_: Any) -> Any:
+            pytest.fail("Opening a saved App must not execute tools")
+
+    projects = create_memory_project_module()
+    owner = ProjectAccess(subject="owner")
+    project = await projects.create(owner, "Saved MCP output")
+    manifest = PluginManifest(
+        id="fixture",
+        name="Fixture",
+        version="1",
+        endpoint="http://fixture/mcp",
+        tools=(PluginTool("render", read_only=True),),
+        app_resource_uri="ui://fixture/view.html",
+        app_allow_wasm=True,
+    )
+    gateway = PluginGatewayModule(
+        projects, [manifest], MemoryPluginEnablementStore(), {"fixture": AppClient()}
+    )
+    await gateway.enable(owner, project.id, "fixture")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    definitions = WorkflowDefinitionModule(
+        projects, datasets, functions, gateway, MemoryWorkflowStore()
+    )
+    graph = WorkflowGraph(
+        (WorkflowNode("view", "mcp", "fixture", "1", tool_name="render"),),
+        (),
+        (WorkflowOutput("model", "view", "result"),),
+    )
+    store = MemoryWorkflowRunStore()
+    run = WorkflowRun(
+        id="saved-app-run",
+        project_id=project.id,
+        workflow_id="saved-workflow",
+        definition_version=1,
+        status="succeeded",
+        snapshot={
+            "graph": asdict(graph),
+            "targets": {"view": {"pluginId": "fixture", "toolName": "render", "version": "1"}},
+        },
+        execution={
+            "outputs": {"model": {"value": 42}},
+            "nodes": {"view": {"status": "succeeded", "inputs": {}, "output": {"value": 42}}},
+        },
+        initiator_subject="owner",
+        idempotency_key="saved-app",
+        created_at=datetime.now(UTC),
+    )
+    await store.create_or_load(run)
+    runs = WorkflowRunModule(definitions, datasets, functions, gateway, store)
+    app = FastAPI()
+    app.include_router(
+        create_workflow_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="owner")),
+            definitions,
+            runs,
+        ),
+        prefix="/api",
+    )
+    path = f"/api/projects/{project.id}/workflows/saved-workflow/runs/{run.id}/outputs/model/app"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(path)
+        assert response.status_code == 200, response.text
+        assert response.text == "<h1>Captured result</h1>"
+        assert "'wasm-unsafe-eval'" in response.headers["content-security-policy"]
+        assert "connect-src 'none'" in response.headers["content-security-policy"]
+        assert response.headers["cache-control"] == "no-store"
+        assert (
+            await client.get(path.replace("saved-workflow", "wrong-workflow"))
+        ).status_code == 404
+        assert (
+            await client.get(path.replace("outputs/model", "outputs/unknown"))
+        ).status_code == 404
+        await gateway.disable(owner, project.id, "fixture")
+        assert (await client.get(path)).status_code == 422
+        await gateway.enable(owner, project.id, "fixture")
+        # A captured old version cannot silently render with the currently deployed App.
+        stale = {
+            **run.snapshot,
+            "targets": {"view": {"pluginId": "fixture", "toolName": "render", "version": "old"}},
+        }
+        from dataclasses import replace
+
+        await store.update(replace(run, snapshot=stale), expected_status="succeeded")
+        assert (await client.get(path)).status_code == 422
+    with pytest.raises(WorkflowNotFound):
+        await runs.app_resource(
+            ProjectAccess(subject="other"), project.id, run.workflow_id, run.id, "model"
+        )

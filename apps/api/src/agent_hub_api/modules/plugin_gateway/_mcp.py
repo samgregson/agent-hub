@@ -30,6 +30,7 @@ class McpPluginClient:
     timeout_seconds: float
     max_result_bytes: int
     allow_private_network: bool = False
+    max_ui_resource_bytes: int | None = None
 
     async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
         self._validate_endpoint()
@@ -133,7 +134,7 @@ class McpPluginClient:
             getattr(content, "uri", None) != resource_uri
             or getattr(content, "mime_type", None) not in {None, MCP_APP_MIME_TYPE}
             or not isinstance(html, str)
-            or len(html.encode("utf-8")) > self.max_result_bytes
+            or len(html.encode("utf-8")) > (self.max_ui_resource_bytes or self.max_result_bytes)
         ):
             raise PluginTransportError("The Plugin App resource is not safe HTML.")
         return PluginUiResource(uri=resource_uri, html=html)

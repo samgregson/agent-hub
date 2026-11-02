@@ -22,6 +22,7 @@ from agent_hub_api.modules.functions import (
     FunctionValidationError,
 )
 from agent_hub_api.modules.plugin_gateway import (
+    PluginAppUnavailable,
     PluginCallLimitExceeded,
     PluginGatewayModule,
     PluginNotAvailable,
@@ -29,6 +30,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginToolNotAllowed,
     PluginToolResult,
     PluginTransportError,
+    PluginUiResource,
 )
 from agent_hub_api.modules.project_files import ProjectFileError, ProjectFilesModule
 from agent_hub_api.modules.projects import ProjectAccess
@@ -994,6 +996,57 @@ class WorkflowRunModule:
         if run is None:
             raise WorkflowNotFound
         return run
+
+    async def app_resource(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        workflow_id: str,
+        run_id: str,
+        output_name: str,
+    ) -> PluginUiResource:
+        """Replay a captured MCP output with its reviewed, version-matched App.
+
+        Loading an App never executes a tool or creates an Artifact.
+        """
+        run = await self.load(access, project_id, run_id)
+        if run.workflow_id != workflow_id:
+            raise WorkflowNotFound
+        graph = WorkflowGraph.from_json(json.dumps(run.snapshot.get("graph")))
+        output = next((item for item in graph.outputs if item.name == output_name), None)
+        if output is None or output_name not in _mapping(run.execution.get("outputs")):
+            raise WorkflowNotFound
+        node = next((item for item in graph.nodes if item.id == output.node), None)
+        progress = _mapping(_mapping(run.execution.get("nodes")).get(output.node))
+        target = _mapping(_mapping(run.snapshot.get("targets")).get(output.node))
+        if (
+            self._gateway is None
+            or node is None
+            or node.kind != "mcp"
+            or node.shape != "single"
+            or output.port != "result"
+            or progress.get("status") != "succeeded"
+            or not isinstance(progress.get("output"), Mapping)
+        ):
+            raise WorkflowValidationError("This output has no compatible MCP App.")
+        plugin_id, tool_name, version = (
+            target.get("pluginId"),
+            target.get("toolName"),
+            target.get("version"),
+        )
+        if not all(isinstance(value, str) for value in (plugin_id, tool_name, version)):
+            raise WorkflowValidationError("The captured App target is unavailable.")
+        try:
+            return await self._gateway.app_resource_for_tool(
+                access, project_id, cast(str, plugin_id), cast(str, tool_name), cast(str, version)
+            )
+        except (
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+            PluginAppUnavailable,
+        ) as error:
+            raise WorkflowValidationError("The captured App version is unavailable.") from error
 
     async def load_image(
         self,

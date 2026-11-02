@@ -160,3 +160,56 @@ jobs:
           docker logs agent-hub-acceptance-web || true
           docker logs agent-hub-acceptance-fixture || true
           docker logs agent-hub-acceptance-model || true
+
+  ifc-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.22.1
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          version: "0.11.15"
+      - run: npm ci --prefix plugins/ifc-viewer/app
+      - run: npm --prefix plugins/ifc-viewer/app run typecheck
+      - run: npm --prefix plugins/ifc-viewer/app test
+      - run: npm --prefix plugins/ifc-viewer/app run build
+      - run: uv sync --project plugins/ifc-viewer --frozen
+      - run: uv run --project plugins/ifc-viewer --frozen pytest -q -c plugins/ifc-viewer/pyproject.toml plugins/ifc-viewer/src/agent_hub_ifc_viewer/_server_test.py
+      - run: uv run --project plugins/ifc-viewer --frozen ruff check plugins/ifc-viewer/src
+      - run: uv run --project plugins/ifc-viewer --frozen ruff format --check plugins/ifc-viewer/src
+      - run: npx --prefix plugins/ifc-viewer/app playwright install --with-deps chromium
+      - run: npm --prefix plugins/ifc-viewer/app run test:browser
+      - run: uv sync --frozen --all-packages
+      - name: Start real Python runner for IFC engineering Workflow
+        run: |
+          docker build -f apps/python-runner/Dockerfile --target production -t agent-hub-ifc-runner .
+          docker run -d --name ifc-engineering-runner -p 127.0.0.1:18009:8000 agent-hub-ifc-runner
+      - name: Verify main-agent IFC assignment over MCP
+        env:
+          AGENT_HUB_IFC_PYTHON: plugins/ifc-viewer/.venv/bin/python
+          AGENT_HUB_FUNCTION_RUNNER_URL: http://127.0.0.1:18009
+          AGENT_HUB_IFC_SMOKE_ARTIFACT: /tmp/agent-hub-ifc-artifact.json
+        run: uv run --frozen --package agent-hub-api pytest -q tests/integration/ifc_main_agent_test.py
+      - name: Stop IFC engineering runner
+        if: always()
+        run: docker rm -f ifc-engineering-runner || true
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @agent-hub/web exec playwright install --with-deps chromium
+      - name: Verify IFC App inside Agent Hub
+        env:
+          AGENT_HUB_IFC_SMOKE_ARTIFACT: /tmp/agent-hub-ifc-artifact.json
+        run: pnpm --filter @agent-hub/web exec playwright test src/modules/artifact-view-host/_ifc-embedded.e2e.spec.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ifc-embedded-smoke
+          path: /tmp/agent-hub-ifc-*.png
+          if-no-files-found: ignore

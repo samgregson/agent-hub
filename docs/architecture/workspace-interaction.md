@@ -159,3 +159,18 @@ Below the usable three-column width, show one primary surface at a time:
 - Detachable windows or browser tabs.
 - Real-time co-editing and live cross-Thread refresh.
 - User-synchronized layout preferences across devices.
+
+## Library and expanded MCP Apps
+
+On desktop, opening a Library item gives its preview the workspace area beside
+the Library navigator. The conversation placeholder is hidden while that preview
+is selected. Chat keeps its conversation/preview split. This removes unused
+space without changing Project or Thread ownership.
+
+The Artifact View Host puts the App first, with Artifact identity, version,
+provenance and raw data in disclosures. A trusted toolbar expands the same iframe
+into a native modal dialog and restores it inline. Escape and the close button
+return focus to the expansion control. The iframe stays mounted, preserving
+selection, camera and local edits, and retains the same sandbox permissions.
+Phone expansion fills the viewport. The MCP host context reports theme and
+inline/fullscreen display modes. See `mcp-app-development.md` for App guidance.

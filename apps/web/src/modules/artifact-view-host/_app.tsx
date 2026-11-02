@@ -4,7 +4,9 @@ import {
   AppBridge,
   PostMessageTransport,
 } from "@modelcontextprotocol/ext-apps/app-bridge";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { Button } from "@/shared/ui";
 
 import type { ArtifactDocument } from "@/contracts";
 
@@ -30,13 +32,36 @@ export function McpAppFrame({
   toolInput,
   toolResult,
   title,
+  displayTitle,
 }: {
   appUrl: string;
   toolInput: Record<string, unknown>;
   toolResult: McpToolResult;
   title: string;
+  displayTitle?: string;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const bridgeRef = useRef<AppBridge | null>(null);
+  const expandedRef = useRef(false);
+  const [expanded, setExpanded] = useState(false);
+  const setDisplayMode = useCallback((next: boolean) => {
+    const container = dialog.current;
+    if (!container || next === expandedRef.current) return;
+    container.close();
+    if (next) container.showModal();
+    else container.show();
+    expandedRef.current = next;
+    setExpanded(next);
+    bridgeRef.current?.setHostContext({
+      platform: "web",
+      theme: "dark",
+      displayMode: next ? "fullscreen" : "inline",
+      availableDisplayModes: ["inline", "fullscreen"],
+    });
+    toolbar.current?.querySelector("button")?.focus();
+  }, []);
   const payload = useRef({ toolInput, toolResult });
   const [attempt, setAttempt] = useState(0);
   const requestKey = `${appUrl}:${attempt}`;
@@ -97,9 +122,22 @@ export function McpAppFrame({
       null,
       { name: "Agent Hub", version: "0.0.0" },
       { sandbox: { csp: {}, permissions: {} }, serverTools: {} },
-      { hostContext: { platform: "web" } },
+      {
+        hostContext: {
+          platform: "web",
+          theme: "dark",
+          displayMode: expandedRef.current ? "fullscreen" : "inline",
+          availableDisplayModes: ["inline", "fullscreen"],
+        },
+      },
     );
 
+    bridgeRef.current = bridge;
+    bridge.onrequestdisplaymode = async ({ mode }) => {
+      if (mode === "inline" || mode === "fullscreen")
+        setDisplayMode(mode === "fullscreen");
+      return { mode: expandedRef.current ? "fullscreen" : "inline" };
+    };
     bridge.oncalltool = async () =>
       toolError("This preview cannot run tools or change the saved result.");
     bridge.oninitialized = () => {
@@ -138,34 +176,55 @@ export function McpAppFrame({
       });
     return () => {
       disposed = true;
+      bridgeRef.current = null;
       void bridge.teardownResource({}).catch(() => {});
       void bridge.close();
     };
-  }, [appUrl, availability, requestKey]);
+  }, [appUrl, availability, requestKey, setDisplayMode]);
 
   return (
     <section aria-label={title} className={styles.app}>
-      {availability === "loading" ? <p>Loading interactive App…</p> : null}
-      {availability === "unavailable" ? (
-        <div className={styles.appUnavailable} role="status">
-          <p>{message}</p>
-          <button
-            onClick={() => setAttempt((value) => value + 1)}
-            type="button"
-          >
-            Retry
-          </button>
+      <dialog
+        open
+        ref={dialog}
+        role={expanded ? "dialog" : "region"}
+        aria-label={displayTitle ?? title}
+        className={`${styles.appDialog} ${expanded ? styles.appExpanded : ""}`}
+        onCancel={(event) => {
+          event.preventDefault();
+          setDisplayMode(false);
+        }}
+      >
+        <div className={styles.appToolbar} ref={toolbar}>
+          <strong>{displayTitle ?? title}</strong>
+          {(availability === "available" || expanded) && (
+            <Button type="button" onClick={() => setDisplayMode(!expanded)}>
+              {expanded ? "Close expanded App" : "Expand App"}
+            </Button>
+          )}
         </div>
-      ) : null}
-      {availability === "available" ? (
-        <iframe
-          className={styles.appFrame}
-          ref={frame}
-          referrerPolicy="no-referrer"
-          sandbox="allow-scripts"
-          title={title}
-        />
-      ) : null}
+        {availability === "loading" ? <p>Loading interactive App…</p> : null}
+        {availability === "unavailable" ? (
+          <div className={styles.appUnavailable} role="status">
+            <p>{message}</p>
+            <button
+              onClick={() => setAttempt((value) => value + 1)}
+              type="button"
+            >
+              Retry
+            </button>
+          </div>
+        ) : null}
+        {availability === "available" ? (
+          <iframe
+            className={styles.appFrame}
+            ref={frame}
+            referrerPolicy="no-referrer"
+            sandbox="allow-scripts"
+            title={title}
+          />
+        ) : null}
+      </dialog>
     </section>
   );
 }
@@ -184,6 +243,7 @@ export function ArtifactApp({
     <McpAppFrame
       appUrl={appUrl}
       title="Artifact App"
+      displayTitle={document.artifact.title}
       toolInput={{ document }}
       toolResult={{
         content: [],

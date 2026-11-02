@@ -138,6 +138,13 @@ export function ProjectWorkspace() {
     ? workspace.projects[workspace.selectedProjectId]
     : undefined;
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
+  const isLibraryPreviewOpen =
+    selectedActivity === "artifacts" &&
+    Boolean(
+      selectedWorkspace?.selectedArtifactId ||
+      selectedWorkspace?.selectedFilePath ||
+      selectedWorkspace?.selectedFileProposal,
+    );
   const isExplorerActivity = ["functions", "plugins", "sources"].includes(
     selectedActivity,
   );
@@ -387,7 +394,7 @@ export function ProjectWorkspace() {
 
   return (
     <main
-      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""} ${isWorkflowActivity ? styles.workflowOpen : ""}`}
+      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""} ${isWorkflowActivity ? styles.workflowOpen : ""} ${isLibraryPreviewOpen ? styles.libraryPreviewOpen : ""}`}
       style={{ "--navigator-width": `${navigatorWidth}px` } as CSSProperties}
     >
       <header className={styles.titlebar}>
