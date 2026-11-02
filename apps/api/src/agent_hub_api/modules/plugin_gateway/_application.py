@@ -617,7 +617,7 @@ def create_postgres_plugin_gateway(
         id="ifc-viewer",
         name="IFC viewer",
         version="0.1.0",
-        endpoint="http://ifc-viewer:8000/mcp",
+        endpoint=settings.ifc_viewer_url,
         tools=(
             PluginTool(name="get_ifc_guide", read_only=True, repeat_safe=True),
             PluginTool(name="inspect_ifc_objects", read_only=True, repeat_safe=True),
