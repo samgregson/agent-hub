@@ -1,6 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel
 
 from agent_hub_api.contracts import ProjectFileCatalog, ProjectFilePreview, ProjectFileSummary
 from agent_hub_api.modules.identity import (
@@ -12,10 +13,17 @@ from agent_hub_api.modules.identity import (
 from agent_hub_api.modules.project_files._application import (
     InvalidProjectFilePath,
     ProjectFileAccess,
+    ProjectFileAlreadyExists,
+    ProjectFileLimitExceeded,
     ProjectFileNotFound,
     ProjectFilesModule,
     ReservedProjectFilePath,
 )
+
+
+class ProjectFileUpload(BaseModel):
+    path: str
+    content: str
 
 
 def create_project_files_router(
@@ -38,6 +46,31 @@ def create_project_files_router(
             ) from error
 
     Context = Annotated[RequestContext, Depends(request_context)]
+
+    @router.post("", response_model=ProjectFilePreview, status_code=status.HTTP_201_CREATED)
+    async def upload_file(
+        project_id: str, context: Context, upload: ProjectFileUpload
+    ) -> ProjectFilePreview:
+        if not upload.path.startswith("/project/"):
+            raise HTTPException(status_code=422, detail="Project files require a /project/ path")
+        try:
+            file = await project_files.create_visible(
+                ProjectFileAccess(subject=context.subject),
+                project_id,
+                upload.path.removeprefix("/project"),
+                upload.content,
+            )
+        except ProjectFileAlreadyExists as error:
+            raise HTTPException(
+                status_code=409, detail="A file already exists at this path"
+            ) from error
+        except ProjectFileNotFound as error:
+            raise HTTPException(status_code=404, detail="Project not found") from error
+        except (InvalidProjectFilePath, ReservedProjectFilePath, ProjectFileLimitExceeded) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        return ProjectFilePreview(
+            path=f"/project{file.path}", content=file.content, version=file.version
+        )
 
     @router.get("/index", response_model=ProjectFileCatalog)
     async def list_files(project_id: str, context: Context) -> ProjectFileCatalog:

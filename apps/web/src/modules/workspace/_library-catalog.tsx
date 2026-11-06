@@ -93,8 +93,62 @@ export function LibraryCatalog({
   const [datasetRecords, setDatasetRecords] = useState("[]");
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const items = result.projectId === projectId ? result.items : null;
   const error = result.projectId === projectId ? result.error : null;
+
+  async function uploadFiles(files: FileList) {
+    setUploading(true);
+    setUploadError(null);
+    const errors: string[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        const bytes = await file.arrayBuffer();
+        const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        const response = await fetch(
+          `/api/projects/${encodeURIComponent(projectId)}/files`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ path: `/project/${file.name}`, content }),
+          },
+        );
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(
+            typeof body.detail === "string" ? body.detail : "Upload failed",
+          );
+        }
+        const saved = (await response.json()) as {
+          path: string;
+          version: number;
+        };
+        setResult((current) =>
+          current.projectId !== projectId || current.items === null
+            ? current
+            : {
+                ...current,
+                items: [
+                  ...current.items,
+                  {
+                    kind: "projectFile" as const,
+                    label: saved.path,
+                    path: saved.path,
+                    version: saved.version,
+                  },
+                ].sort((a, b) => a.label.localeCompare(b.label)),
+              },
+        );
+      } catch (error) {
+        errors.push(
+          `${file.name}: ${error instanceof Error ? error.message : "Upload failed"}`,
+        );
+      }
+    }
+    if (errors.length) setUploadError(errors.join("; "));
+    setUploading(false);
+  }
 
   async function createDataset() {
     let records: unknown;
@@ -228,6 +282,25 @@ export function LibraryCatalog({
 
   return (
     <section aria-label="Library items">
+      <label>
+        Upload Project files (UTF-8 text)
+        <input
+          type="file"
+          multiple
+          disabled={uploading}
+          onChange={(event) => {
+            if (event.target.files?.length)
+              void uploadFiles(event.target.files);
+            event.target.value = "";
+          }}
+        />
+      </label>
+      {uploading ? <p>Uploading…</p> : null}
+      {uploadError ? (
+        <p className={styles.error} role="alert">
+          {uploadError}
+        </p>
+      ) : null}
       <button
         className={styles.newThread}
         onClick={() => setAddingDataset((current) => !current)}

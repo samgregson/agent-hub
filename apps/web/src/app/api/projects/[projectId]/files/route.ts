@@ -19,3 +19,11 @@ export async function DELETE(
   const { projectId } = await context.params;
   return forwardProjectFileRequest(request, projectId);
 }
+
+export async function POST(
+  request: Request,
+  context: RouteContext,
+): Promise<Response> {
+  const { projectId } = await context.params;
+  return forwardProjectFileRequest(request, projectId);
+}

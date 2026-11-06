@@ -8,6 +8,7 @@ import {
   assignMetadata,
   colourMap,
   readView,
+  scaleLegend,
   valueKey,
   type View,
 } from "./metadata";
@@ -100,8 +101,8 @@ function Viewer({ initial }: { initial: View }) {
     ...new Set(rows.flatMap((row) => Object.keys(row.values))),
   ].sort();
   const colours = useMemo(
-    () => colourMap(rows, view.colourBy ?? ""),
-    [rows, view.colourBy],
+    () => colourMap(rows, view.colourBy ?? "", view.colourScale),
+    [rows, view.colourBy, view.colourScale],
   );
   const byId = useMemo(
     () => new Map(rows.map((row) => [row.globalId, row.values])),
@@ -296,7 +297,11 @@ function Viewer({ initial }: { initial: View }) {
       </div>
       {view.colourBy && (
         <section aria-label="Colour legend" className="legend">
-          {[...colours].map(([label, colour]) => (
+          {[
+            ...(view.colourScale?.key === view.colourBy
+              ? scaleLegend(view.colourScale)
+              : colours),
+          ].map(([label, colour]) => (
             <span key={label}>
               <i style={{ background: colour }} />
               {label}
@@ -307,7 +312,11 @@ function Viewer({ initial }: { initial: View }) {
       <p className="notice">
         Metadata edits are local to this preview. Export these inputs and call
         prepare_ifc_view to save a new result. The IFC source is unchanged.
-        Numeric values use discrete colours.
+        Numeric values use{" "}
+        {view.colourScale?.key === view.colourBy
+          ? "the supplied colour scale"
+          : "discrete colours"}
+        .
       </p>
       {exporting && (
         <label>
@@ -321,6 +330,7 @@ function Viewer({ initial }: { initial: View }) {
                 ifc_text: view.ifcText,
                 metadata: rows,
                 colour_by: view.colourBy,
+                colour_scale: view.colourScale ?? null,
               },
               null,
               2,

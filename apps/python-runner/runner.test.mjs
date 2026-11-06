@@ -81,3 +81,46 @@ Deno.test("time and output limits terminate a Function", async () => {
     );
   }
 });
+
+Deno.test(
+  "Functions can parse different CSV schemas and dialects",
+  async () => {
+    const source = `
+import csv
+import io
+def transform(inputs, parameters):
+    reader = csv.DictReader(io.StringIO(inputs["text"], newline=""), delimiter=parameters["delimiter"])
+    return {"columns": reader.fieldnames, "rows": list(reader)}
+`;
+    for (const [text, delimiter, expected] of [
+      [
+        'name,description\nA,"one, two"\n',
+        ",",
+        {
+          columns: ["name", "description"],
+          rows: [{ name: "A", description: "one, two" }],
+        },
+      ],
+      [
+        "date;quantity\n2026-01-01;42\n",
+        ";",
+        {
+          columns: ["date", "quantity"],
+          rows: [{ date: "2026-01-01", quantity: "42" }],
+        },
+      ],
+    ]) {
+      const result = await runFunction({
+        source,
+        inputs: { text },
+        parameters: { delimiter },
+      });
+      if (
+        !result.ok ||
+        JSON.stringify(result.output) !== JSON.stringify(expected)
+      ) {
+        throw new Error(`Unexpected CSV result: ${JSON.stringify(result)}`);
+      }
+    }
+  },
+);

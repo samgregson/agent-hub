@@ -21,6 +21,7 @@ from pydantic import (
     StrictFloat,
     StrictInt,
     StrictStr,
+    model_validator,
 )
 
 GUIDE_URI = "resource://agent-hub-ifc-viewer/agent-guide"
@@ -56,6 +57,25 @@ class IfcObjects(BaseModel):
     objects: list[IfcObjectRecord]
 
 
+class ColourBand(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    max: float
+    colour: Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
+
+
+class ColourScale(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: Annotated[str, Field(min_length=1, max_length=128)]
+    bands: Annotated[list[ColourBand], Field(min_length=1, max_length=20)]
+    aboveColour: Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
+
+    @model_validator(mode="after")
+    def ordered_bands(self) -> ColourScale:
+        if any(a.max >= b.max for a, b in zip(self.bands, self.bands[1:])):
+            raise ValueError("Colour band maxima must be strictly increasing")
+        return self
+
+
 class IfcView(BaseModel):
     kind: Literal["ifc.view"]
     schemaVersion: Literal["1"]
@@ -63,6 +83,7 @@ class IfcView(BaseModel):
     modelSha256: str
     metadata: list[ObjectMetadata]
     colourBy: str | None
+    colourScale: ColourScale | None = None
 
 
 def _model(ifc_text: str):
@@ -154,12 +175,16 @@ def create_ifc_viewer_server() -> FastMCP:
         ifc_text: str,
         metadata: list[ObjectMetadata] | None = None,
         colour_by: str | None = None,
+        colour_scale: ColourScale | None = None,
     ) -> ToolResult:
         """Read get_ifc_guide first. Create a portable IFC view with metadata overlays keyed by IFC GlobalId.
 
         Bind calculation/Map outputs as [{globalId, values: {status, utilisation, ...}}].
         Each object may occur once; unknown IDs are rejected. Values are finite JSON
-        scalars. colour_by names an overlay key. IFC source is preserved verbatim.
+        scalars. colour_by names an overlay key. colour_scale optionally sets
+        ordered inclusive numeric maxima and hex colours for one overlay key;
+        values above the last maximum use aboveColour, non-numbers are grey.
+        IFC source is preserved verbatim.
         A successful result can be saved by the host and reopened without rerunning.
         """
         _, products = _model(ifc_text)
@@ -179,6 +204,10 @@ def create_ifc_viewer_server() -> FastMCP:
             rows.append(row.model_dump())
         if colour_by is not None and colour_by not in {k for row in rows for k in row["values"]}:
             raise ToolError("colour_by must name an assigned metadata key.")
+        if colour_scale is not None and colour_scale.key not in {
+            k for row in rows for k in row["values"]
+        }:
+            raise ToolError("colour_scale.key must name an assigned metadata key.")
         return _bounded(
             {
                 "kind": "ifc.view",
@@ -187,6 +216,7 @@ def create_ifc_viewer_server() -> FastMCP:
                 "modelSha256": hashlib.sha256(ifc_text.encode()).hexdigest(),
                 "metadata": rows,
                 "colourBy": colour_by,
+                "colourScale": colour_scale.model_dump() if colour_scale else None,
             }
         )
 

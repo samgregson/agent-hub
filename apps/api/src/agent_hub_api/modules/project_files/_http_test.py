@@ -12,6 +12,36 @@ from agent_hub_api.settings import Settings
 
 
 @pytest.mark.asyncio
+async def test_upload_creates_scoped_text_file_without_overwriting() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="alice"), "Bridge")
+    files = create_memory_project_files(projects, max_bytes=64)
+    app = FastAPI()
+    app.include_router(
+        create_project_files_router(
+            create_identity_module(Settings(environment="test", fixed_identity_subject="alice")),
+            files,
+        ),
+        prefix="/api",
+    )
+    url = f"/api/projects/{project.id}/files"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        saved = await client.post(
+            url, json={"path": "/project/forces.csv", "content": "id,moment\na,1\n"}
+        )
+        duplicate = await client.post(
+            url, json={"path": "/project/forces.csv", "content": "changed"}
+        )
+        reserved = await client.post(url, json={"path": "/project/.datasets/a", "content": "x"})
+        too_large = await client.post(url, json={"path": "/project/large", "content": "x" * 65})
+    assert saved.status_code == 201
+    assert duplicate.status_code == 409
+    assert reserved.status_code == 422
+    assert too_large.status_code == 422
+    assert (await files.load(project.id, "/forces.csv")).content == "id,moment\na,1\n"
+
+
+@pytest.mark.asyncio
 async def test_preview_is_safe_project_authorized_and_does_not_create_an_artifact() -> None:
     settings = Settings(environment="test", fixed_identity_subject="alice")
     projects = create_memory_project_module()

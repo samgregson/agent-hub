@@ -74,3 +74,28 @@ async def test_duplicate_rows_and_nonfinite_values_are_rejected():
             await client.call_tool("prepare_ifc_view", {"ifc_text": text, "metadata": [row, row]})
         with pytest.raises(ValidationError):
             ObjectMetadata(globalId=global_id, values={"x": float("inf")})
+
+
+@pytest.mark.asyncio
+async def test_colour_scale_is_captured_and_invalid_thresholds_rejected():
+    text = FIXTURE.read_text()
+    global_id = ifcopenshell.file.from_string(text).by_type("IfcBeam")[0].GlobalId
+    scale = {
+        "key": "utilisation",
+        "bands": [{"max": 0.95, "colour": "#008000"}, {"max": 1, "colour": "#ffbf00"}],
+        "aboveColour": "#ff0000",
+    }
+    async with Client(create_ifc_viewer_server()) as client:
+        args = {
+            "ifc_text": text,
+            "metadata": [{"globalId": global_id, "values": {"utilisation": 1}}],
+            "colour_by": "utilisation",
+            "colour_scale": scale,
+        }
+        result = (await client.call_tool("prepare_ifc_view", args)).structured_content
+        assert result["colourScale"] == scale
+        with pytest.raises((ToolError, ValidationError)):
+            await client.call_tool(
+                "prepare_ifc_view",
+                {**args, "colour_scale": {**scale, "bands": list(reversed(scale["bands"]))}},
+            )
