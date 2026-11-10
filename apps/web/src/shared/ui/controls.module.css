@@ -27,7 +27,7 @@
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .primary:hover:not(:disabled) {

@@ -452,9 +452,7 @@ export function ProjectWorkspace() {
         >
           Menu
         </button>
-        <span className={styles.foundation}>
-          Foundation · Project workspace
-        </span>
+        <span className={styles.foundation}>Agent Hub</span>
       </header>
 
       {isNewProjectDialogOpen ? (

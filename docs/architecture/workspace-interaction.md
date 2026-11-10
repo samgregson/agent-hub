@@ -174,3 +174,14 @@ return focus to the expansion control. The iframe stays mounted, preserving
 selection, camera and local edits, and retains the same sandbox permissions.
 Phone expansion fills the viewport. The MCP host context reports theme and
 inline/fullscreen display modes. See `mcp-app-development.md` for App guidance.
+
+## Visual direction
+
+The host uses neutral slate surfaces with restrained blue accents. Avoid neon
+colours and green-tinted black panels. Primary actions, focus and selection have
+clear hierarchy; routine navigation and branding stay quiet. Green and rose are
+reserved for semantic success and danger, including file diffs. Use the shared
+colour tokens in `globals.css` so chat, Library, Workflows and dialogs stay
+consistent. Keep text contrast readable, corners modest, and typography lighter
+than the former heavy button and monogram treatment. Plugin Apps continue to
+own their isolated styles and receive the standard dark host theme context.

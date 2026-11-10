@@ -38,13 +38,13 @@
 }
 
 .tabs button[aria-pressed="true"] {
-  border-color: #888c62;
-  background: #282b1f;
+  border-color: var(--line-strong);
+  background: var(--surface-selected);
   color: var(--text);
 }
 
 .tabs button:focus-visible {
-  outline: 2px solid #e9ff70;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -55,7 +55,7 @@
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 0.45rem;
-  background: #111210;
+  background: var(--surface-code);
   font:
     12px/1.5 ui-monospace,
     SFMono-Regular,
@@ -70,17 +70,17 @@
 }
 
 .added {
-  background: #1c3525;
-  color: #a9e7ba;
+  background: var(--success-surface);
+  color: var(--success);
 }
 
 .removed {
-  background: #3a2421;
-  color: #f1aaa0;
+  background: var(--danger-surface);
+  color: var(--danger);
 }
 
 .hunk {
-  color: #b7b6e7;
+  color: var(--info);
 }
 
 .preview footer {

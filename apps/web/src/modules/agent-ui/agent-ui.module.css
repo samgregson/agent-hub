@@ -245,7 +245,7 @@
   padding: 1rem;
   border: 1px solid var(--line);
   border-radius: 0.45rem;
-  background: #111210;
+  background: var(--surface-code);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -276,7 +276,7 @@
 .messageError,
 .runError,
 .runFailure {
-  color: #ff9b86;
+  color: var(--danger);
 }
 
 .runStatus {
@@ -342,7 +342,7 @@
 
 .processPulse {
   background: var(--accent);
-  box-shadow: 0 0 0 3px rgb(220 245 107 / 13%);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .processCount {
@@ -520,7 +520,7 @@
   overflow: auto;
   padding: 10px;
   border-radius: 8px;
-  background: #111210;
+  background: var(--surface-code);
   color: var(--text);
   font-size: 12px;
   line-height: 1.5;
