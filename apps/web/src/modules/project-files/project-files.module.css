@@ -68,3 +68,78 @@
   border-color: var(--line-strong);
   background: var(--surface-raised);
 }
+
+.documentViewer {
+  min-width: 0;
+  width: 100%;
+}
+.documentViewer header,
+.documentToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.documentViewer header {
+  justify-content: space-between;
+}
+.documentStage {
+  height: 68dvh;
+  min-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line-subtle);
+  background: var(--surface);
+}
+.documentStage img {
+  display: block;
+  height: auto;
+}
+.documentStage pre {
+  padding: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.documentViewer details {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+
+.documentToolbar select {
+  min-height: var(--control-height);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  padding: var(--space-2);
+  color: var(--text);
+  background: var(--surface-card);
+  font: inherit;
+}
+.documentToolbar button[aria-pressed="true"] {
+  background: var(--surface-selected);
+  border-color: var(--accent);
+}
+.documentViewer header a {
+  color: var(--accent);
+}
+.documentUpload {
+  margin-bottom: var(--space-3);
+}
+.documentUpload label {
+  display: grid;
+  gap: var(--space-2);
+}
+.documentUpload input {
+  width: 100%;
+  min-width: 0;
+  color: var(--text-muted);
+}
+.documentUpload input::file-selector-button {
+  min-height: var(--control-height);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text);
+  cursor: pointer;
+  padding: var(--space-2) var(--space-3);
+  margin-right: var(--space-2);
+}

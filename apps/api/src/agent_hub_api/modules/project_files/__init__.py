@@ -21,6 +21,9 @@ from agent_hub_api.modules.project_files._application import (
 from agent_hub_api.modules.project_files._http import create_project_files_router
 
 __all__ = [
+    "DocumentInvalid",
+    "ProjectDocumentsModule",
+    "create_document_router",
     "ARTIFACT_ROOT",
     "InvalidProjectFilePath",
     "InvalidProjectFilePattern",
@@ -41,3 +44,6 @@ __all__ = [
     "create_postgres_project_files",
     "create_project_files_router",
 ]
+
+from ._document_http import create_document_router
+from ._documents import DocumentInvalid, ProjectDocumentsModule

@@ -45,6 +45,7 @@ import {
   createWorkspaceState,
   workspaceReducer,
 } from "./_state";
+import { DocumentPreview } from "@/modules/project-files";
 import { LibraryCatalog } from "./_library-catalog";
 import { WorkflowOverview } from "@/modules/workflows";
 
@@ -766,6 +767,25 @@ export function ProjectWorkspace() {
             key={`${selectedProject.id}:${selectedWorkspace.selectedFilePath}`}
             onSaved={() => setLibraryRefreshKey((current) => current + 1)}
             projectId={selectedProject.id}
+          />
+        ) : selectedProject &&
+          selectedWorkspace?.selectedFilePath?.startsWith(
+            "/project/.documents/",
+          ) ? (
+          <DocumentPreview
+            key={`${selectedProject.id}:${selectedWorkspace.selectedFilePath}`}
+            projectId={selectedProject.id}
+            documentId={selectedWorkspace.selectedFilePath.split("/")[3]}
+            initialPage={Number(
+              selectedWorkspace.selectedFilePath.match(
+                /pages\/(\d+)\.md$/,
+              )?.[1] ?? 1,
+            )}
+            initialMode={
+              selectedWorkspace.selectedFilePath.endsWith("/text.md")
+                ? "text"
+                : "original"
+            }
           />
         ) : selectedProject && selectedWorkspace?.selectedFilePath ? (
           <ProjectFilePreview

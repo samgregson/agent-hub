@@ -526,7 +526,7 @@ async def test_agent_uses_structured_interrupt_outcomes_without_legacy_custom_ev
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
     runner._model = cast(Any, object())
-    runner._project_files = cast(Any, object())
+    runner._project_files = cast(Any, SimpleNamespace(documents=None))
     runner._plugin_gateway = None
     runner._settings = cast(
         Any,
@@ -560,7 +560,7 @@ async def test_agent_can_discover_and_load_project_artifacts(
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
     runner._model = cast(Any, object())
-    runner._project_files = cast(Any, object())
+    runner._project_files = cast(Any, SimpleNamespace(documents=None))
     runner._plugin_gateway = None
     runner._artifacts = cast(Any, ArtifactContext())
     runner._settings = cast(
@@ -590,7 +590,7 @@ async def test_agent_exposes_authoring_and_workflow_tools_without_standalone_run
     runner = object.__new__(PostgresDeepAgentRunner)
     runner._checkpointer = cast(Any, object())
     runner._model = cast(Any, object())
-    runner._project_files = cast(Any, object())
+    runner._project_files = cast(Any, SimpleNamespace(documents=None))
     runner._plugin_gateway = None
     runner._datasets = cast(Any, object())
     runner._functions = cast(Any, object())

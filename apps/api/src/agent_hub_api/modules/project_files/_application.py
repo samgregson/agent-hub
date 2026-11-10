@@ -5,13 +5,16 @@ import posixpath
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from psycopg import AsyncConnection
 from psycopg.rows import dict_row
 
 from agent_hub_api.modules.projects import ProjectAccess, ProjectModule, ProjectNotFound
 from agent_hub_api.settings import Settings
+
+if TYPE_CHECKING:
+    from ._documents import ProjectDocumentsModule
 
 ARTIFACT_ROOT = "/.artifacts"
 DATASET_ROOT = "/.datasets"
@@ -141,6 +144,10 @@ def _normalize_file_path(path: str) -> str:
 
 
 def _require_mutable(path: str) -> None:
+    if path == "/.documents" or path.startswith("/.documents/"):
+        raise ReservedProjectFilePath(
+            "Document originals and generated files are managed through document uploads."
+        )
     if path == ARTIFACT_ROOT or path.startswith(f"{ARTIFACT_ROOT}/"):
         raise ReservedProjectFilePath(
             "Artifact paths can only be changed through the Artifact Module"
@@ -179,6 +186,7 @@ class ProjectFilesModule:
         max_files: int,
         search_max_matches: int,
     ) -> None:
+        self.documents: ProjectDocumentsModule | None = None
         self._store = store
         self._projects = projects
         self._max_bytes = max_bytes
@@ -607,22 +615,38 @@ class PostgresProjectFileStore:
 def create_memory_project_files(
     projects: ProjectModule, *, max_bytes: int = 1_000_000
 ) -> ProjectFilesModule:
-    return ProjectFilesModule(
-        MemoryProjectFileStore(),
+    store = MemoryProjectFileStore()
+    module = ProjectFilesModule(
+        store,
         projects,
         max_bytes=max_bytes,
         max_files=1_000,
         search_max_matches=200,
     )
+    from ._documents import MemoryDocumentStore, ProjectDocumentsModule
+
+    module.documents = ProjectDocumentsModule(
+        projects, MemoryDocumentStore(store), max_file_bytes=max_bytes
+    )
+    return module
 
 
 def create_postgres_project_files(
     settings: Settings, projects: ProjectModule
 ) -> ProjectFilesModule:
-    return ProjectFilesModule(
+    module = ProjectFilesModule(
         PostgresProjectFileStore(settings),
         projects,
         max_bytes=settings.project_file_max_bytes,
         max_files=settings.project_file_max_files,
         search_max_matches=settings.project_file_search_max_matches,
     )
+    from ._documents import PostgresDocumentStore, ProjectDocumentsModule
+
+    module.documents = ProjectDocumentsModule(
+        projects,
+        PostgresDocumentStore(settings),
+        max_files=settings.project_file_max_files,
+        max_file_bytes=settings.project_file_max_bytes,
+    )
+    return module

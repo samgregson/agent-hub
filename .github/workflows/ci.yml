@@ -77,7 +77,7 @@ jobs:
       - name: Verify PostgreSQL Run reconciliation and Artifact audit
         env:
           AGENT_HUB_ISOLATED_TEST_DATABASE_URL: postgresql://agent_hub:agent_hub@localhost:5432/agent_hub
-        run: uv run --frozen --package agent-hub-api pytest -q apps/api/src/agent_hub_api/modules/agent_execution/_postgres_integration_test.py apps/api/src/agent_hub_api/modules/artifacts/_postgres_integration_test.py
+        run: uv run --frozen --package agent-hub-api pytest -q apps/api/src/agent_hub_api/modules/agent_execution/_postgres_integration_test.py apps/api/src/agent_hub_api/modules/artifacts/_postgres_integration_test.py apps/api/src/agent_hub_api/modules/project_files/_documents_postgres_integration_test.py
       - name: Build foundation runtime images
         run: |
           docker build -t agent-hub-acceptance-api -f apps/api/Dockerfile .
@@ -135,6 +135,7 @@ jobs:
           AGENT_HUB_E2E_EXTERNAL: "1"
           AGENT_HUB_E2E_BASE_URL: http://127.0.0.1:3001
           AGENT_HUB_FOUNDATION_E2E: "1"
+          AGENT_HUB_DOCUMENT_E2E: "1"
         run: pnpm --filter @agent-hub/web test:e2e
       - name: Restore application and checkpoint data
         env:

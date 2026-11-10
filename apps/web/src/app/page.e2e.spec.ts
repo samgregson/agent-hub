@@ -3,6 +3,15 @@ import { readFileSync } from "node:fs";
 
 import { expect, test } from "@playwright/test";
 
+// Existing Library fixtures have no uploaded documents.
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/projects/*/files/documents", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: [] })
+      : route.fallback(),
+  );
+});
+
 test("Plugins are available through the browser-facing Project API", async ({
   request,
 }) => {

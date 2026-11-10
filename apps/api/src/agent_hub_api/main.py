@@ -32,6 +32,7 @@ from agent_hub_api.modules.plugin_gateway import (
     create_postgres_plugin_gateway,
 )
 from agent_hub_api.modules.project_files import (
+    create_document_router,
     create_postgres_project_files,
     create_project_files_router,
 )
@@ -131,6 +132,9 @@ def create_app(
     application.include_router(health_router)
     application.include_router(
         create_project_router(resolved_identity, resolved_projects), prefix="/api"
+    )
+    application.include_router(
+        create_document_router(resolved_identity, resolved_project_files), prefix="/api"
     )
     application.include_router(
         create_project_files_router(resolved_identity, resolved_project_files),

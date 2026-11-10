@@ -115,3 +115,9 @@ _Avoid_: Open marketplace, user-supplied plugin registry
 **Plugin**:
 A catalogued extension exposed through a portable MCP server and, optionally, an MCP App interface. Agent Hub may add host conveniences without making them requirements of the plugin.
 _Avoid_: Provider-owned artifact store, internal Python module
+
+**Document**:
+An uploaded PDF or DOCX source owned by a Project, retaining its exact original
+bytes and protected generated Markdown. It is discoverable in Library and the
+Virtual Filesystem without automatically becoming an Artifact. PDF page images
+are derived on demand; extracted text is not a complete visual representation.
