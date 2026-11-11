@@ -82,6 +82,10 @@
   gap: 0.5rem;
 }
 
+.appCompact .appFrame {
+  height: 13rem;
+}
+
 .appFrame {
   background: white;
   border: 1px solid var(--line);

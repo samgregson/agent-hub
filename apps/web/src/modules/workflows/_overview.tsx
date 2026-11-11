@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { WorkflowDefinitionEditor } from "./_editor";
+import { WorkflowFunctionPreview } from "./_function-preview";
 import {
   GraphCanvas,
   type GraphCanvasEdge,
   type GraphCanvasNode,
 } from "./_graph-canvas";
 import { WorkflowMapResults } from "./_map-results";
-import { WorkflowOutputApp } from "./_output-app";
+import { WorkflowNodeAppPreview, WorkflowOutputApp } from "./_output-app";
 import {
   WorkflowNodePreview,
   type WorkflowNodePreviewSource,
@@ -721,6 +722,8 @@ export function WorkflowOverview({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const nodeInspectorRef = useRef<HTMLDivElement>(null);
+  const overviewRef = useRef<HTMLElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const reviewRequestId = useRef(0);
   const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(
     null,
@@ -742,6 +745,14 @@ export function WorkflowOverview({
   const [workflowInputText, setWorkflowInputText] = useState<
     Record<string, string>
   >({});
+
+  useEffect(() => {
+    const syncFullscreen = () =>
+      setIsFullscreen(document.fullscreenElement === overviewRef.current);
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () =>
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
 
   useEffect(() => {
     if (selectedNodeId && window.matchMedia("(max-width: 720px)").matches) {
@@ -856,6 +867,13 @@ export function WorkflowOverview({
   const snapshotTargets = isRecord(selectedRun?.snapshot.targets)
     ? (selectedRun.snapshot.targets as Record<string, SourceSnapshot>)
     : {};
+  const selectedNodeTarget = selectedNode
+    ? (snapshotTargets[selectedNode.id] ?? {})
+    : {};
+  const selectedNodeAppUrl =
+    selectedRun && selectedNode?.kind === "mcp"
+      ? `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow?.id ?? "")}/runs/${encodeURIComponent(selectedRun.id)}/nodes/${encodeURIComponent(selectedNode.id)}/app`
+      : null;
   const finalOutputs = isRecord(runExecution.outputs)
     ? runExecution.outputs
     : {};
@@ -1330,7 +1348,11 @@ export function WorkflowOverview({
   }
 
   return (
-    <section aria-label="Workflow overview" className={styles.overview}>
+    <section
+      aria-label="Workflow overview"
+      className={styles.overview}
+      ref={overviewRef}
+    >
       <header className={styles.header}>
         <div>
           {workflows.length > 1 ? (
@@ -1360,6 +1382,21 @@ export function WorkflowOverview({
           </p>
         </div>
         <div className={styles.headerActions}>
+          <button
+            className={styles.secondaryButton}
+            onClick={() => {
+              const root = overviewRef.current;
+              if (!root) return;
+              if (document.fullscreenElement === root) {
+                void document.exitFullscreen();
+              } else {
+                void root.requestFullscreen();
+              }
+            }}
+            type="button"
+          >
+            {isFullscreen ? "Exit full screen" : "Full screen"}
+          </button>
           <button
             className={styles.secondaryButton}
             onClick={() => setEditingDefinitionId(workflow.id)}
@@ -1440,34 +1477,57 @@ export function WorkflowOverview({
                   Close preview
                 </button>
               </div>
-              <WorkflowNodePreview
-                capturedTarget={
-                  selectedNode ? snapshotTargets[selectedNode.id] : undefined
-                }
-                inputSources={
-                  selectedNode
-                    ? selectedInputSources
-                    : [
-                        {
-                          label: "Binding source",
-                          value: selectedNodeOutput,
-                          provenance: selectedCanvasNode.kind,
-                        },
-                      ]
-                }
-                kindLabel={selectedCanvasNode.kind}
-                node={
-                  selectedNode ?? {
-                    id: selectedCanvasNode.id,
-                    kind: selectedCanvasNode.kind,
-                    refId: selectedCanvasNode.title,
-                    version: workflow.version,
+              {selectedNode?.kind === "mcp" &&
+              selectedNodeAppUrl &&
+              selectedNodeProgress?.status === "succeeded" &&
+              isRecord(selectedNodeProgress.output) ? (
+                <WorkflowNodeAppPreview
+                  appUrl={selectedNodeAppUrl}
+                  title={selectedNode.toolName ?? selectedNode.id}
+                  inputs={
+                    isRecord(selectedNodeProgress.inputs)
+                      ? selectedNodeProgress.inputs
+                      : {}
                   }
-                }
-                output={selectedNodeOutput}
-                outputError={selectedNodeProgress?.error}
-                outputState={selectedOutputState}
-              />
+                  output={selectedNodeProgress.output}
+                />
+              ) : selectedNode?.kind === "python" ? (
+                <WorkflowFunctionPreview
+                  capturedTarget={selectedNodeTarget}
+                  functionId={selectedNode.refId}
+                  projectId={projectId}
+                  version={selectedNode.version}
+                />
+              ) : (
+                <WorkflowNodePreview
+                  capturedTarget={
+                    selectedNode ? snapshotTargets[selectedNode.id] : undefined
+                  }
+                  inputSources={
+                    selectedNode
+                      ? selectedInputSources
+                      : [
+                          {
+                            label: "Binding source",
+                            value: selectedNodeOutput,
+                            provenance: selectedCanvasNode.kind,
+                          },
+                        ]
+                  }
+                  kindLabel={selectedCanvasNode.kind}
+                  node={
+                    selectedNode ?? {
+                      id: selectedCanvasNode.id,
+                      kind: selectedCanvasNode.kind,
+                      refId: selectedCanvasNode.title,
+                      version: workflow.version,
+                    }
+                  }
+                  output={selectedNodeOutput}
+                  outputError={selectedNodeProgress?.error}
+                  outputState={selectedOutputState}
+                />
+              )}
               {selectedNode?.shape === "map" ? (
                 <WorkflowMapResults
                   items={selectedNodeProgress?.items}
