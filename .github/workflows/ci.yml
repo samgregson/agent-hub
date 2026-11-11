@@ -213,3 +213,31 @@ jobs:
           name: ifc-embedded-smoke
           path: /tmp/agent-hub-ifc-*.png
           if-no-files-found: ignore
+
+  plugin-contracts:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - project: ifc-viewer
+            factory: agent_hub_ifc_viewer._server:create_ifc_viewer_server
+          - project: calculation-source-object
+            factory: agent_hub_calculation_source_object._server:create_calculation_source_object_server
+          - project: reference-calculation
+            factory: agent_hub_reference_calculation._server:create_reference_calculation_server
+          - project: test-fixture
+            factory: agent_hub_foundation_fixture._server:create_fixture_server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          version: "0.11.15"
+      - run: uv sync --project plugins/${{ matrix.project }} --frozen
+      - run: uv run --project plugins/${{ matrix.project }} --frozen python scripts/check-plugin-contract.py '${{ matrix.factory }}'
+      - if: matrix.project == 'calculation-source-object'
+        run: |
+          uv sync --project plugins/reference-calculation --frozen
+          PYTHONPATH=plugins/calculation-source-object/src uv run --project plugins/reference-calculation --frozen pytest -q plugins/calculation-source-object/src/agent_hub_calculation_source_object/_server_test.py

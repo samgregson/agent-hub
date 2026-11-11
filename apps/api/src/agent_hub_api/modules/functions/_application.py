@@ -302,9 +302,24 @@ def _validate_definition(
     if not source.strip() or len(source.encode()) > 64_000:
         raise FunctionValidationError("Function source must contain 1 to 64000 bytes.")
     try:
-        ast.parse(source)
+        tree = ast.parse(source)
     except SyntaxError as error:
         raise FunctionValidationError("Function source is not valid Python.") from error
+    if not any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "transform"
+        or isinstance(node, ast.Name)
+        and node.id == "transform"
+        and isinstance(node.ctx, ast.Store)
+        or isinstance(node, ast.alias)
+        and (node.asname or node.name) == "transform"
+        for node in ast.walk(tree)
+    ):
+        raise FunctionValidationError(
+            "Function source does not define transform. Define transform(inputs, parameters) "
+            "and return a value matching output_schema. If this source belongs to a Plugin, "
+            "use that Plugin through an MCP node; host Functions can prepare its inputs."
+        )
     contract = dict(input_schema)
     properties = contract.get("properties")
     required = contract.get("required", [])

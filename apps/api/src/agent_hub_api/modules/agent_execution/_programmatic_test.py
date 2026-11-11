@@ -42,6 +42,18 @@ from ._deep_agent import PostgresDeepAgentRunner
 from ._programmatic import project_read_tools
 
 
+@pytest.mark.asyncio
+async def test_file_listing_invalid_pagination_returns_recoverable_error() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="sam"), "Files")
+    files = create_memory_project_files(projects)
+    listing, _ = project_read_tools(files, project.id, "sam")
+    result = json.loads(await listing.ainvoke({"limit": 200}))
+    assert result["error"]["code"] == "invalid_pagination"
+    assert "100" in result["nextStep"]
+    assert json.loads(await listing.ainvoke({"limit": 100}))["files"] == []
+
+
 class ProgramModel(BaseChatModel):
     code: str
     after: str | None = None
@@ -188,6 +200,21 @@ async def test_native_ptc_reads_exact_files_and_mcp_data_without_saving_or_expos
         tool.name
         for tool in await gateway.programmatic_tools(ProjectAccess(subject="sam"), project.id)
     ] == ["fixture__inspect"]
+
+
+@pytest.mark.asyncio
+async def test_unavailable_eval_tool_explains_read_only_boundary() -> None:
+    _, _, _, _, _, _, agent = await setup_program("await tools.notAvailable({});")
+    result = await agent.graph.ainvoke(
+        {"messages": [HumanMessage(content="Inspect the Project file.")]},
+        config={"configurable": {"thread_id": "ptc-thread"}},
+    )
+    message = next(
+        item for item in result["messages"] if isinstance(item, ToolMessage) and item.name == "eval"
+    )
+    assert "not a function" in str(message.content)
+    assert "only exposes reviewed read-only tools" in str(message.content)
+    assert "outside eval" in str(message.content)
 
 
 @pytest.mark.asyncio

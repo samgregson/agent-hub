@@ -125,3 +125,26 @@ Plugin Gateway for the currently enabled, reviewed UI at that captured version.
 The host replays the saved step inputs and structured output in `McpAppFrame`;
 opening a view never executes tools or creates an Artifact. Full output data is
 retained alongside the view. This path stays generic and imports no Plugin code.
+
+## Contract quality gates
+
+The `plugin-contracts` CI job discovers each first-party server through an MCP
+client and checks unique names, descriptions and valid object input/output JSON
+Schemas. Add each new first-party server to that matrix. The check is deliberately
+not a requirement imposed on arbitrary third-party servers: MCP permits optional
+output schemas, and conformance alone does not establish that a tool is useful.
+
+For tools intended for Workflow composition, declare the stable output fields and
+nested types that consumers actually bind, including public computed values; do
+not publish only an untyped object. Explain dynamic keys and show a minimal valid
+call, the result path, units and error recovery in the Plugin guide. Test real
+successful results against the declared schema and test representative invalid
+inputs. Where tools compose, test their handoff and a realistic agent journey;
+metadata validation cannot judge whether descriptions are clear, results are
+correct, or the model can complete a task. Review changes to those contracts and
+run agent evaluations separately. Treat third-party annotations as untrusted;
+reviewed host catalog policy remains the authorization boundary.
+
+The [MCP tools specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
+defines discovery, schemas and tool errors; it is a protocol baseline, not a
+complete usability standard.

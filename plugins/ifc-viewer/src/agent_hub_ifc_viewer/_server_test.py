@@ -94,6 +94,12 @@ async def test_colour_scale_is_captured_and_invalid_thresholds_rejected():
         }
         result = (await client.call_tool("prepare_ifc_view", args)).structured_content
         assert result["colourScale"] == scale
+        defaulted = (
+            await client.call_tool("prepare_ifc_view", {**args, "colour_by": None})
+        ).structured_content
+        assert defaulted["colourBy"] == "utilisation"
+        with pytest.raises(ToolError, match="must match"):
+            await client.call_tool("prepare_ifc_view", {**args, "colour_by": "status"})
         with pytest.raises((ToolError, ValidationError)):
             await client.call_tool(
                 "prepare_ifc_view",

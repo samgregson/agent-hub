@@ -20,6 +20,11 @@ Enable **Calculation Source Object** for a Project. An agent can call `run_calcu
 
 The Plugin captures the source, inputs, source hash and CalculationSourceObject execution record. Agent Hub stores successful structured results using its Tool Result Snapshot policy. Opening that Artifact loads the bundled `@cs-object/react` MCP App, which renders the prepared calculation report and the captured source.
 
+Read the [agent guide](AGENT_GUIDE.md) for an executable source example and
+Workflow composition. Public numeric results are available under `outputs`,
+keyed by the names returned by the source calculation; the full execution is
+retained separately for the report.
+
 The first version accepts one source file. Calculations that depend on adjacent source modules or local figure assets are not yet supported. The report is read-only. Re-run the tool with changed inputs or source to create another result.
 
 ## Execution boundary

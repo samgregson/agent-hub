@@ -330,7 +330,10 @@ function Viewer({ initial }: { initial: View }) {
                 ifc_text: view.ifcText,
                 metadata: rows,
                 colour_by: view.colourBy,
-                colour_scale: view.colourScale ?? null,
+                colour_scale:
+                  view.colourScale?.key === view.colourBy
+                    ? view.colourScale
+                    : null,
               },
               null,
               2,

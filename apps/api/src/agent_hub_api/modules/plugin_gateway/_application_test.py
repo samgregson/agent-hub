@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -98,6 +99,114 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
 
     await gateway.disable(access, project.id, "foundation-fixture")
     assert (await gateway.selections(access, project.id))[0].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_programmatic_plugin_input_error_is_recoverable() -> None:
+    class NumericClient(FixtureClient):
+        async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+            return (
+                PluginDiscoveredTool(
+                    name="foundation_status",
+                    description="Numeric values",
+                    read_only=True,
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "values": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "anyOf": [{"type": "integer"}, {"type": "number"}]
+                                },
+                            }
+                        },
+                        "required": ["values"],
+                    },
+                ),
+            )
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Input recovery")
+    client = NumericClient(calls=[])
+    gateway = PluginGatewayModule(
+        projects,
+        [
+            PluginManifest(
+                id="fixture",
+                name="Fixture",
+                version="1",
+                endpoint="http://fixture/mcp",
+                tools=(PluginTool(name="foundation_status", read_only=True),),
+            )
+        ],
+        MemoryPluginEnablementStore(),
+        {"fixture": client},
+    )
+    await gateway.enable(access, project.id, "fixture")
+    tool = (await gateway.programmatic_tools(access, project.id))[0]
+    result = await tool.ainvoke({"values": {"label": "not a number"}})
+    assert result["error"]["code"] == "invalid_plugin_input"
+    assert "/values/label" in result["error"]["message"]
+    assert "integer or number" in result["error"]["message"]
+    assert client.calls == []
+    valid = await tool.ainvoke({"values": {"amount": 3}})
+    assert valid["structuredContent"] == {"status": "available"}
+
+
+@pytest.mark.asyncio
+async def test_saved_large_repeated_output_is_summarized_without_losing_snapshot() -> None:
+    payload = {"kind": "example", "outputs": {"total": 42}, "report": "x" * 12000}
+
+    class LargeClient(FixtureClient):
+        async def call_tool(
+            self, tool_name: str, arguments: Mapping[str, object]
+        ) -> PluginToolResult:
+            content = getattr(self, "text_override", json.dumps(payload))
+            return PluginToolResult(content=(content,), structured_content=payload)
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Large output")
+    client = LargeClient(calls=[])
+    gateway = PluginGatewayModule(
+        projects,
+        [
+            PluginManifest(
+                id="fixture",
+                name="Fixture",
+                version="1",
+                endpoint="http://fixture/mcp",
+                tools=(PluginTool(name="foundation_status", read_only=True),),
+            )
+        ],
+        MemoryPluginEnablementStore(),
+        {"fixture": client},
+    )
+    await gateway.enable(access, project.id, "fixture")
+    recorded: list[Mapping[str, object] | None] = []
+
+    async def save(_manifest, _tool, _arguments, result):
+        recorded.append(result.structured_content)
+        return {"artifactId": "saved", "outputPointer": "/payload/output"}
+
+    tool = (await gateway.agent_tools(project.id, on_success=save))[0]
+    text = await tool.ainvoke({})
+    assert len(text) < 1000
+    assert '"total": 42' in text
+    assert '"omittedFields": ["report"]' in text
+    assert '"artifactId": "saved"' in text
+    assert recorded == [payload]
+    unsaved = (await gateway.agent_tools(project.id))[0]
+    assert await unsaved.ainvoke({}) == json.dumps(payload)
+
+    async def no_reference(_manifest, _tool, _arguments, _result):
+        return {"note": "not a recoverable snapshot"}
+
+    without_reference = (await gateway.agent_tools(project.id, on_success=no_reference))[0]
+    assert (await without_reference.ainvoke({})).startswith(json.dumps(payload))
+    client.text_override = "Important narrative " + "x" * 12000
+    assert (await tool.ainvoke({})).startswith(client.text_override)
 
 
 @pytest.mark.asyncio

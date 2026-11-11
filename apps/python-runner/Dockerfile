@@ -3,7 +3,7 @@ FROM denoland/deno:2.9.7@sha256:fa335acdf6b72106eda2cb6a8cb5f4187e7630e357467489
 ENV DENO_DIR=/deno-dir
 WORKDIR /app
 COPY --chmod=644 apps/python-runner/deno.lock apps/python-runner/worker.mjs ./
-RUN deno cache --frozen-lockfile worker.mjs
+RUN deno cache --lock=/app/deno.lock --frozen-lockfile worker.mjs
 COPY --chmod=644 apps/python-runner/runner.mjs apps/python-runner/server.mjs ./
 
 FROM runtime AS test

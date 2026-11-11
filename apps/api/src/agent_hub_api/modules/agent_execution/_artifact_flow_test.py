@@ -55,6 +55,28 @@ class FixtureGateway:
 
 
 @pytest.mark.asyncio
+async def test_missing_artifact_references_return_recoverable_errors() -> None:
+    projects = create_memory_project_module()
+    project = await projects.create(ProjectAccess(subject="sam"), "Test")
+    artifacts = create_memory_artifact_module(projects)
+    tools = {
+        tool.name: tool
+        for tool in PostgresDeepAgentRunner._artifact_tools(
+            artifacts, project.id, "sam", "thread", "run"
+        )
+    }
+    loaded = json.loads(await tools["load_project_artifact"].ainvoke({"artifact_id": "missing"}))
+    edited = json.loads(
+        await tools["edit_project_artifact"].ainvoke(
+            {"artifact_id": "missing", "expected_version": 1, "tool_name": "noop", "arguments": {}}
+        )
+    )
+    for result in (loaded, edited):
+        assert result["error"]["code"] == "artifact_not_found"
+        assert "discover_project_artifacts" in result["nextStep"]
+
+
+@pytest.mark.asyncio
 async def test_two_threads_create_discover_and_plugin_edit_one_artifact() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="sam")

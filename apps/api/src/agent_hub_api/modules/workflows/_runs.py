@@ -28,6 +28,7 @@ from agent_hub_api.modules.plugin_gateway import (
     PluginNotAvailable,
     PluginNotEnabled,
     PluginToolNotAllowed,
+    PluginToolRejected,
     PluginToolResult,
     PluginTransportError,
     PluginUiResource,
@@ -751,6 +752,11 @@ class WorkflowRunModule:
                     "status": "failed",
                     "inputs": dict(inputs),
                     "error": code,
+                    **(
+                        {"diagnostic": {"source": "plugin", "message": str(error)}}
+                        if isinstance(error, PluginToolRejected)
+                        else {}
+                    ),
                 }
                 await checkpoint()
                 return None, code
@@ -859,6 +865,7 @@ class WorkflowRunModule:
                 "items": _ordered_items(item_results),
             }
             await checkpoint()
+            diagnostic: dict[str, str] | None = None
             try:
                 Draft202012Validator(input_schema).validate(call_arguments)
             except JsonSchemaValidationError:
@@ -877,6 +884,8 @@ class WorkflowRunModule:
                     PluginTransportError,
                 ) as error:
                     code = _plugin_error_code(error)
+                    if isinstance(error, PluginToolRejected):
+                        diagnostic = {"source": "plugin", "message": str(error)}
                 else:
                     output = _structured_output(result)
                     if output is None:
@@ -901,7 +910,12 @@ class WorkflowRunModule:
                 }
                 await checkpoint()
                 return index, output, None
-            item_results[index] = {**item_results[index], "status": "failed", "error": code}
+            item_results[index] = {
+                **item_results[index],
+                "status": "failed",
+                "error": code,
+                **({"diagnostic": diagnostic} if diagnostic is not None else {}),
+            }
             execution_nodes[node.id] = {
                 "status": "running",
                 "inputs": dict(inputs),
@@ -1143,6 +1157,11 @@ def _validate_workflow_inputs(
 def _select_binding_value(value: object, pointer: str, *, each_item: bool) -> object:
     tokens = _pointer_tokens(pointer)
     if each_item:
+        if isinstance(value, Mapping):
+            selected = _select_pointer(value, tokens)
+            if not isinstance(selected, list):
+                raise WorkflowValidationError("Map item binding must select an array.")
+            return selected
         if not isinstance(value, list):
             raise WorkflowValidationError("Map item binding source must be a collection.")
         return [_select_pointer(item, tokens) for item in value]
@@ -1281,6 +1300,8 @@ def _structured_output(result: PluginToolResult) -> dict[str, object] | None:
 
 
 def _plugin_error_code(error: Exception) -> str:
+    if isinstance(error, PluginToolRejected):
+        return "plugin_tool_rejected"
     if isinstance(error, PluginCallLimitExceeded):
         return "plugin_call_limit"
     if isinstance(error, PluginNotAvailable):

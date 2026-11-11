@@ -147,7 +147,25 @@ async def test_function_definition_rejects_invalid_source_or_schema() -> None:
         await functions.define(
             access, project.id, "Bad", "not Python!", _INPUT_SCHEMA, _OUTPUT_SCHEMA
         )
+    with pytest.raises(FunctionValidationError, match=r"transform\(inputs, parameters\)"):
+        await functions.define(
+            access,
+            project.id,
+            "Wrong entry point",
+            "def calculate(x):\n    return x\n",
+            _INPUT_SCHEMA,
+            _OUTPUT_SCHEMA,
+        )
     with pytest.raises(FunctionValidationError, match="input schema"):
-        await functions.define(access, project.id, "Bad", "pass", {"type": "array"}, _OUTPUT_SCHEMA)
+        await functions.define(
+            access,
+            project.id,
+            "Bad",
+            "def transform(a, b): pass",
+            {"type": "array"},
+            _OUTPUT_SCHEMA,
+        )
     with pytest.raises(FunctionValidationError, match="output schema"):
-        await functions.define(access, project.id, "Bad", "pass", _INPUT_SCHEMA, {"type": "wat"})
+        await functions.define(
+            access, project.id, "Bad", "def transform(a, b): pass", _INPUT_SCHEMA, {"type": "wat"}
+        )

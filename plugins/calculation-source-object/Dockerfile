@@ -26,6 +26,7 @@ WORKDIR /workspace
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
 COPY src src
+COPY AGENT_GUIDE.md AGENT_GUIDE.md
 COPY app/index.html app/index.html
 COPY --from=app-builder /app/dist/report.js app/dist/report.js
 COPY --from=cso-runtime /usr/bin/deno /usr/bin/deno

@@ -16,7 +16,9 @@ and read-only MCP tools, but cannot save files, Artifacts or Workflows.
 2. Call `tools.ifcViewer_InspectIfcObjects({ifc_text: file.content})`. PTC MCP tools
    return `{content, structuredContent}`. Object records are in
    `result.structuredContent.objects`.
-3. Select actual objects using `ifcType`, `name` or `properties`. Preserve
+3. Select actual objects using `ifcType`, `name` or `properties`. `ifcType` uses
+   canonical mixed-case class names (for example, `IfcWall`), while STEP text may
+   use uppercase entity names. Inspect returned types before filtering. Preserve
    `globalId`; expressId is only local to the exact file. Never invent identifiers.
 4. Build one row per selected object:
    `{globalId: object.globalId, values: {status: "reviewed"}}`.
@@ -97,7 +99,9 @@ metadata into IFC properties requires an explicit conversion/update capability.
   optional `colour_scale` object, for example
   `{"key":"temperature","bands":[{"max":10,"colour":"#2563eb"},
   {"max":20,"colour":"#059669"}],"aboveColour":"#e11d48"}` and set
-  `colour_by: "temperature"`. Band maxima are inclusive and strictly increasing;
+  `colour_by: "temperature"` (or omit it to select the scale key automatically).
+  When supplying both, the keys must match; omit the scale for categorical colours.
+  Band maxima are inclusive and strictly increasing;
   values above the final maximum use `aboveColour`. Select thresholds, colours,
   and units to suit the task. Missing and nonnumeric values are grey. The scale
   is saved with the view.

@@ -10,7 +10,11 @@ from agent_hub_api.modules.functions import (
     FunctionRuntimeIdentity,
     MemoryFunctionStore,
 )
-from agent_hub_api.modules.plugin_gateway import PluginGatewayModule, PluginToolResult
+from agent_hub_api.modules.plugin_gateway import (
+    PluginGatewayModule,
+    PluginToolRejected,
+    PluginToolResult,
+)
 from agent_hub_api.modules.project_files import create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.modules.workflows import (
@@ -281,6 +285,65 @@ async def test_workflow_captures_and_resolves_runtime_and_literal_bindings() -> 
     assert completed.execution["outputs"] == {
         "payload": {"label": "beam A", "operator": "engineer", "retry_count": 3}
     }
+
+
+@pytest.mark.asyncio
+async def test_map_selects_collection_nested_in_workflow_input() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Nested collection")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    functions = FunctionModule(projects, MemoryFunctionStore(), _Runner())
+    record = {"type": "object", "properties": {"value": {"type": "integer"}}}
+    function = await functions.define(
+        access,
+        project.id,
+        "Double",
+        "# double\ndef transform(inputs, parameters):\n    return {}",
+        {"type": "object", "properties": {"record": record}, "required": ["record"]},
+        record,
+    )
+    definitions = WorkflowDefinitionModule(
+        projects, datasets, functions, None, MemoryWorkflowStore()
+    )
+    graph = WorkflowGraph(
+        nodes=(WorkflowNode("double", "python", function.id, function.revision, shape="map"),),
+        edges=(
+            WorkflowEdge(
+                None,
+                None,
+                "double",
+                "items",
+                source_kind="workflowInput",
+                source_input="data",
+                source_path="/rows",
+            ),
+        ),
+        inputs=(
+            WorkflowInput(
+                "data",
+                {
+                    "type": "object",
+                    "properties": {"rows": {"type": "array", "items": record}},
+                    "required": ["rows"],
+                },
+            ),
+        ),
+        outputs=(WorkflowOutput("values", "double", "result"),),
+    )
+    definition = await definitions.create(access, project.id, "Double rows", graph)
+    runs = WorkflowRunModule(definitions, datasets, functions, None, MemoryWorkflowRunStore())
+    prepared = await runs.prepare(
+        access,
+        project.id,
+        definition.id,
+        "nested",
+        expected_version=1,
+        workflow_inputs={"data": {"rows": [{"value": 2}, {"value": 5}]}},
+    )
+    completed = await runs.execute(access, project.id, prepared.id)
+    assert completed.status == "succeeded", completed.execution
+    assert completed.execution["outputs"] == {"values": [{"value": 4}, {"value": 10}]}
 
 
 @pytest.mark.asyncio
@@ -663,7 +726,8 @@ async def test_recovery_does_not_repeat_an_unconfirmed_single_mcp_call() -> None
 
 
 @pytest.mark.asyncio
-async def test_execute_dispatches_single_mcp_call_and_retains_output() -> None:
+@pytest.mark.parametrize("rejected", [False, True])
+async def test_execute_dispatches_single_mcp_call_and_retains_output(rejected: bool) -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
     project = await projects.create(access, "Workflow execution")
@@ -706,6 +770,8 @@ async def test_execute_dispatches_single_mcp_call_and_retains_output() -> None:
             arguments: dict[str, object],
         ) -> PluginToolResult:
             self.calls.append((plugin_id, tool_name, arguments))
+            if rejected:
+                raise PluginToolRejected("Choose matching keys.")
             return PluginToolResult((), {"count": len(cast(list[object], arguments["items"]))})
 
     gateway = Gateway()
@@ -739,6 +805,15 @@ async def test_execute_dispatches_single_mcp_call_and_retains_output() -> None:
 
     completed = await workflows.execute(access, project.id, prepared.id)
 
+    if rejected:
+        assert completed.status == "failed"
+        node = cast(
+            dict[str, object], cast(dict[str, object], completed.execution["nodes"])["remote"]
+        )
+        assert node["error"] == "plugin_tool_rejected"
+        assert node["diagnostic"] == {"source": "plugin", "message": "Choose matching keys."}
+        assert gateway.calls == [("plugin", "count", {"items": [{"value": 2}]})]
+        return
     assert completed.status == "succeeded"
     assert completed.execution["outputs"] == {"result": {"count": 1}}
     nodes = cast(dict[str, object], completed.execution["nodes"])
@@ -748,8 +823,10 @@ async def test_execute_dispatches_single_mcp_call_and_retains_output() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("first_item_succeeds", [True, False])
+@pytest.mark.parametrize("rejected", [False, True])
 async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
     first_item_succeeds: bool,
+    rejected: bool,
 ) -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")
@@ -810,6 +887,8 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
             self.active_calls -= 1
             if value == 2:
                 self.first_item_completed = True
+                if rejected:
+                    raise PluginToolRejected("Choose matching keys.")
                 if not self.first_item_succeeds:
                     return PluginToolResult((), None)
             return PluginToolResult((), {"doubled": value * 2})
@@ -845,6 +924,16 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
 
     completed = await workflows.execute(access, project.id, prepared.id)
 
+    if rejected:
+        assert completed.status == "failed"
+        node = cast(
+            dict[str, object], cast(dict[str, object], completed.execution["nodes"])["mapped"]
+        )
+        first = cast(list[dict[str, object]], node["items"])[0]
+        assert first["error"] == "plugin_tool_rejected"
+        assert first["diagnostic"] == {"source": "plugin", "message": "Choose matching keys."}
+        assert gateway.calls == [("double", {"value": 2})]
+        return
     if not first_item_succeeds:
         assert completed.status == "failed"
         assert cast(dict[str, object], completed.execution["error"])["code"] == (

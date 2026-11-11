@@ -31,6 +31,182 @@ class _Schemas:
 
 
 @pytest.mark.asyncio
+async def test_nested_array_type_mismatch_reports_field_and_types() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Nested contracts")
+    functions = FunctionModule(projects, MemoryFunctionStore())
+
+    def item(kind: object) -> dict[str, object]:
+        return {"type": "object", "properties": {"amount": {"type": kind}}, "required": ["amount"]}
+
+    source = await functions.define(
+        access,
+        project.id,
+        "Source",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"type": "object", "properties": {}},
+        {
+            "type": "object",
+            "properties": {"records": {"type": "array", "items": item(["number", "null"])}},
+        },
+    )
+    target = await functions.define(
+        access,
+        project.id,
+        "Target",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {
+            "type": "object",
+            "properties": {"records": {"type": "array", "items": item("number")}},
+            "required": ["records"],
+        },
+        {"type": "object"},
+    )
+    workflows = WorkflowDefinitionModule(
+        projects,
+        DatasetModule(projects, MemoryDatasetStore()),
+        functions,
+        None,
+        MemoryWorkflowStore(),
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "python", source.id, source.revision),
+            WorkflowNode("target", "python", target.id, target.revision),
+        ),
+        (WorkflowEdge("source", "result", "target", "records", source_path="/records"),),
+        (WorkflowOutput("result", "target", "result"),),
+    )
+    with pytest.raises(WorkflowValidationError) as error:
+        await workflows.create(access, project.id, "Incompatible", graph)
+    assert "/items/properties/amount" in str(error.value)
+    assert "['null', 'number']" in str(error.value)
+    assert "target types ['number']" in str(error.value)
+    assert "Handle or reject null values" in str(error.value)
+    assert "only when the source actually guarantees it" in str(error.value)
+    assert await workflows.list(access, project.id) == ()
+
+
+@pytest.mark.asyncio
+async def test_creation_and_revision_report_independent_binding_errors_without_saving() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Bindings")
+    files = create_memory_project_files(projects)
+    source = await files.write(project.id, "/input.csv", "name,value\na,2\n")
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    fn = await functions.define(
+        access,
+        project.id,
+        "Process",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {
+            "type": "object",
+            "properties": {"rows": {"type": "array"}, "label": {"type": "string"}},
+            "required": ["rows", "label"],
+        },
+        {"type": "object"},
+    )
+    workflows = WorkflowDefinitionModule(
+        projects,
+        DatasetModule(projects, MemoryDatasetStore()),
+        functions,
+        None,
+        MemoryWorkflowStore(),
+        project_files=files,
+    )
+    nodes = (
+        WorkflowNode("file", "file", "/project/input.csv", source.version),
+        WorkflowNode("fn", "python", fn.id, fn.revision),
+    )
+    outputs = (WorkflowOutput("result", "fn", "result"),)
+    invalid_map = WorkflowGraph(
+        (
+            nodes[0],
+            WorkflowNode("fn", "python", fn.id, fn.revision, shape="map", map_input="inputs"),
+        ),
+        (WorkflowEdge("file", "content", "fn", "items"),),
+        outputs,
+    )
+    with pytest.raises(WorkflowValidationError) as error:
+        await workflows.create(access, project.id, "Invalid map", invalid_map)
+    assert "map_input 'inputs'" in str(error.value)
+    assert "'rows'" in str(error.value)
+    assert "declare a single object input" in str(error.value)
+    bad = WorkflowGraph(
+        nodes,
+        (
+            WorkflowEdge("file", "content", "fn", "rows"),
+            WorkflowEdge("file", "missing", "fn", "label"),
+        ),
+        outputs,
+    )
+    with pytest.raises(WorkflowValidationError) as error:
+        await workflows.create(access, project.id, "Invalid", bad)
+    assert len(error.value.diagnostics) == 2
+    assert "source type 'string'" in error.value.diagnostics[0]
+    assert "target type 'array'" in error.value.diagnostics[0]
+    assert "parse or transform" in error.value.diagnostics[0]
+    assert "do not assume its fields" in error.value.diagnostics[0]
+    assert "missing" in error.value.diagnostics[1]
+    assert await workflows.list(access, project.id) == ()
+    good = WorkflowGraph(
+        nodes,
+        (
+            WorkflowEdge("file", "content", "fn", "label"),
+            WorkflowEdge(source_kind="literal", literal=[], target_node="fn", target_port="rows"),
+        ),
+        outputs,
+    )
+    saved = await workflows.create(access, project.id, "Valid", good)
+    with pytest.raises(WorkflowValidationError) as revision_error:
+        await workflows.revise(access, project.id, saved.id, "Invalid", bad, expected_version=1)
+    assert revision_error.value.diagnostics == error.value.diagnostics
+    assert (await workflows.load(access, project.id, saved.id)) == saved
+
+
+@pytest.mark.asyncio
+async def test_unknown_binding_identifies_node_port_and_available_ports() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Port diagnostics")
+    files = create_memory_project_files(projects)
+    source = await files.write(project.id, "/data.txt", "test")
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    function = await functions.define(
+        access,
+        project.id,
+        "Read",
+        "def transform(inputs, parameters):\n    return {}\n",
+        {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
+        {"type": "object"},
+    )
+    workflows = WorkflowDefinitionModule(
+        projects,
+        DatasetModule(projects, MemoryDatasetStore()),
+        functions,
+        None,
+        MemoryWorkflowStore(),
+        project_files=files,
+    )
+    nodes = (
+        WorkflowNode("file", "file", "/project/data.txt", source.version),
+        WorkflowNode("read", "python", function.id, function.revision),
+    )
+    outputs = (WorkflowOutput("output", "read", "result"),)
+    for edge, expected in (
+        (WorkflowEdge("file", "content", "read", "inputs"), ("read", "inputs", "text")),
+        (WorkflowEdge("file", "missing", "read", "text"), ("file", "missing", "content")),
+    ):
+        with pytest.raises(WorkflowValidationError) as error:
+            await workflows.validate_graph(
+                access, project.id, WorkflowGraph(nodes, (edge,), outputs)
+            )
+        assert all(part in str(error.value) for part in expected)
+
+
+@pytest.mark.asyncio
 async def test_project_can_save_and_revise_a_branching_workflow_definition() -> None:
     projects = create_memory_project_module()
     owner = ProjectAccess(subject="owner")
@@ -507,6 +683,28 @@ async def test_workflow_wires_permitted_mcp_ports_and_rejects_incompatible_input
         cast(PluginGatewayModule, RepeatGateway()),
         MemoryWorkflowStore(),
     )
+    with pytest.raises(WorkflowValidationError, match="cannot use map_input"):
+        await repeat_workflows.create(
+            owner,
+            project.id,
+            "Wrong map syntax",
+            WorkflowGraph(
+                (
+                    source,
+                    WorkflowNode(
+                        "calculate",
+                        "mcp",
+                        "calculator",
+                        "v1",
+                        shape="map",
+                        tool_name="evaluate",
+                        map_input="payload",
+                    ),
+                ),
+                (WorkflowEdge("source", "records", "calculate", "items"),),
+                (WorkflowOutput("answer", "calculate", "result"),),
+            ),
+        )
     with pytest.raises(WorkflowValidationError, match="Record 1"):
         await repeat_workflows.create(
             owner,

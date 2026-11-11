@@ -113,6 +113,10 @@ class PluginTransportError(Exception):
     """The reviewed Plugin did not return a usable MCP result."""
 
 
+class PluginToolRejected(PluginTransportError):
+    """A Plugin responded successfully but rejected this tool call."""
+
+
 class PluginAppUnavailable(Exception):
     """The requested tool has no current, catalog-approved MCP App resource."""
 
@@ -609,7 +613,10 @@ def create_postgres_plugin_gateway(
         name="Calculation Source Object",
         version="0.1.0",
         endpoint="http://calculation-source-object:8000/mcp",
-        tools=(PluginTool(name="run_calculation", read_only=False, repeat_safe=True),),
+        tools=(
+            PluginTool(name="get_calculation_guide", read_only=True, repeat_safe=True),
+            PluginTool(name="run_calculation", read_only=True, repeat_safe=True),
+        ),
         app_resource_uri="ui://agent-hub-calculation-source-object/report.html",
         app_tool_names=(),
     )
@@ -671,7 +678,17 @@ def _validate_arguments(schema: Mapping[str, object], arguments: Mapping[str, ob
         Draft202012Validator(schema, registry=Registry()).validate(arguments)
     except JsonSchemaValidationError as error:
         location = "/" + "/".join(str(part) for part in error.path)
-        raise ValueError(f"MCP input is invalid at {location} ({error.validator}).") from None
+        expected = sorted(
+            {
+                item.schema.get("type")
+                for item in [error, *error.context]
+                if isinstance(item.schema, Mapping) and isinstance(item.schema.get("type"), str)
+            }
+        )
+        detail = f" Expected type: {' or '.join(expected)}." if expected else ""
+        raise ValueError(
+            f"MCP input is invalid at {location} ({error.validator}).{detail}"
+        ) from None
 
 
 def _agent_tool(
@@ -708,6 +725,40 @@ def _agent_tool(
             )
         )
         if saved is not None:
+            # FastMCP commonly repeats the entire structured payload as text. Once
+            # captured in an Artifact, keep small fields visible and avoid sending
+            # large reports to the model on every subsequent turn.
+            if (
+                len(text) > 4096
+                and result.structured_content is not None
+                and isinstance(saved.get("artifactId"), str)
+                and isinstance(saved.get("outputPointer"), str)
+            ):
+                try:
+                    repeated = json.loads(text) == result.structured_content
+                except (ValueError, TypeError):
+                    repeated = False
+                if repeated:
+                    summary: dict[str, object] = {}
+                    omitted: list[str] = []
+                    omitted_count = 0
+                    for key, value in result.structured_content.items():
+                        candidate = {**summary, key: value}
+                        if len(json.dumps(candidate, ensure_ascii=False)) <= 3000:
+                            summary[key] = value
+                        else:
+                            omitted_count += 1
+                            if len(omitted) < 20:
+                                omitted.append(key[:120])
+                    text = json.dumps(
+                        {
+                            "structuredResultSummary": summary,
+                            "omittedFields": omitted,
+                            "omittedFieldCount": omitted_count,
+                            "message": "Full structured output is saved in the Artifact below.",
+                        },
+                        ensure_ascii=False,
+                    )
             text += "\nSaved structured result: " + json.dumps(dict(saved), sort_keys=True)
         return text
 
@@ -742,7 +793,15 @@ def _programmatic_tool(
         contract = next((tool for tool in discovered_tools if tool.name == plugin_tool.name), None)
         if contract is None or not contract.read_only:
             raise PluginToolNotAllowed("The server does not declare this tool read-only.")
-        _validate_arguments(contract.input_schema or {}, arguments)
+        try:
+            _validate_arguments(contract.input_schema or {}, arguments)
+        except ValueError as error:
+            return {
+                "error": {"code": "invalid_plugin_input", "message": str(error)},
+                "nextStep": (
+                    "Correct the indicated argument using the Plugin tool schema and retry."
+                ),
+            }
         result = await gateway._call_enabled(project_id, current.id, plugin_tool.name, arguments)
         # Deliberately no result recorder: PTC never creates a saved Artifact.
         return {

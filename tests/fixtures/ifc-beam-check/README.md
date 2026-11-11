@@ -1,5 +1,32 @@
 # IFC engineering Workflow smoke
 
+`beams.ifc`, `beam-forces.csv` and `beam_utilisation.cso.py` provide a
+three-beam live-smoke input. Enable both **IFC Viewer** and **Calculation
+Source Object** for the Project, and upload all three files. The calculation
+Plugin executes `beam_utilisation` for each CSV row; its named `outputs` carry
+the utilisation to the IFC view. The files are inputs to the example, not
+application-specific assumptions. The CSV supplies illustrative demands and
+capacities; using the test
+formula `abs(axial_kN)/axial_capacity_kN + abs(moment_kNm)/moment_capacity_kNm`
+gives 0.50, 0.96 and 1.10. This formula is supplied to the agent for the test;
+it is not a structural design-code check. These files are examples, not a
+required CSV schema.
+
+Example request: “Create and run a reusable Workflow using the uploaded IFC,
+CSV and calculation source. Use the Calculation Source Object Plugin to calculate
+each beam, joining rows by IFC GlobalId. Make each calculation available for
+inspection and colour the 3D model red above 1, amber above 0.95 through 1, and
+green otherwise. This is an illustrative formula, not a design-code check.”
+
+The Workflow Run view can open a successful mapped calculation item as an MCP
+App without rerunning it. A live-model test is needed to establish whether the
+agent can author and execute the complete Workflow.
+
+## Existing deterministic integration test
+
+The following is a separate, earlier test. It exercises a Python Function and the
+IFC Plugin; it does not use the calculation Plugin or the three-beam CSV above.
+
 `transform.py` is example project-owned Function source, exercised by
 `tests/integration/ifc_main_agent_test.py`. It uses the existing IFC App and host
 Function runner; no new engineering App or cross-Plugin imports are needed.

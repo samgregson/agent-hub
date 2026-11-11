@@ -5,14 +5,18 @@ import json
 import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from fastmcp.apps import AppConfig, app_config_to_meta_dict
 from fastmcp.exceptions import ToolError
+from fastmcp.tools import ToolResult
+from pydantic import BaseModel, Field
 
 RUN_CALCULATION_TOOL_NAME = "run_calculation"
 REPORT_APP_RESOURCE_URI = "ui://agent-hub-calculation-source-object/report.html"
+GUIDE_URI = "resource://agent-hub-calculation-source-object/agent-guide"
+_GUIDE_PATH = Path(__file__).parents[2] / "AGENT_GUIDE.md"
 _APP_HTML_PATH = Path(__file__).parents[2] / "app" / "index.html"
 _APP_BUNDLE_PATH = Path(__file__).parents[2] / "app" / "dist" / "report.js"
 _SOURCE_BYTE_LIMIT = 64_000
@@ -23,6 +27,19 @@ _RUNNER_PATH = Path("/app/worker.mjs")
 _DENO_PATH = "/usr/bin/deno"
 _FUNCTION_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _execution_lock = asyncio.Semaphore(1)
+
+
+class CalculationResult(BaseModel):
+    kind: str
+    schemaVersion: str
+    sourceSha256: str | None
+    function: str
+    inputs: dict[str, int | float]
+    outputs: dict[str, int | float] = Field(
+        description="Public numeric outputs keyed by the names returned by the calculation."
+    )
+    execution: dict[str, Any] = Field(description="Full execution and report record.")
+    checks: dict[str, str]
 
 
 async def _read_bounded(stream: asyncio.StreamReader, maximum: int) -> bytes:
@@ -77,8 +94,8 @@ async def _execute_source(
 
     process: asyncio.subprocess.Process | None = None
     try:
-        async with asyncio.timeout(_EXECUTION_TIMEOUT_SECONDS):
-            async with _execution_lock:
+        async with _execution_lock:
+            async with asyncio.timeout(_EXECUTION_TIMEOUT_SECONDS):
                 process = await asyncio.create_subprocess_exec(
                     _DENO_PATH,
                     "run",
@@ -107,9 +124,7 @@ async def _execute_source(
     except TimeoutError as error:
         if process is not None:
             await _stop_process(process)
-        raise ToolError(
-            "The calculation exceeded its 12-second limit, including queue wait time."
-        ) from error
+        raise ToolError("The calculation exceeded its 12-second execution limit.") from error
     except ValueError as error:
         if process is not None:
             await _stop_process(process)
@@ -146,31 +161,63 @@ def create_calculation_source_object_server() -> FastMCP:
     """Create a portable MCP server for running and viewing CSO calculations."""
     mcp = FastMCP("agent-hub-calculation-source-object")
 
+    @mcp.resource(uri=GUIDE_URI, name="Calculation agent guide", mime_type="text/markdown")
+    def agent_guide() -> str:
+        return _GUIDE_PATH.read_text(encoding="utf-8")
+
+    @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
+    def get_calculation_guide() -> ToolResult:
+        """Read the calculation authoring, output and Workflow composition guide."""
+        return ToolResult(content=_GUIDE_PATH.read_text(encoding="utf-8"))
+
     @mcp.tool(
         name=RUN_CALCULATION_TOOL_NAME,
-        annotations={"idempotentHint": True},
+        annotations={"readOnlyHint": True, "idempotentHint": True},
         app=AppConfig(resource_uri=REPORT_APP_RESOURCE_URI),
+        output_schema=CalculationResult.model_json_schema(),
     )
     async def run_calculation(
-        source: str,
-        function: str,
-        inputs: dict[str, int | float],
+        source: Annotated[str, Field(description="Complete single-file .cso.py source text.")],
+        function: Annotated[str, Field(description="Name of the decorated calculation function.")],
+        inputs: Annotated[
+            dict[str, int | float],
+            Field(description="Finite numeric values keyed by calculation parameter names."),
+        ],
     ) -> dict[str, object]:
         """Execute one CalculationSourceObject Python source and return its captured report data.
 
+        Read get_calculation_guide for a working source example and Workflow bindings.
         Provide a single .cso.py source file, the decorated calculation function name, and
         finite numeric inputs. Agent Hub Workflows can bind Project File contents to source;
-        ordinary agent tool calls can provide source text directly. Execution captures the
+        ordinary agent tool calls can provide source text directly. Public numeric results are
+        in outputs keyed by the calculation's returned names; execution contains the report.
+        Execution captures the
         exact source and inputs. This reports captured execution; it does not run independent
         formula or reference checks, and it does not establish engineering approval.
         """
         execution = await _execute_source(source, function, inputs)
+        authoring = execution.get("authoring", {})
+        records = authoring.get("outputs") if isinstance(authoring, dict) else None
+        if not isinstance(records, list):
+            raise ToolError("The calculation runner returned no public output records.")
+        outputs = {}
+        for record in records:
+            if isinstance(record, dict) and record.get("invocationId") == "root":
+                name, value = record.get("name"), record.get("value")
+                if (
+                    not isinstance(name, str)
+                    or type(value) not in (int, float)
+                    or not math.isfinite(value)
+                ):
+                    raise ToolError("The calculation runner returned an invalid public output.")
+                outputs[name] = value
         return {
             "kind": "calculation-source-object.execution",
             "schemaVersion": "1",
             "sourceSha256": execution.get("entry", {}).get("sourceHash"),
             "function": function,
             "inputs": inputs,
+            "outputs": outputs,
             "execution": execution,
             "checks": {
                 "formulaConsistency": "not_run",

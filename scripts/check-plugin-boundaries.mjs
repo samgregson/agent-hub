@@ -184,6 +184,10 @@ export async function checkPluginBoundaries(root) {
     throw new Error(`Python import parsing failed: ${python.stderr}`);
   for (const [path, specifier, level] of JSON.parse(python.stdout)) {
     if (specifier === null) {
+      // This external CI harness deliberately loads the selected Plugin factory;
+      // Plugin and application code must still use statically checked imports.
+      if (relative(root, path).split(sep).join("/") === "scripts/check-plugin-contract.py")
+        continue;
       diagnostics.push(
         `${relative(root, path)}: computed imports cannot be checked against Plugin boundaries`,
       );

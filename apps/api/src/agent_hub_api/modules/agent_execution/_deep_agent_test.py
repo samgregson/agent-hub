@@ -10,6 +10,7 @@ from deepagents.middleware._fs_interrupt import _build_interrupt_on_from_permiss
 from langchain.agents.middleware import ModelRequest, ModelResponse
 from langchain.tools.tool_node import ToolCallRequest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
+from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
 import agent_hub_api.modules.agent_execution._deep_agent as deep_agent
@@ -28,6 +29,7 @@ from agent_hub_api.modules.functions import (
     FunctionModule,
     MemoryFunctionStore,
 )
+from agent_hub_api.modules.plugin_gateway import PluginTransportError
 from agent_hub_api.modules.project_files import (
     ProjectFileAccess,
     create_memory_project_files,
@@ -167,11 +169,11 @@ def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
     assert "saved Function UUID as ref_id" in _AGENT_SYSTEM_PROMPT
     assert "target_port names a Function input" in _AGENT_SYSTEM_PROMPT
     assert "never put a Function name in ref_id" in _AGENT_SYSTEM_PROMPT
-    assert "Create or revise a Workflow directly" in _AGENT_SYSTEM_PROMPT
     assert "those authoring tools validate automatically" in _AGENT_SYSTEM_PROMPT
     assert "discover_project_file_sources" in _AGENT_SYSTEM_PROMPT
     assert "Workflow output schema properties are inside the result value" in _AGENT_SYSTEM_PROMPT
-    assert "when its Function accepts a collection" in _AGENT_SYSTEM_PROMPT
+    assert "Function or repeat-safe MCP tool" in _AGENT_SYSTEM_PROMPT
+    assert "when the target accepts a collection" in _AGENT_SYSTEM_PROMPT
     assert "Never map a collection filter" in _AGENT_SYSTEM_PROMPT
     assert "Workflow IDs and Workflow Run IDs are different" in _AGENT_SYSTEM_PROMPT
     assert "treat it as a recoverable tool result" in _AGENT_SYSTEM_PROMPT
@@ -268,6 +270,18 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     assert "Use the Run ID" in image_error_payload["nextStep"]
     file_sources = json.loads(await tools["discover_project_file_sources"].ainvoke({}))
     assert file_sources == [{"path": "/project/demo.txt", "version": file.version}]
+    for tool_name in ("create_project_workflow", "revise_project_workflow"):
+        contract = convert_to_openai_tool(tools[tool_name])["function"]["parameters"]
+        graph_contract = contract["properties"]["graph_json"]
+        if "anyOf" in graph_contract:
+            graph_contract = next(item for item in graph_contract["anyOf"] if "properties" in item)
+        assert set(graph_contract["required"]) == {"nodes", "edges", "outputs"}
+        assert {"id", "kind", "ref_id", "version"} <= set(
+            graph_contract["properties"]["nodes"]["items"]["properties"]
+        )
+        assert {"source_node", "source_port", "target_node", "target_port"} <= set(
+            graph_contract["properties"]["edges"]["items"]["properties"]
+        )
     graph_json = json.dumps(
         {
             "nodes": [{"id": "source", "kind": "dataset", "ref_id": dataset.id, "version": 1}],
@@ -283,6 +297,35 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
         {"type": "object", "properties": {"result": {"type": "string"}}},
     )
+    invalid_binding_graph = {
+        "nodes": [
+            {"id": "file", "kind": "file", "ref_id": "/project/demo.txt", "version": 1},
+            {"id": "fn", "kind": "python", "ref_id": function.id, "version": function.revision},
+        ],
+        "edges": [
+            {"source_kind": "literal", "literal": 12, "target_node": "fn", "target_port": "text"},
+            {
+                "source_kind": "node",
+                "source_node": "file",
+                "source_port": "content",
+                "target_node": "fn",
+                "target_port": "unknown",
+            },
+        ],
+        "outputs": [{"name": "output", "node": "fn", "port": "result"}],
+    }
+    rejected = json.loads(
+        await tools["create_project_workflow"].ainvoke(
+            {"name": "Invalid bindings", "graph_json": invalid_binding_graph}
+        )
+    )
+    assert rejected["error"]["code"] == "workflow_validation"
+    diagnostics = rejected["error"]["diagnostics"]
+    assert len(diagnostics) == 2
+    assert "source type 'integer'" in diagnostics[0]
+    assert "target type 'string'" in diagnostics[0]
+    assert "unknown" in diagnostics[1]
+    assert await workflows.list(owner, project.id) == ()
     saved_functions = json.loads(await tools["discover_project_functions"].ainvoke({}))
     assert saved_functions == [
         {
@@ -375,8 +418,8 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
             ),
         },
         "nextStep": (
-            "Correct graph_json using the named node, reference, schema, or binding, then "
-            "retry once."
+            "Correct graph_json or changes using the named node, reference, schema, "
+            "or binding, then retry once."
         ),
     }
     invalid = await tools["create_project_workflow"].ainvoke(
@@ -390,6 +433,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         }
     )
     assert json.loads(invalid)["error"]["code"] == "workflow_validation"
+    assert "nodes" in json.loads(invalid)["error"]["message"]
     assert "Correct graph_json" in json.loads(invalid)["nextStep"]
 
     created = json.loads(
@@ -437,6 +481,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     )
     assert loaded["workflowId"] == created["workflowId"]
     assert loaded["graph"]["outputs"][0]["name"] == "records"
+    assert "records" in loaded["nodePorts"]["source"]["outputs"]
     missing_workflow = json.loads(
         await tools["load_project_workflow"].ainvoke({"workflow_id": "missing-workflow"})
     )
@@ -495,6 +540,51 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
     )
     assert missing_run["error"]["code"] == "workflow_run_not_found"
     assert "prepare a fresh Run" in missing_run["nextStep"]
+
+    change = {
+        "add_nodes": [
+            {"id": "file", "kind": "file", "ref_id": "/project/demo.txt", "version": 1},
+            {"id": "clean", "kind": "python", "ref_id": function.id, "version": 1},
+        ],
+        "add_edges": [
+            {
+                "source_node": "file",
+                "source_port": "content",
+                "target_node": "clean",
+                "target_port": "text",
+            }
+        ],
+        "add_outputs": [{"name": "cleaned", "node": "clean", "port": "result"}],
+    }
+    incomplete = {**change, "add_edges": []}
+    args = {"workflow_id": created["workflowId"], "name": "Inspect", "expected_version": 1}
+    invalid_edit = json.loads(
+        await tools["revise_project_workflow"].ainvoke({**args, "changes": incomplete})
+    )
+    assert invalid_edit["error"]["code"] == "workflow_validation"
+    assert (await workflows.load(owner, project.id, created["workflowId"])).version == 1
+    edited = json.loads(await tools["revise_project_workflow"].ainvoke({**args, "changes": change}))
+    assert edited["version"] == 2
+    inspected = json.loads(
+        await tools["load_project_workflow"].ainvoke({"workflow_id": created["workflowId"]})
+    )
+    assert inspected["nodePorts"]["clean"]["requiredInputs"] == ["text"]
+    assert len(inspected["graph"]["outputs"]) == 2
+    stale = json.loads(
+        await tools["revise_project_workflow"].ainvoke(
+            {**args, "changes": {"remove_outputs": ["cleaned"]}}
+        )
+    )
+    assert stale["error"]["code"] == "workflow_validation"
+    monkeypatch.setattr(
+        workflows, "describe_nodes", AsyncMock(side_effect=PluginTransportError("Plugin offline"))
+    )
+    offline = json.loads(
+        await tools["load_project_workflow"].ainvoke({"workflow_id": created["workflowId"]})
+    )
+    assert offline["graph"]["nodes"]
+    assert offline["nodePorts"] is None
+    assert "offline" in offline["nodePortsError"]
 
 
 @pytest.mark.asyncio
@@ -735,6 +825,47 @@ async def test_unavailable_function_preview_returns_actionable_tool_error() -> N
     assert preview_error["error"]["code"] == "function_preview_failed"
     assert "runner_unavailable" in preview_error["error"]["message"]
     assert "fix the Function source or input shape" in preview_error["nextStep"]
+
+    missing = json.loads(
+        await tools["preview_project_function"].ainvoke({"function_id": "unknown", "inputs": {}})
+    )
+    assert missing["error"]["code"] == "function_not_found"
+    assert "unknown" in missing["error"]["message"]
+    assert "discover_project_functions" in missing["nextStep"]
+
+
+@pytest.mark.asyncio
+async def test_invalid_preview_input_recommends_fixing_values_first() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Preview inputs")
+    runner = AsyncMock()
+    runner.identity.return_value = None
+    functions = FunctionModule(projects, MemoryFunctionStore(), runner)
+    function = await functions.define(
+        access,
+        project.id,
+        "Copy",
+        "def transform(inputs, parameters):\n    return inputs\n",
+        {
+            "type": "object",
+            "properties": {"quantity": {"type": "number"}},
+            "required": ["quantity"],
+        },
+        {"type": "object"},
+    )
+    tools = {
+        item.name: item
+        for item in PostgresDeepAgentRunner._function_tools(functions, project.id, access.subject)
+    }
+    error = json.loads(
+        await tools["preview_project_function"].ainvoke(
+            {"function_id": function.id, "inputs": {"quanity": 1}}
+        )
+    )
+    assert "quantity" in error["error"]["message"]
+    assert "supplied inputs" in error["nextStep"]
+    assert "only revise" in error["nextStep"]
 
 
 @pytest.mark.asyncio

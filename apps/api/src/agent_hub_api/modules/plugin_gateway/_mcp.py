@@ -10,6 +10,7 @@ from mcp import Client
 
 from agent_hub_api.modules.plugin_gateway._application import (
     PluginDiscoveredTool,
+    PluginToolRejected,
     PluginToolResult,
     PluginTransportError,
     PluginUiResource,
@@ -88,7 +89,10 @@ class McpPluginClient:
 
         try:
             if response.is_error:
-                raise PluginTransportError("The Plugin rejected the tool call.")
+                texts = [getattr(item, "text", "") for item in response.content]
+                diagnostic = " ".join(text for text in texts if isinstance(text, str))
+                diagnostic = " ".join(diagnostic.split())[:1000]
+                raise PluginToolRejected(diagnostic or "The Plugin rejected the tool call.")
             content = tuple(_content_text(item) for item in response.content)
             structured_content = _structured_content(response.structured_content)
             serialized_size = len(

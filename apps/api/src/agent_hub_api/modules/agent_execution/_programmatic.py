@@ -3,9 +3,10 @@
 import hashlib
 import json
 from collections.abc import Sequence
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
-from langchain_core.tools import BaseTool, tool
+from langchain.tools import ToolRuntime
+from langchain_core.tools import BaseTool, StructuredTool, tool
 from langchain_quickjs import CodeInterpreterMiddleware
 from pydantic import Field
 
@@ -30,6 +31,29 @@ _READ_TOOL_NAMES = frozenset(
 )
 
 
+class _ReadOnlyInterpreter(CodeInterpreterMiddleware[Any, Any]):
+    def _build_tool(self) -> BaseTool:
+        eval_tool = cast(StructuredTool, super()._build_tool())
+        original = eval_tool.coroutine
+        assert original is not None
+
+        async def invoke(runtime: ToolRuntime[None, Any], code: str) -> Any:
+            result = await original(runtime, code)
+            if (
+                isinstance(result.content, str)
+                and '<error type="TypeError">not a function' in result.content
+            ):
+                result.content += (
+                    "\nA called function may be unavailable in eval. Check the exposed tool names; "
+                    "eval only exposes reviewed read-only tools. Call other Plugin tools normally "
+                    "outside eval, and do not retry unchanged code."
+                )
+            return result
+
+        eval_tool.coroutine = invoke
+        return eval_tool
+
+
 def project_read_tools(
     files: ProjectFilesModule,
     project_id: str,
@@ -39,9 +63,14 @@ def project_read_tools(
 
     @tool
     async def list_project_files(query: str = "", offset: int = 0, limit: int = 50) -> str:
-        """List authorized Project File paths, versions and sizes without returning source text."""
+        """List authorized Project File paths, versions and sizes; limit is 1–100, offset >= 0."""
         if offset < 0 or not 1 <= limit <= 100:
-            raise ValueError("Use offset >= 0 and limit between 1 and 100.")
+            return json.dumps(
+                {
+                    "error": {"code": "invalid_pagination", "message": "Invalid offset or limit."},
+                    "nextStep": "Retry with offset >= 0 and limit between 1 and 100.",
+                }
+            )
         items = sorted(
             (
                 item
@@ -100,13 +129,13 @@ def read_only_interpreter(
         *mcp_tools,
         *(tool for tool in agent_tools if tool.name in _READ_TOOL_NAMES),
     ]
-    return CodeInterpreterMiddleware(
+    return _ReadOnlyInterpreter(
         ptc=allowed,
         subagents=False,
         mode="call",
         capture_console=False,
         memory_limit=64 * 1024 * 1024,
-        timeout=10,
+        timeout=20,
         max_ptc_calls=32,
         max_result_chars=8_000,
     )

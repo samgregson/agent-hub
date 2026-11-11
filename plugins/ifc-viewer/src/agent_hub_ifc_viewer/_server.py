@@ -44,7 +44,12 @@ class ObjectMetadata(BaseModel):
 class IfcObjectRecord(BaseModel):
     globalId: str
     expressId: int
-    ifcType: str
+    ifcType: str = Field(
+        description=(
+            "Canonical mixed-case IFC class name, for example IfcWall; STEP entity names "
+            "in the source text can use uppercase. Inspect returned values before filtering."
+        )
+    )
     name: str | None
     properties: dict[str, JsonValue]
 
@@ -143,6 +148,7 @@ def create_ifc_viewer_server() -> FastMCP:
 
         Preserve globalId through calculations; join computed values back using
         prepare_ifc_view metadata rows. expressId is only local to this exact file.
+        ifcType uses canonical mixed-case class names, not uppercase STEP entity names.
         """
         model, products = _model(ifc_text)
         objects = []
@@ -184,6 +190,7 @@ def create_ifc_viewer_server() -> FastMCP:
         scalars. colour_by names an overlay key. colour_scale optionally sets
         ordered inclusive numeric maxima and hex colours for one overlay key;
         values above the last maximum use aboveColour, non-numbers are grey.
+        When a scale is supplied, colour_by defaults to its key and must match it.
         IFC source is preserved verbatim.
         A successful result can be saved by the host and reopened without rerunning.
         """
@@ -202,6 +209,14 @@ def create_ifc_viewer_server() -> FastMCP:
             if any(isinstance(v, float) and not math.isfinite(v) for v in row.values.values()):
                 raise ToolError("Metadata numbers must be finite.")
             rows.append(row.model_dump())
+        if colour_scale is not None:
+            if colour_by is None:
+                colour_by = colour_scale.key
+            elif colour_by != colour_scale.key:
+                raise ToolError(
+                    "colour_by must match colour_scale.key when a scale is supplied; "
+                    "select the scaled key or omit colour_scale for categorical colours."
+                )
         if colour_by is not None and colour_by not in {k for row in rows for k in row["values"]}:
             raise ToolError("colour_by must name an assigned metadata key.")
         if colour_scale is not None and colour_scale.key not in {

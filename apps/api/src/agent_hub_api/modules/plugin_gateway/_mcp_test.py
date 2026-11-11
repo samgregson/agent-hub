@@ -89,6 +89,27 @@ async def test_mcp_client_normalizes_a_bounded_result(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_mcp_client_preserves_bounded_tool_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_hub_api.modules.plugin_gateway import PluginToolRejected
+
+    monkeypatch.setattr(
+        FakeClient,
+        "response",
+        FakeResponse(
+            content=[FakeContent("Select matching keys. " + "x" * 5000)],
+            structured_content=None,
+            is_error=True,
+        ),
+    )
+    monkeypatch.setattr(_mcp, "Client", FakeClient)
+    client = McpPluginClient("http://foundation-fixture:8000/mcp", 12, 1024, True)
+    with pytest.raises(PluginToolRejected) as error:
+        await client.call_tool("some_tool", {})
+    assert "Select matching keys." in str(error.value)
+    assert len(str(error.value)) <= 1100
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("meta", "expected_uri"),
     [
