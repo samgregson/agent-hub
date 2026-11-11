@@ -657,9 +657,20 @@ class WorkflowDefinitionModule:
             try:
                 definition = await self._functions.load(access, project_id, node.ref_id)
             except FunctionNotFound as error:
+                available = await self._functions.list(access, project_id)
+                if available:
+                    guidance = (
+                        "Call discover_project_functions and use the ID and revision of a "
+                        "suitable saved Function. If none is suitable, create the Function first."
+                    )
+                else:
+                    guidance = (
+                        "This Project has no saved Functions. Create the required Function first."
+                    )
                 raise WorkflowValidationError(
-                    f"Python Function ID {node.ref_id!r} is unavailable; use the ID returned "
-                    "by discover_project_functions, not the Function name."
+                    f"Python Function ID {node.ref_id!r} is unavailable. {guidance} "
+                    "Use the id and revision returned by create_project_function as this "
+                    "node's ref_id and version; do not use a placeholder or Function name."
                 ) from error
             if definition.revision != node.version:
                 raise WorkflowValidationError(

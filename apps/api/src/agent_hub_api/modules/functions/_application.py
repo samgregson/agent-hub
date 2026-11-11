@@ -105,6 +105,16 @@ class FunctionModule:
         self._store = store
         self._runner = runner
 
+    @staticmethod
+    def validate_definition(
+        name: str,
+        source: str,
+        input_schema: Mapping[str, object],
+        output_schema: Mapping[str, object],
+    ) -> None:
+        """Apply the same pure validation used before any Function is saved."""
+        _validate_definition(name, source, input_schema, output_schema)
+
     async def define(
         self,
         access: ProjectAccess,

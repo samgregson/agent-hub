@@ -133,6 +133,14 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
         async for event in super().run(input):
             yield event
 
+    async def prepare_stream(self, input: RunAgentInput, agent_state: Any, config: Any) -> Any:
+        # The checkpoint, not the optional client message echo, owns pending
+        # tool-call identity. In particular a resume can legitimately contain
+        # no messages at all, including after reconnecting.
+        if agent_state.values.get("messages"):
+            self._visible_tool_calls = list(_pending_tool_calls(agent_state.values["messages"]))
+        return await super().prepare_stream(input, agent_state, config)
+
     def langgraph_default_merge_state(self, state: Any, messages: Any, input: RunAgentInput) -> Any:
         """Canonicalize replayed tool results by call ID after the adapter merge."""
         merged = super().langgraph_default_merge_state(state, messages, input)
@@ -169,7 +177,7 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
         for raw_interrupt in raw_interrupts:
             raw = getattr(raw_interrupt, "value", None)
             actions = raw.get("action_requests") if isinstance(raw, dict) else None
-            if isinstance(actions, list):
+            if isinstance(actions, list) and any(call.get("args") is None for call in calls):
                 available = list(calls)
                 for action in actions:
                     if not isinstance(action, dict):
@@ -179,6 +187,7 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
                             index
                             for index, call in enumerate(available)
                             if call.get("name") == action.get("name")
+                            and (call.get("args") is None or call.get("args") == action.get("args"))
                         ),
                         None,
                     )

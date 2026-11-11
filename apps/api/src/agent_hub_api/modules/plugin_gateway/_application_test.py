@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 import pytest
+from langchain_core.utils.function_calling import convert_to_openai_tool
 
 from agent_hub_api.modules.plugin_gateway import (
     MemoryPluginEnablementStore,
@@ -86,7 +87,8 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
     )
     agent_tool = (await gateway.agent_tools(project.id))[0]
     assert agent_tool.name == "foundation_fixture__foundation_status"
-    assert agent_tool.description == "Return fixture status."
+    assert agent_tool.description.startswith("Return fixture status.")
+    assert "foundation-fixture" in agent_tool.description
     assert await agent_tool.ainvoke({}) == "Agent Hub's portable MCP fixture is available."
     assert len(await gateway.agent_tools(project.id)) == 1
     assert client.discoveries == 1
@@ -99,6 +101,48 @@ async def test_only_an_enabled_catalogued_plugin_can_be_called() -> None:
 
     await gateway.disable(access, project.id, "foundation-fixture")
     assert (await gateway.selections(access, project.id))[0].enabled is False
+
+
+@pytest.mark.asyncio
+async def test_model_facing_tool_description_includes_declared_output_schema() -> None:
+    class ContractClient(FixtureClient):
+        async def discover_tools(self) -> tuple[PluginDiscoveredTool, ...]:
+            return (
+                PluginDiscoveredTool(
+                    name="foundation_status",
+                    description="Check status.",
+                    read_only=True,
+                    input_schema={"type": "object", "properties": {}},
+                    output_schema={"type": "object", "properties": {"status": {"type": "string"}}},
+                ),
+            )
+
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="sam")
+    project = await projects.create(access, "Schema")
+    gateway = PluginGatewayModule(
+        projects,
+        [
+            PluginManifest(
+                id="fixture",
+                name="Fixture",
+                version="1",
+                endpoint="http://fixture/mcp",
+                tools=(PluginTool(name="foundation_status", read_only=True),),
+            )
+        ],
+        MemoryPluginEnablementStore(),
+        {"fixture": ContractClient(calls=[])},
+    )
+    await gateway.enable(access, project.id, "fixture")
+    direct = (await gateway.agent_tools(project.id))[0]
+    ptc = (await gateway.programmatic_tools(access, project.id))[0]
+    for tool in (direct, ptc):
+        assert '"status":{"type":"string"}' in tool.description
+        assert "Plugin ID 'fixture'" in tool.description
+        model_tool = convert_to_openai_tool(tool)["function"]
+        assert model_tool["parameters"]["type"] == "object"
+        assert '"status":{"type":"string"}' in model_tool["description"]
 
 
 @pytest.mark.asyncio
