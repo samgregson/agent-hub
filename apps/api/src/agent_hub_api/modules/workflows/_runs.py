@@ -1062,6 +1062,48 @@ class WorkflowRunModule:
         ) as error:
             raise WorkflowValidationError("The captured App version is unavailable.") from error
 
+    async def node_app_resource(
+        self,
+        access: ProjectAccess,
+        project_id: str,
+        workflow_id: str,
+        run_id: str,
+        node_id: str,
+    ) -> PluginUiResource:
+        """Replay the captured App for one successful MCP graph step."""
+        run = await self.load(access, project_id, run_id)
+        if run.workflow_id != workflow_id:
+            raise WorkflowNotFound
+        graph = WorkflowGraph.from_json(json.dumps(run.snapshot.get("graph")))
+        node = next((item for item in graph.nodes if item.id == node_id), None)
+        progress = _mapping(_mapping(run.execution.get("nodes")).get(node_id))
+        target = _mapping(_mapping(run.snapshot.get("targets")).get(node_id))
+        if (
+            self._gateway is None
+            or node is None
+            or node.kind != "mcp"
+            or node.shape != "single"
+            or progress.get("status") != "succeeded"
+            or not isinstance(progress.get("output"), Mapping)
+        ):
+            raise WorkflowValidationError("This step has no captured MCP App.")
+        plugin_id, tool_name, version = (
+            target.get("pluginId"), target.get("toolName"), target.get("version")
+        )
+        if not all(isinstance(value, str) for value in (plugin_id, tool_name, version)):
+            raise WorkflowValidationError("The captured App version is unavailable.")
+        try:
+            return await self._gateway.app_resource_for_tool(
+                access, project_id, cast(str, plugin_id), cast(str, tool_name), cast(str, version)
+            )
+        except (
+            PluginNotAvailable,
+            PluginNotEnabled,
+            PluginToolNotAllowed,
+            PluginAppUnavailable,
+        ) as error:
+            raise WorkflowValidationError("The captured App version is unavailable.") from error
+
     async def load_image(
         self,
         access: ProjectAccess,

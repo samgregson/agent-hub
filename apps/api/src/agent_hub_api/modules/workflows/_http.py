@@ -352,6 +352,41 @@ def create_workflow_router(
                 },
             )
 
+        @router.get("/{workflow_id}/runs/{run_id}/nodes/{node_id}/app")
+        async def node_app(
+            project_id: str,
+            workflow_id: str,
+            run_id: str,
+            node_id: str,
+            request_context: Context,
+        ) -> Response:
+            try:
+                resource = await runs.node_app_resource(
+                    ProjectAccess(request_context.subject),
+                    project_id,
+                    workflow_id,
+                    run_id,
+                    node_id,
+                )
+            except WorkflowNotFound as error:
+                raise HTTPException(status_code=404, detail="Workflow step is unavailable.") from error
+            except WorkflowValidationError as error:
+                raise HTTPException(status_code=422, detail=str(error)) from error
+            except PluginCallLimitExceeded as error:
+                raise HTTPException(status_code=429, detail="The Plugin is busy; retry later.") from error
+            except PluginTransportError as error:
+                raise HTTPException(status_code=502, detail="The App could not be loaded.") from error
+            return Response(
+                content=resource.html,
+                media_type="text/html",
+                headers={
+                    "Cache-Control": "no-store",
+                    "Content-Security-Policy": resource.content_security_policy,
+                    "Referrer-Policy": "no-referrer",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
         @router.get("/{workflow_id}/runs/{run_id}/outputs/{output_name}/image")
         async def load_image(
             project_id: str,

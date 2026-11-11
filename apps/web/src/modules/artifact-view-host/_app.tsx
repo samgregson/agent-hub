@@ -33,12 +33,14 @@ export function McpAppFrame({
   toolResult,
   title,
   displayTitle,
+  compact = false,
 }: {
   appUrl: string;
   toolInput: Record<string, unknown>;
   toolResult: McpToolResult;
   title: string;
   displayTitle?: string;
+  compact?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -183,7 +185,10 @@ export function McpAppFrame({
   }, [appUrl, availability, requestKey, setDisplayMode]);
 
   return (
-    <section aria-label={title} className={styles.app}>
+    <section
+      aria-label={title}
+      className={`${styles.app} ${compact ? styles.appCompact : ""}`}
+    >
       <dialog
         open
         ref={dialog}

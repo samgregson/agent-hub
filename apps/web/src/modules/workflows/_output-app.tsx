@@ -41,3 +41,26 @@ export function WorkflowOutputApp({
     </>
   );
 }
+
+export function WorkflowNodeAppPreview({
+  appUrl,
+  title,
+  inputs,
+  output,
+}: {
+  appUrl: string;
+  title: string;
+  inputs: Record<string, unknown>;
+  output: Record<string, unknown>;
+}) {
+  return (
+    <McpAppFrame
+      appUrl={appUrl}
+      title={`${title} App preview`}
+      displayTitle={title}
+      compact
+      toolInput={inputs}
+      toolResult={{ content: [], structuredContent: output }}
+    />
+  );
+}

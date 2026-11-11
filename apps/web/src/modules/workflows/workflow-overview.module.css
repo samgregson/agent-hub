@@ -896,3 +896,89 @@
     padding: 18px 15px 28px;
   }
 }
+
+.functionSourcePreview {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line-subtle);
+  background: var(--surface);
+}
+
+.functionSourcePreview header,
+.functionSourceDialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.functionSourcePreview h2 {
+  font-size: 15px;
+}
+
+.functionSourcePreview p {
+  margin: 4px 0 0;
+  color: var(--text-subtle);
+  font-size: var(--font-size-meta);
+}
+
+.functionSourcePreview button,
+.functionSourceDialog button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.functionSourcePreview pre,
+.functionSourceDialog pre {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  background: var(--surface-code);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.functionSourceDialog {
+  position: fixed;
+  inset: 2rem;
+  width: calc(100vw - 4rem);
+  height: calc(100dvh - 4rem);
+  max-width: none;
+  max-height: none;
+  padding: 20px;
+  border: 1px solid var(--line-strong);
+  background: var(--background);
+  color: var(--text);
+}
+
+.functionSourceDialog[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+}
+
+.functionSourceDialog::backdrop {
+  background: rgb(0 0 0 / 70%);
+}
+
+.functionSourceDialog pre {
+  max-height: none;
+  height: 100%;
+}
+
+@media (max-width: 600px) {
+  .functionSourceDialog {
+    inset: 0;
+    width: 100vw;
+    height: 100dvh;
+  }
+}
