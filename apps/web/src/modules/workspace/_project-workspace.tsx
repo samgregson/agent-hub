@@ -97,6 +97,7 @@ export function ProjectWorkspace() {
     string | null
   >(null);
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
+  const [isMoreViewsOpen, setIsMoreViewsOpen] = useState(false);
   const [navigatorWidth, setNavigatorWidth] = useState(256);
   const isResizingNavigator = useRef(false);
   const navigatorRef = useRef<HTMLElement>(null);
@@ -140,13 +141,11 @@ export function ProjectWorkspace() {
     ? workspace.projects[workspace.selectedProjectId]
     : undefined;
   const selectedActivity = selectedWorkspace?.activity ?? "chats";
-  const isLibraryPreviewOpen =
-    selectedActivity === "artifacts" &&
-    Boolean(
-      selectedWorkspace?.selectedArtifactId ||
-      selectedWorkspace?.selectedFilePath ||
-      selectedWorkspace?.selectedFileProposal,
-    );
+  const isLibraryPreviewOpen = Boolean(
+    selectedWorkspace?.selectedArtifactId ||
+    selectedWorkspace?.selectedFilePath ||
+    selectedWorkspace?.selectedFileProposal,
+  );
   const isExplorerActivity = ["functions", "plugins", "sources"].includes(
     selectedActivity,
   );
@@ -216,11 +215,22 @@ export function ProjectWorkspace() {
     const projectId = workspace.selectedProjectId;
     let active = true;
     listThreads(projectId)
-      .then((loaded) => {
+      .then(async (loaded) => {
         if (!active) return;
         setThreadsByProject((current) => ({ ...current, [projectId]: loaded }));
         if (!selectedThreadIdRef.current && loaded[0]) {
           dispatch({ threadId: loaded[0].id, type: "selectThread" });
+        } else if (loaded.length === 0) {
+          const firstThread = await createThread(
+            projectId,
+            initialThreadTitle(1),
+          );
+          if (!active) return;
+          setThreadsByProject((current) => ({
+            ...current,
+            [projectId]: [firstThread],
+          }));
+          dispatch({ threadId: firstThread.id, type: "selectThread" });
         }
       })
       .catch(() => {
@@ -359,6 +369,7 @@ export function ProjectWorkspace() {
   }
 
   function handleSelectActivity(activity: ActivityView) {
+    setIsMoreViewsOpen(false);
     const projectId = workspace.selectedProjectId;
     if (projectId) userSelectedActivityProjects.current.add(projectId);
     dispatch({ activity, type: "selectActivity" });
@@ -445,6 +456,16 @@ export function ProjectWorkspace() {
             </select>
           </label>
         </div>
+        <button
+          className={styles.newProjectAction}
+          onClick={() => {
+            setProjectCreationError(null);
+            setIsNewProjectDialogOpen(true);
+          }}
+          type="button"
+        >
+          New Project
+        </button>
         {selectedProject &&
         selectedActivity !== "workflows" &&
         projectsWithWorkflows.has(selectedProject.id) ? (
@@ -550,7 +571,7 @@ export function ProjectWorkspace() {
       ) : null}
 
       <nav aria-label="Project views" className={styles.rail}>
-        {activityViews.map((view) => (
+        {(["chats", "artifacts", "workflows"] as const).map((view) => (
           <button
             aria-label={activityLabels[view]}
             aria-pressed={selectedActivity === view}
@@ -564,6 +585,36 @@ export function ProjectWorkspace() {
             {activityLabels[view]}
           </button>
         ))}
+        <button
+          aria-expanded={isMoreViewsOpen}
+          aria-pressed={
+            isMoreViewsOpen ||
+            ["functions", "sources", "plugins"].includes(selectedActivity)
+          }
+          className={styles.railButton}
+          disabled={!selectedProject}
+          onClick={() => setIsMoreViewsOpen((open) => !open)}
+          type="button"
+        >
+          More
+        </button>
+        {isMoreViewsOpen ||
+        ["functions", "sources", "plugins"].includes(selectedActivity)
+          ? (["functions", "sources", "plugins"] as const).map((view) => (
+              <button
+                aria-label={activityLabels[view]}
+                aria-pressed={selectedActivity === view}
+                className={styles.railButton}
+                disabled={!selectedProject}
+                key={view}
+                onClick={() => handleSelectActivity(view)}
+                title={activityLabels[view]}
+                type="button"
+              >
+                {activityLabels[view]}
+              </button>
+            ))
+          : null}
       </nav>
 
       <aside className={styles.navigator} ref={navigatorRef}>
@@ -704,7 +755,7 @@ export function ProjectWorkspace() {
           />
         ) : selectedProject &&
           selectedThread &&
-          selectedActivity === "chats" ? (
+          (selectedActivity === "chats" || selectedActivity === "artifacts") ? (
           <AgentChat
             key={selectedThread.id}
             onOpenFileProposal={(proposal) =>
@@ -870,13 +921,15 @@ function ProjectNavigator({
       <strong>{activityLabels[selectedActivity]}</strong>
       {selectedActivity === "chats" && project ? (
         <>
-          <button
-            className={styles.newThread}
-            onClick={onCreateThread}
-            type="button"
-          >
-            + New Thread
-          </button>
+          {threads.length > 0 ? (
+            <button
+              className={styles.newThread}
+              onClick={onCreateThread}
+              type="button"
+            >
+              + New Thread
+            </button>
+          ) : null}
           <div className={styles.threadList}>
             {threads.map((thread) => (
               <div className={styles.threadRow} key={thread.id}>

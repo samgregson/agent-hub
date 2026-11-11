@@ -1,9 +1,9 @@
 .shell {
   display: grid;
-  grid-template-areas: "title title title title" "rail navigator chat artifact";
+  grid-template-areas: "title title title" "rail navigator chat";
   grid-template-columns:
     96px minmax(208px, min(var(--navigator-width, 256px), 34vw))
-    minmax(280px, 1.35fr) minmax(220px, 0.85fr);
+    minmax(0, 1fr);
   grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
   background: var(--background);
@@ -51,6 +51,23 @@
   min-width: 220px;
   max-width: min(42vw, 420px);
   padding: 0 32px 0 12px;
+}
+
+.newProjectAction {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--text-strong);
+  border-radius: var(--radius-control);
+  background: var(--text-strong);
+  color: var(--background);
+  font-size: var(--font-size-label);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.newProjectAction:hover {
+  background: var(--surface-selected);
+  color: var(--text-strong);
 }
 
 .themeToggle {
@@ -302,6 +319,7 @@
 }
 
 .artifact {
+  display: none;
   grid-area: artifact;
   border-left: 1px solid var(--line-subtle);
   background: var(--surface);
@@ -820,6 +838,10 @@
     min-width: 0;
   }
 
+  .newProjectAction {
+    display: none;
+  }
+
   .projectPicker select {
     width: 100%;
     min-width: 0;
@@ -844,13 +866,17 @@
 
 @media (min-width: 1025px) {
   .shell.libraryPreviewOpen {
-    grid-template-areas: "title title title" "rail navigator artifact";
+    grid-template-areas: "title title title title" "rail navigator chat artifact";
     grid-template-columns:
-      96px minmax(208px, min(var(--navigator-width, 256px), 34vw))
-      minmax(0, 1fr);
+      96px minmax(208px, min(var(--navigator-width, 256px), 28vw))
+      minmax(280px, 1.15fr) minmax(320px, 1.4fr);
   }
 
   .shell.libraryPreviewOpen .chat {
-    display: none;
+    display: block;
+  }
+
+  .shell.libraryPreviewOpen .artifact {
+    display: block;
   }
 }

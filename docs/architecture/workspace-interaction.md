@@ -97,6 +97,7 @@ The product borrows the stable navigation/chat/inspector structure from Codex an
 
 - Remains the default primary surface.
 - Shows streamed messages, Agent Run state, tool calls, approvals, errors, and the composer.
+- When a Project has no Threads, creates its first Thread automatically so the user can start by typing and sending; additional Threads remain explicit.
 - Clearly distinguishes user and assistant messages by alignment, surface treatment, and an accessible sender label. Assistant text renders safe Markdown, including emphasis, lists, links, and fenced code blocks; untrusted HTML is never rendered.
 - Selecting or creating a Thread changes this surface but does not automatically close the current Project Artifact.
 - Links and tool results can select an Artifact or Source in the right workspace without navigating away from the Thread. Project and Thread-local Scratch file links open safe previews in that workspace without changing their lifecycle.
@@ -104,6 +105,7 @@ The product borrows the stable navigation/chat/inspector structure from Codex an
 ### Right: Artifact workspace
 
 - Displays the Artifact or Source selected through its corresponding project-scoped rail view; neither is mixed into the message transcript.
+- Stays collapsed while empty. A selected file or Artifact opens a split view beside the active conversation.
 - Renders the selected portable Artifact using its MCP App when available, with a generic document/JSON fallback.
 - Shows Artifact identity, provenance, validation state, Plugin identity, and trusted controls in host chrome outside the untrusted MCP App iframe.
 - Supports collapsed, split, and focus states.
@@ -162,10 +164,10 @@ Below the usable three-column width, show one primary surface at a time:
 
 ## Library and expanded MCP Apps
 
-On desktop, opening a Library item gives its preview the workspace area beside
-the Library navigator. The conversation placeholder is hidden while that preview
-is selected. Chat keeps its conversation/preview split. This removes unused
-space without changing Project or Thread ownership.
+On desktop, the preview stays closed until the user selects a file or Artifact.
+Opening a Library item or following a file/Artifact link from chat opens the
+preview beside the conversation, which remains available for questions about the
+selected material. Returning to Chats does not discard the selected Project item.
 
 The Artifact View Host puts the App first, with Artifact identity, version,
 provenance and raw data in disclosures. A trusted toolbar expands the same iframe
