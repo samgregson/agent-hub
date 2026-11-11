@@ -11,7 +11,6 @@ export type GraphCanvasNode = {
   status?: string;
   inputs?: string[];
   outputs?: string[];
-  outputPreview?: unknown;
 };
 
 export type GraphCanvasEdge = {
@@ -29,6 +28,8 @@ export type GraphCanvasProps = {
   edges: GraphCanvasEdge[];
   selectedNodeId?: string | null;
   onSelectNode?: (nodeId: string | null) => void;
+  onToggleFullscreen?: () => void;
+  isFullscreen?: boolean;
   className?: string;
 };
 
@@ -101,15 +102,6 @@ function defaultPositions(nodes: GraphCanvasNode[], edges: GraphCanvasEdge[]) {
   return positions;
 }
 
-function pretty(value: unknown) {
-  if (value === undefined) return "No output captured yet.";
-  try {
-    return JSON.stringify(value, null, 2) ?? "null";
-  } catch {
-    return String(value);
-  }
-}
-
 export function GraphCanvas({
   workflowId,
   version,
@@ -117,6 +109,8 @@ export function GraphCanvas({
   edges,
   selectedNodeId,
   onSelectNode,
+  onToggleFullscreen,
+  isFullscreen = false,
   className,
 }: GraphCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -365,7 +359,6 @@ export function GraphCanvas({
     );
 
   const activeId = selectedNodeId ?? focusedId;
-  const active = nodes.find((node) => node.id === activeId);
   const revealPorts = zoom >= 1.08;
   return (
     <section
@@ -418,6 +411,27 @@ export function GraphCanvas({
             }}
           >
             Reset layout
+          </button>
+          <button
+            type="button"
+            className={styles.expandButton}
+            aria-label={
+              isFullscreen
+                ? "Exit expanded workflow graph"
+                : "Expand workflow graph"
+            }
+            title={isFullscreen ? "Exit expanded graph" : "Expand graph"}
+            onClick={onToggleFullscreen}
+          >
+            {isFullscreen ? (
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M9 4H4v5m0-5 6 6m5 10h5v-5m0 5-6-6M20 9V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6" />
+              </svg>
+            ) : (
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M4 9V4h5M4 4l6 6m10 5v5h-5m5 0-6-6M15 4h5v5m0-5-6 6M9 20H4v-5m0 5 6-6" />
+              </svg>
+            )}
           </button>
         </div>
       </div>
@@ -628,31 +642,6 @@ export function GraphCanvas({
           <p className={styles.zoomHint}>
             Zoom in to inspect named inputs and outputs
           </p>
-        ) : null}
-        {active && active.outputPreview !== undefined ? (
-          <aside
-            data-no-pan="true"
-            className={styles.preview}
-            aria-label={`${active.title} output preview`}
-          >
-            <div className={styles.previewHeader}>
-              <div>
-                <span>Step output</span>
-                <strong>{active.title}</strong>
-              </div>
-              <button
-                type="button"
-                aria-label="Close output preview"
-                onClick={() => {
-                  setFocusedId(null);
-                  onSelectNode?.(null);
-                }}
-              >
-                ×
-              </button>
-            </div>
-            <pre>{pretty(active.outputPreview)}</pre>
-          </aside>
         ) : null}
       </div>
       <div className={styles.canvasFooter}>

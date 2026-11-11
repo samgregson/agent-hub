@@ -570,8 +570,8 @@ export function WorkflowMapResults({
         <div>
           <h3>Results by item</h3>
           <p>
-            Primary output values and status are shown here. Preview a row for
-            its complete captured input, output, and technical details.
+            Select a successful item to open its captured App and inspect the
+            input and result for that item.
           </p>
         </div>
         <span>{items.length} items</span>
@@ -636,7 +636,9 @@ export function WorkflowMapResults({
                       className={styles.mapInspectButton}
                       onClick={(event) => {
                         previewTriggerRef.current = event.currentTarget;
-                        setShowApp(false);
+                        setShowApp(
+                          Boolean(appUrl && item.status === "succeeded"),
+                        );
                         setSelectedIndex(item.index);
                       }}
                       type="button"
@@ -787,8 +789,8 @@ export function WorkflowMapResults({
                 <div>
                   <h4>Interactive view</h4>
                   <p>
-                    Open the MCP App with this saved input and result. The tool
-                    will not run again.
+                    This App shows the saved input and result. The tool will not
+                    run again.
                   </p>
                 </div>
                 {!showApp ? (

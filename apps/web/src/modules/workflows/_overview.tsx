@@ -10,7 +10,7 @@ import {
   type GraphCanvasNode,
 } from "./_graph-canvas";
 import { WorkflowMapResults } from "./_map-results";
-import { WorkflowNodeAppPreview, WorkflowOutputApp } from "./_output-app";
+import { WorkflowNodeAppPreview } from "./_output-app";
 import {
   WorkflowNodePreview,
   type WorkflowNodePreviewSource,
@@ -19,11 +19,6 @@ import {
   DatasetRecordsTable,
   type DatasetTableRecord,
 } from "@/modules/datasets";
-import {
-  ImageOutputPreview,
-  isImageOutput,
-  type ImageOutput,
-} from "@/modules/media";
 import styles from "./workflow-overview.module.css";
 
 type WorkflowNode = {
@@ -722,8 +717,8 @@ export function WorkflowOverview({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const nodeInspectorRef = useRef<HTMLDivElement>(null);
-  const overviewRef = useRef<HTMLElement>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const graphExperienceRef = useRef<HTMLDivElement>(null);
+  const [isGraphFullscreen, setIsGraphFullscreen] = useState(false);
   const reviewRequestId = useRef(0);
   const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(
     null,
@@ -741,14 +736,15 @@ export function WorkflowOverview({
     sources: ReviewedSource[];
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [savedImages, setSavedImages] = useState<Record<string, boolean>>({});
   const [workflowInputText, setWorkflowInputText] = useState<
     Record<string, string>
   >({});
 
   useEffect(() => {
     const syncFullscreen = () =>
-      setIsFullscreen(document.fullscreenElement === overviewRef.current);
+      setIsGraphFullscreen(
+        document.fullscreenElement === graphExperienceRef.current,
+      );
     document.addEventListener("fullscreenchange", syncFullscreen);
     return () =>
       document.removeEventListener("fullscreenchange", syncFullscreen);
@@ -874,9 +870,6 @@ export function WorkflowOverview({
     selectedRun && selectedNode?.kind === "mcp"
       ? `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow?.id ?? "")}/runs/${encodeURIComponent(selectedRun.id)}/nodes/${encodeURIComponent(selectedNode.id)}/app`
       : null;
-  const finalOutputs = isRecord(runExecution.outputs)
-    ? runExecution.outputs
-    : {};
   const canvasGraph = useMemo(() => {
     const nodes: GraphCanvasNode[] = (graph?.nodes ?? []).map((node) => {
       const progress = isRecord(selectedRun?.execution.nodes)
@@ -1242,27 +1235,6 @@ export function WorkflowOverview({
     }
   }
 
-  async function saveImageToLibrary(outputName: string) {
-    if (!workflow || !selectedRun) return;
-    setActionError(null);
-    const key = `${selectedRun.id}:${outputName}`;
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow.id)}/runs/${encodeURIComponent(selectedRun.id)}/outputs/${encodeURIComponent(outputName)}/artifact`,
-        { method: "POST" },
-      );
-      if (!response.ok)
-        throw new Error("Could not save this image to Library.");
-      setSavedImages((current) => ({ ...current, [key]: true }));
-    } catch (error) {
-      setActionError(
-        error instanceof Error
-          ? error.message
-          : "Could not save this image to Library.",
-      );
-    }
-  }
-
   function acceptRevisedDefinition(revised: WorkflowDefinition) {
     setResult((current) =>
       current.projectId !== projectId || current.workflows === null
@@ -1348,11 +1320,7 @@ export function WorkflowOverview({
   }
 
   return (
-    <section
-      aria-label="Workflow overview"
-      className={styles.overview}
-      ref={overviewRef}
-    >
+    <section aria-label="Workflow overview" className={styles.overview}>
       <header className={styles.header}>
         <div>
           {workflows.length > 1 ? (
@@ -1382,21 +1350,6 @@ export function WorkflowOverview({
           </p>
         </div>
         <div className={styles.headerActions}>
-          <button
-            className={styles.secondaryButton}
-            onClick={() => {
-              const root = overviewRef.current;
-              if (!root) return;
-              if (document.fullscreenElement === root) {
-                void document.exitFullscreen();
-              } else {
-                void root.requestFullscreen();
-              }
-            }}
-            type="button"
-          >
-            {isFullscreen ? "Exit full screen" : "Full screen"}
-          </button>
           <button
             className={styles.secondaryButton}
             onClick={() => setEditingDefinitionId(workflow.id)}
@@ -1448,8 +1401,19 @@ export function WorkflowOverview({
         </div>
         <div
           className={`${styles.graphExperience} ${selectedCanvasNode ? styles.graphWithInspector : ""}`}
+          ref={graphExperienceRef}
         >
           <GraphCanvas
+            isFullscreen={isGraphFullscreen}
+            onToggleFullscreen={() => {
+              const root = graphExperienceRef.current;
+              if (!root) return;
+              if (document.fullscreenElement === root) {
+                void document.exitFullscreen();
+              } else {
+                void root.requestFullscreen();
+              }
+            }}
             edges={canvasGraph.edges}
             nodes={canvasGraph.nodes}
             onSelectNode={setSelectedNodeId}
@@ -1477,10 +1441,17 @@ export function WorkflowOverview({
                   Close preview
                 </button>
               </div>
-              {selectedNode?.kind === "mcp" &&
-              selectedNodeAppUrl &&
-              selectedNodeProgress?.status === "succeeded" &&
-              isRecord(selectedNodeProgress.output) ? (
+              {selectedNode?.shape === "map" ? (
+                <WorkflowMapResults
+                  items={selectedNodeProgress?.items}
+                  node={selectedNode}
+                  projectId={projectId}
+                  target={snapshotTargets[selectedNode.id] ?? {}}
+                />
+              ) : selectedNode?.kind === "mcp" &&
+                selectedNodeAppUrl &&
+                selectedNodeProgress?.status === "succeeded" &&
+                isRecord(selectedNodeProgress.output) ? (
                 <WorkflowNodeAppPreview
                   appUrl={selectedNodeAppUrl}
                   title={selectedNode.toolName ?? selectedNode.id}
@@ -1528,14 +1499,6 @@ export function WorkflowOverview({
                   outputState={selectedOutputState}
                 />
               )}
-              {selectedNode?.shape === "map" ? (
-                <WorkflowMapResults
-                  items={selectedNodeProgress?.items}
-                  node={selectedNode}
-                  projectId={projectId}
-                  target={snapshotTargets[selectedNode.id] ?? {}}
-                />
-              ) : null}
             </div>
           ) : null}
         </div>
@@ -1892,95 +1855,6 @@ export function WorkflowOverview({
           projectId={projectId}
         />
       ) : null}
-
-      <section aria-label="Workflow outputs" className={styles.outputs}>
-        <div className={styles.sectionHeading}>
-          <h2>Final outputs</h2>
-          <span>
-            {selectedRun ? `Run ${selectedRun.id.slice(0, 8)}` : "No Run yet"}
-          </span>
-        </div>
-        {selectedRun ? (
-          <div className={styles.outputList}>
-            {graph.outputs.map((output) => {
-              const outputNode = graphNodes.get(output.node);
-              const rows = datasetRows(finalOutputs[output.name]);
-              const outputValue = finalOutputs[output.name];
-              const image: ImageOutput | null = isImageOutput(outputValue)
-                ? outputValue
-                : null;
-              const imageKey = `${selectedRun.id}:${output.name}`;
-              const imageUrl = `/api/projects/${encodeURIComponent(projectId)}/workflows/${encodeURIComponent(workflow?.id ?? "")}/runs/${encodeURIComponent(selectedRun.id)}/outputs/${encodeURIComponent(output.name)}/image`;
-              const appUrl = imageUrl.replace(/\/image$/, "/app");
-              const progress = progressByNode[output.node];
-              const canPreviewApp =
-                outputNode?.kind === "mcp" &&
-                outputNode.shape !== "map" &&
-                output.port === "result" &&
-                progress?.status === "succeeded" &&
-                isRecord(outputValue);
-              return (
-                <article
-                  className={`${styles.output} ${canPreviewApp ? styles.appOutput : ""}`}
-                  key={output.name}
-                >
-                  <div>
-                    <h3>{output.name}</h3>
-                    <p>
-                      From {outputNode?.id ?? output.node} · {output.port}
-                    </p>
-                  </div>
-                  {outputNode?.shape === "map" ? (
-                    <WorkflowMapResults
-                      items={progressByNode[output.node]?.items}
-                      node={outputNode}
-                      projectId={projectId}
-                      target={snapshotTargets[output.node] ?? {}}
-                    />
-                  ) : canPreviewApp ? (
-                    <WorkflowOutputApp
-                      key={appUrl}
-                      appUrl={appUrl}
-                      title={output.name}
-                      inputs={isRecord(progress?.inputs) ? progress.inputs : {}}
-                      output={outputValue as Record<string, unknown>}
-                    />
-                  ) : image ? (
-                    <>
-                      <ImageOutputPreview
-                        altText={image.altText}
-                        src={imageUrl}
-                        title={output.name}
-                      />
-                      <button
-                        className={styles.secondaryButton}
-                        disabled={savedImages[imageKey]}
-                        onClick={() => void saveImageToLibrary(output.name)}
-                        type="button"
-                      >
-                        {savedImages[imageKey]
-                          ? "Saved to Library"
-                          : "Save to Library"}
-                      </button>
-                    </>
-                  ) : rows ? (
-                    <DatasetRecordsTable
-                      ariaLabel={`${output.name} workflow output`}
-                      records={rows}
-                    />
-                  ) : (
-                    <pre>{jsonText(finalOutputs[output.name])}</pre>
-                  )}
-                </article>
-              );
-            })}
-          </div>
-        ) : (
-          <p>
-            No completed Run yet. Start the Workflow to capture its outputs.
-          </p>
-        )}
-      </section>
     </section>
   );
 }
