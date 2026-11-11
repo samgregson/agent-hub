@@ -45,6 +45,7 @@ import {
   createWorkspaceState,
   workspaceReducer,
 } from "./_state";
+import { DocumentPreview } from "@/modules/project-files";
 import { LibraryCatalog } from "./_library-catalog";
 import { WorkflowOverview } from "@/modules/workflows";
 
@@ -90,6 +91,7 @@ export function ProjectWorkspace() {
     serverIsInteractive,
   );
   const [isCreating, setIsCreating] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [isNewProjectDialogOpen, setIsNewProjectDialogOpen] = useState(false);
   const [projectCreationError, setProjectCreationError] = useState<
     string | null
@@ -392,8 +394,20 @@ export function ProjectWorkspace() {
     }
   }
 
+  useEffect(() => {
+    setIsDarkMode(window.localStorage.getItem("agent-hub-theme") === "dark");
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "agent-hub-theme",
+      isDarkMode ? "dark" : "light",
+    );
+  }, [isDarkMode]);
+
   return (
     <main
+      data-theme={isDarkMode ? "dark" : "light"}
       className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""} ${isWorkflowActivity ? styles.workflowOpen : ""} ${isLibraryPreviewOpen ? styles.libraryPreviewOpen : ""}`}
       style={{ "--navigator-width": `${navigatorWidth}px` } as CSSProperties}
     >
@@ -401,6 +415,7 @@ export function ProjectWorkspace() {
         <span aria-hidden="true" className={styles.mark}>
           A
         </span>
+        <span className={styles.foundation}>Agent Hub</span>
         <div className={styles.projectControls}>
           <label className={styles.projectPicker}>
             <span className={styles.srOnly}>Selected Project</span>
@@ -451,9 +466,25 @@ export function ProjectWorkspace() {
         >
           Menu
         </button>
-        <span className={styles.foundation}>
-          Foundation · Project workspace
-        </span>
+        <button
+          aria-label={`Switch to ${isDarkMode ? "light" : "dark"} mode`}
+          aria-pressed={isDarkMode}
+          className={styles.themeToggle}
+          onClick={() => setIsDarkMode((current) => !current)}
+          title={`Switch to ${isDarkMode ? "light" : "dark"} mode`}
+          type="button"
+        >
+          {isDarkMode ? (
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+            </svg>
+          ) : (
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M20.5 15.5A8.5 8.5 0 0 1 8.5 3.5 8.5 8.5 0 1 0 20.5 15.5Z" />
+            </svg>
+          )}
+        </button>
       </header>
 
       {isNewProjectDialogOpen ? (
@@ -469,7 +500,6 @@ export function ProjectWorkspace() {
           >
             <div className={styles.newProjectDialogHeading}>
               <div>
-                <p className={styles.eyebrow}>Project workspace</p>
                 <h2 id="new-project-title">New Project</h2>
               </div>
               <button
@@ -700,7 +730,6 @@ export function ProjectWorkspace() {
           />
         ) : (
           <div className={styles.chatPlaceholder}>
-            <p className={styles.eyebrow}>Agent Hub</p>
             <h1>{selectedProject?.name ?? "Choose a Project"}</h1>
             <p>
               {selectedProject
@@ -766,6 +795,25 @@ export function ProjectWorkspace() {
             key={`${selectedProject.id}:${selectedWorkspace.selectedFilePath}`}
             onSaved={() => setLibraryRefreshKey((current) => current + 1)}
             projectId={selectedProject.id}
+          />
+        ) : selectedProject &&
+          selectedWorkspace?.selectedFilePath?.startsWith(
+            "/project/.documents/",
+          ) ? (
+          <DocumentPreview
+            key={`${selectedProject.id}:${selectedWorkspace.selectedFilePath}`}
+            projectId={selectedProject.id}
+            documentId={selectedWorkspace.selectedFilePath.split("/")[3]}
+            initialPage={Number(
+              selectedWorkspace.selectedFilePath.match(
+                /pages\/(\d+)\.md$/,
+              )?.[1] ?? 1,
+            )}
+            initialMode={
+              selectedWorkspace.selectedFilePath.endsWith("/text.md")
+                ? "text"
+                : "original"
+            }
           />
         ) : selectedProject && selectedWorkspace?.selectedFilePath ? (
           <ProjectFilePreview

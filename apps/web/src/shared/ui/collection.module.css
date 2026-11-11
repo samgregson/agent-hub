@@ -1,6 +1,6 @@
 .collection {
   display: grid;
-  gap: var(--space-2);
+  gap: 0;
   container-type: inline-size;
 }
 
@@ -8,15 +8,15 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  background: var(--surface-card);
+  border: 0;
+  border-bottom: 1px solid var(--line-subtle);
+  background: transparent;
 }
 
 .item:hover,
 .item:focus-within {
-  border-color: var(--line-strong);
-  background: var(--surface-raised);
+  border-color: var(--line);
+  background: var(--surface-selected);
 }
 
 .content,
@@ -25,7 +25,7 @@
   flex: 1;
   min-width: 0;
   gap: var(--space-1);
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-2);
   color: var(--text);
   font-size: var(--font-size-body);
 }
@@ -68,32 +68,4 @@
 .actions select {
   flex-basis: 100%;
   width: 100%;
-}
-
-@media (max-width: 1024px) {
-  .item {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-
-  .actions {
-    width: 100%;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    border-top: 1px solid var(--line-strong);
-  }
-}
-
-@container (max-width: 320px) {
-  .item {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-
-  .actions {
-    width: 100%;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    border-top: 1px solid var(--line-strong);
-  }
 }

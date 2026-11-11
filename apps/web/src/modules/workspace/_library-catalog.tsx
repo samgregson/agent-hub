@@ -5,9 +5,18 @@ import { useEffect, useState } from "react";
 import type { ArtifactCatalog, ProjectFileCatalog } from "@/contracts";
 import { Collection, CollectionItem, Menu, MenuItem } from "@/shared/ui";
 
+import { DocumentUpload, type ProjectDocument } from "@/modules/project-files";
+
 import styles from "./workspace.module.css";
 
 type LibraryItem =
+  | {
+      id: string;
+      kind: "document";
+      label: string;
+      path: string;
+      version: number;
+    }
   | { id: string; kind: "artifact"; label: string; version: number }
   | {
       id: string;
@@ -28,6 +37,7 @@ interface DatasetSummary {
 type PendingDeletion = LibraryItem | null;
 
 const libraryKindLabels = {
+  document: "Document",
   artifact: "Artifact",
   dataset: "Dataset",
   projectFile: "Project File",
@@ -43,8 +53,16 @@ function combineLibraryItems(
   artifacts: ArtifactCatalog,
   files: ProjectFileCatalog,
   datasets: DatasetSummary[],
+  documents: ProjectDocument[],
 ): LibraryItem[] {
   return [
+    ...documents.map((d) => ({
+      id: d.id,
+      kind: "document" as const,
+      label: d.name,
+      path: d.filePath,
+      version: d.version,
+    })),
     ...artifacts.artifacts.map((artifact) => ({
       id: artifact.id,
       kind: "artifact" as const,
@@ -59,7 +77,11 @@ function combineLibraryItems(
       version: dataset.version,
     })),
     ...files.files
-      .filter((file) => !file.path.startsWith("/project/.datasets/"))
+      .filter(
+        (file) =>
+          !file.path.startsWith("/project/.datasets/") &&
+          !file.path.startsWith("/project/.documents/"),
+      )
       .map((file) => ({
         kind: "projectFile" as const,
         label: file.path,
@@ -80,6 +102,7 @@ export function LibraryCatalog({
   projectId: string;
   refreshKey: number;
 }) {
+  const [uploadRevision, setUploadRevision] = useState(0);
   const [result, setResult] = useState<LibraryCatalogResult>({
     error: null,
     items: null,
@@ -206,22 +229,27 @@ export function LibraryCatalog({
     try {
       const encodedProjectId = encodeURIComponent(projectId);
       const response =
-        item.kind === "artifact"
+        item.kind === "document"
           ? await fetch(
-              `/api/projects/${encodedProjectId}/artifacts/${encodeURIComponent(item.id)}`,
+              `/api/projects/${encodedProjectId}/files/documents/${encodeURIComponent(item.id)}`,
               { method: "DELETE" },
             )
-          : item.kind === "dataset"
+          : item.kind === "artifact"
             ? await fetch(
-                `/api/projects/${encodedProjectId}/datasets/${encodeURIComponent(item.id)}`,
-                {
-                  method: "DELETE",
-                },
-              )
-            : await fetch(
-                `/api/projects/${encodedProjectId}/files?path=${encodeURIComponent(item.path)}`,
+                `/api/projects/${encodedProjectId}/artifacts/${encodeURIComponent(item.id)}`,
                 { method: "DELETE" },
-              );
+              )
+            : item.kind === "dataset"
+              ? await fetch(
+                  `/api/projects/${encodedProjectId}/datasets/${encodeURIComponent(item.id)}`,
+                  {
+                    method: "DELETE",
+                  },
+                )
+              : await fetch(
+                  `/api/projects/${encodedProjectId}/files?path=${encodeURIComponent(item.path)}`,
+                  { method: "DELETE" },
+                );
       if (!response.ok) throw new Error(String(response.status));
       setResult((current) =>
         current.projectId !== projectId || current.items === null
@@ -252,17 +280,33 @@ export function LibraryCatalog({
       fetch(`/api/projects/${encodedProjectId}/datasets`, {
         cache: "no-store",
       }),
+      fetch(`/api/projects/${encodedProjectId}/files/documents`, {
+        cache: "no-store",
+      }),
     ])
-      .then(async ([artifactResponse, fileResponse, datasetResponse]) => {
-        if (!artifactResponse.ok || !fileResponse.ok || !datasetResponse.ok) {
-          throw new Error("Library catalog unavailable");
-        }
-        return combineLibraryItems(
-          (await artifactResponse.json()) as ArtifactCatalog,
-          (await fileResponse.json()) as ProjectFileCatalog,
-          (await datasetResponse.json()) as DatasetSummary[],
-        );
-      })
+      .then(
+        async ([
+          artifactResponse,
+          fileResponse,
+          datasetResponse,
+          documentResponse,
+        ]) => {
+          if (
+            !artifactResponse.ok ||
+            !fileResponse.ok ||
+            !datasetResponse.ok ||
+            !documentResponse.ok
+          ) {
+            throw new Error("Library catalog unavailable");
+          }
+          return combineLibraryItems(
+            (await artifactResponse.json()) as ArtifactCatalog,
+            (await fileResponse.json()) as ProjectFileCatalog,
+            (await datasetResponse.json()) as DatasetSummary[],
+            (await documentResponse.json()) as ProjectDocument[],
+          );
+        },
+      )
       .then((loaded) => {
         if (active) setResult({ error: null, items: loaded, projectId });
       })
@@ -278,7 +322,7 @@ export function LibraryCatalog({
     return () => {
       active = false;
     };
-  }, [projectId, refreshKey]);
+  }, [projectId, refreshKey, uploadRevision]);
 
   return (
     <section aria-label="Library items">
@@ -301,6 +345,14 @@ export function LibraryCatalog({
           {uploadError}
         </p>
       ) : null}
+      <DocumentUpload
+        key={projectId}
+        projectId={projectId}
+        onUploaded={(document) => {
+          setUploadRevision((n) => n + 1);
+          onOpenProjectFile(document.filePath);
+        }}
+      />
       <button
         className={styles.newThread}
         onClick={() => setAddingDataset((current) => !current)}

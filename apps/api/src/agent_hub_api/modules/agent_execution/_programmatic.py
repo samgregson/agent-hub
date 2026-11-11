@@ -16,6 +16,7 @@ from agent_hub_api.modules.project_files import ProjectFileAccess, ProjectFilesM
 _READ_TOOL_NAMES = frozenset(
     {
         "list_project_files",
+        "list_project_documents",
         "discover_project_plugins",
         "discover_project_artifacts",
         "load_project_artifact",

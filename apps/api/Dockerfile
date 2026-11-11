@@ -5,6 +5,10 @@ ENV PYTHONUNBUFFERED=1
 ENV UV_PROJECT_ENVIRONMENT=/workspace/.venv
 WORKDIR /workspace
 
+# MarkItDown's local file detection runtime uses native C++ libraries.
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=uv /uv /uvx /bin/
 COPY pyproject.toml uv.lock ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml

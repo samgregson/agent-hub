@@ -111,7 +111,7 @@ test("the IFC main-agent result renders inside Agent Hub", async ({ page }) => {
   await expect(app.getByLabel("Value", { exact: true })).toHaveValue(
     "Check connections",
   );
-  await expect(app.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(app.locator("html")).toHaveAttribute("data-theme", "light");
   await app.locator("canvas").scrollIntoViewIfNeeded();
   await app
     .locator("canvas")

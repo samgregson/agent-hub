@@ -174,3 +174,13 @@ return focus to the expansion control. The iframe stays mounted, preserving
 selection, camera and local edits, and retains the same sandbox permissions.
 Phone expansion fills the viewport. The MCP host context reports theme and
 inline/fullscreen display modes. See `mcp-app-development.md` for App guidance.
+
+## Visual direction
+
+The host uses bright neutral surfaces, a softly coloured navigation area and
+restrained dark accents. Buttons share size, border, spacing and states across the workspace. Typography and controls stay
+clear; simple divided lists and generous workspace help the agent conversation
+and project material remain the focus. Use the shared tokens in `globals.css`,
+maintain readable contrast and keyboard focus, and preserve semantic success and
+danger states. Plugin Apps own their isolated styles and receive the standard
+light host theme context.

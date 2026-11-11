@@ -2,11 +2,12 @@
   display: grid;
   grid-template-areas: "title title title title" "rail navigator chat artifact";
   grid-template-columns:
-    112px minmax(208px, min(var(--navigator-width, 256px), 34vw))
-    minmax(240px, 1.15fr) minmax(220px, 0.85fr);
+    96px minmax(208px, min(var(--navigator-width, 256px), 34vw))
+    minmax(280px, 1.35fr) minmax(220px, 0.85fr);
   grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
   background: var(--background);
+  color: var(--text);
 }
 
 .titlebar {
@@ -16,7 +17,7 @@
   gap: 16px;
   padding: 0 20px;
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--surface);
+  background: var(--background);
 }
 
 .mark {
@@ -25,10 +26,11 @@
   height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 9px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 900;
+  border: 1px solid var(--text-strong);
+  border-radius: 0;
+  background: var(--text-strong);
+  color: var(--background);
+  font-weight: 650;
   letter-spacing: -0.04em;
 }
 
@@ -49,6 +51,36 @@
   min-width: 220px;
   max-width: min(42vw, 420px);
   padding: 0 32px 0 12px;
+}
+
+.themeToggle {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--text-strong);
+  border-radius: 50%;
+  background: var(--text-strong);
+  color: var(--background);
+  cursor: pointer;
+}
+
+.themeToggle:hover {
+  background: var(--surface-selected);
+  color: var(--text-strong);
+}
+
+.themeToggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .projectControls {
@@ -133,17 +165,14 @@
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
-  font-weight: 800;
+  font-weight: 650;
 }
 
 .foundation {
-  margin-left: auto;
-  color: var(--text-muted);
-  font:
-    11px ui-monospace,
-    monospace;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  color: var(--text-strong);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .mobileNavigationToggle,
@@ -162,7 +191,7 @@
   gap: 6px;
   padding: 24px 10px;
   border-right: 1px solid var(--line-subtle);
-  background: #141914;
+  background: var(--surface-nav);
 }
 
 .railButton {
@@ -172,9 +201,12 @@
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-muted);
-  font-size: var(--font-size-label);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.075em;
   padding: 8px 10px;
   text-align: left;
+  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -184,9 +216,10 @@
 }
 
 .railButton[aria-pressed="true"] {
-  border-color: var(--line-strong);
+  border-color: transparent;
+  border-left: 3px solid var(--text-strong);
   background: var(--surface-selected);
-  color: var(--accent);
+  color: var(--text-strong);
   font-weight: 700;
 }
 
@@ -271,7 +304,7 @@
 .artifact {
   grid-area: artifact;
   border-left: 1px solid var(--line-subtle);
-  background: #161b15;
+  background: var(--surface);
 }
 
 .navigator p,
@@ -350,9 +383,9 @@
 }
 
 .deleteDialogEyebrow {
-  color: #e5aaa0 !important;
+  color: var(--danger) !important;
   font-size: 11px !important;
-  font-weight: 800;
+  font-weight: 650;
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -373,9 +406,9 @@
 }
 
 .deleteDialogActions button:last-child {
-  border-color: #d88072;
-  background: #753f38;
-  color: white;
+  border-color: var(--danger-border);
+  background: var(--danger-surface);
+  color: var(--danger);
 }
 
 .workItemOpen span,
@@ -445,7 +478,7 @@
   border: 1px solid var(--danger-border);
   border-radius: var(--radius-control);
   background: transparent;
-  color: #e5aaa0;
+  color: var(--danger);
   cursor: pointer;
   font-size: 11px;
   padding: 5px 7px;
@@ -454,7 +487,7 @@
 .newThread,
 .threadButton {
   width: 100%;
-  min-height: 40px;
+  min-height: var(--control-height);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
@@ -466,10 +499,11 @@
 
 .newThread {
   margin: 18px 0 16px;
-  padding: 9px 12px;
-  border: 1px solid var(--line-strong);
-  color: var(--accent);
-  font-weight: 700;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  background: var(--surface-card);
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 .newThread:hover,
@@ -541,7 +575,7 @@
   background: var(--accent);
   color: var(--accent-ink);
   font-size: var(--font-size-label);
-  font-weight: 800;
+  font-weight: 650;
   cursor: pointer;
 }
 
@@ -552,18 +586,9 @@
 
 .chat h1 {
   margin: 12px 0 20px;
-  font-size: clamp(32px, 4vw, 54px);
+  font-size: 1.75rem;
   line-height: 1.08;
   letter-spacing: -0.035em;
-}
-
-.eyebrow {
-  color: var(--accent) !important;
-  font:
-    700 10px ui-monospace,
-    monospace !important;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .error {
@@ -625,7 +650,7 @@
     background: var(--accent);
     color: var(--accent-ink);
     font-size: var(--font-size-label);
-    font-weight: 800;
+    font-weight: 650;
   }
 
   .mobileWorkflowShortcut {
@@ -745,7 +770,7 @@
   .workItemActions {
     width: 100%;
     justify-content: space-between;
-    border-top: 1px solid #35342f;
+    border-top: 1px solid var(--line-subtle);
   }
 
   .recordSelector {
@@ -820,10 +845,9 @@
 @media (min-width: 1025px) {
   .shell.libraryPreviewOpen {
     grid-template-areas: "title title title" "rail navigator artifact";
-    grid-template-columns: 112px minmax(
-        208px,
-        min(var(--navigator-width, 256px), 34vw)
-      ) minmax(0, 1fr);
+    grid-template-columns:
+      96px minmax(208px, min(var(--navigator-width, 256px), 34vw))
+      minmax(0, 1fr);
   }
 
   .shell.libraryPreviewOpen .chat {

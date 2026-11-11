@@ -46,3 +46,17 @@ inspects object properties, and colours metadata or mapped calculation results.
 
 See the [MCP App development guide](docs/architecture/mcp-app-development.md) for
 Plugin packaging, agent instructions, viewport layouts and embedded testing.
+
+## PDF and DOCX sources
+
+In **Library**, use **Upload PDF or DOCX**. PDFs open with page navigation and zoom;
+**Extracted Markdown** shows searchable text, and **Download original** preserves the
+exact upload. DOCX provides extracted text and its original download. Extraction
+warnings identify pages requiring OCR or visual inspection; OCR is not automatic.
+
+The agent can discover sources with `list_project_documents`, search generated
+`/project/.documents/<id>/` Markdown using normal `glob`/`grep`/`read_file`, and
+inspect an original PDF page with `view_project_document_page`. Generated files
+are protected from generic edits. Agent Hub owns original bytes and all derived
+state; no external document index is required. See [ADR 0018](docs/adr/0018-ingest-documents-into-project-files.md)
+for limits, ownership and lifecycle. Apply migrations through `0030_project_documents`.

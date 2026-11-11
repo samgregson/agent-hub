@@ -56,7 +56,7 @@ export function McpAppFrame({
     setExpanded(next);
     bridgeRef.current?.setHostContext({
       platform: "web",
-      theme: "dark",
+      theme: "light",
       displayMode: next ? "fullscreen" : "inline",
       availableDisplayModes: ["inline", "fullscreen"],
     });
@@ -125,7 +125,7 @@ export function McpAppFrame({
       {
         hostContext: {
           platform: "web",
-          theme: "dark",
+          theme: "light",
           displayMode: expandedRef.current ? "fullscreen" : "inline",
           availableDisplayModes: ["inline", "fullscreen"],
         },

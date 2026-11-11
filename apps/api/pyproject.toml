@@ -19,6 +19,9 @@ dependencies = [
     "sqlalchemy==2.0.52",
     "uvicorn[standard]==0.52.4",
     "langchain-quickjs==0.3.5",
+    "markitdown[docx,pdf]==0.1.9",
+    "pypdf==7.0.1",
+    "pypdfium2==5.15.2",
 ]
 
 [dependency-groups]

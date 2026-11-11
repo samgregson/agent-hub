@@ -1,41 +1,82 @@
 :root {
-  color-scheme: dark;
-  --accent: #dcf56b;
-  --accent-hover: #edff9c;
-  --accent-ink: #17200f;
-  --background: #10130f;
-  --surface: #181c17;
-  --surface-card: #1b211a;
-  --surface-raised: #252c22;
-  --surface-selected: #2e3828;
-  --text: #f1f4ea;
-  --text-strong: #fbfdf6;
-  --text-subtle: #d5dccd;
-  --text-muted: #b1bda9;
-  --muted: #a0ad99;
-  --line: #394536;
-  --line-subtle: #2c352a;
-  --line-strong: #485643;
-  --danger: #ff9b86;
-  --danger-border: #6c3f39;
-  --focus-ring: #e9ff70;
+  color-scheme: light;
+  --accent: #181818;
+  --accent-hover: #393939;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(75 48 180 / 8%);
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-nav: #ffffff;
+  --surface-card: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-selected: #f3f3f3;
+  --surface-code: #f3f3f4;
+  --text: #252525;
+  --text-strong: #111111;
+  --text-subtle: #424242;
+  --text-muted: #595959;
+  --muted: #6a6a6a;
+  --line: #d0d0d2;
+  --line-subtle: #e8e8e9;
+  --line-strong: #76767b;
+  --danger: #a13748;
+  --danger-border: #b77880;
+  --danger-surface: #f7e6e7;
+  --success: #2f6d57;
+  --success-surface: #e0f0e8;
+  --info: #405d89;
+  --status-success: var(--success);
+  --status-danger: var(--danger);
+  --focus-ring: #5b37c6;
   --font-size-meta: 0.75rem;
   --font-size-label: 0.8125rem;
   --font-size-body: 0.9375rem;
   --font-size-code: 0.78rem;
   --font-size-heading: 1.5rem;
   --font-size-display: clamp(1.75rem, 5vw, 3.25rem);
-  --control-height: 2.5rem;
-  --radius-control: 0.625rem;
-  --radius-panel: 1rem;
+  --control-height: 2.25rem;
+  --radius-control: 0.125rem;
+  --radius-panel: 0.25rem;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.875rem;
   --space-4: 1.25rem;
   --space-5: 1.75rem;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
   background: var(--background);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #f4f4f4;
+  --accent-hover: #dddddd;
+  --accent-ink: #111111;
+  --accent-soft: rgb(255 255 255 / 8%);
+  --background: #101010;
+  --surface: #151515;
+  --surface-nav: #101010;
+  --surface-card: #151515;
+  --surface-raised: #1d1d1d;
+  --surface-selected: #252525;
+  --surface-code: #202020;
+  --text: #ededed;
+  --text-strong: #ffffff;
+  --text-subtle: #d0d0d0;
+  --text-muted: #b0b0b0;
+  --muted: #a0a0a0;
+  --line: #454545;
+  --line-subtle: #303030;
+  --line-strong: #858585;
+  --danger: #ff8585;
+  --danger-border: #a85e5e;
+  --danger-surface: #351d1d;
+  --success: #7ac7a1;
+  --success-surface: #1d3328;
+  --info: #9ab9f0;
+  --focus-ring: #ffffff;
 }
 
 * {
@@ -46,6 +87,18 @@ html,
 body {
   height: 100%;
   margin: 0;
+}
+
+body {
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 650;
+  letter-spacing: -0.025em;
 }
 
 button {
@@ -80,4 +133,25 @@ input,
 select {
   color: inherit;
   font: inherit;
+}
+
+/* A consistent baseline for native controls that do not use the shared Button. */
+:where(button:not([class])) {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text-strong);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+:where(button:not([class])):hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-selected);
+}
+:where(button:not([class])):disabled {
+  opacity: 0.5;
+  cursor: default;
 }

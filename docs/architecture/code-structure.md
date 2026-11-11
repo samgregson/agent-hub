@@ -38,7 +38,7 @@ apps/api/src/agent_hub_api/
     projects/                  # Projects, Threads metadata and enablement
     agent_execution/           # Deep Agent construction and Run lifecycle
     agent_transport/           # Project-authorized AG-UI orchestration and transport
-    project_files/             # project-scoped Deep Agents filesystem
+    project_files/             # Project files, original documents, extraction and page rendering
     call_review/               # common review shape for Python and MCP call plans
     artifacts/                 # Artifact lifecycle and authority rules
     plugin_gateway/            # MCP transport, policy and resource loading
@@ -160,3 +160,10 @@ Plugin to host, or Plugin to another Plugin, in frontend or backend code. Keep
 composition on MCP and portable data. `pnpm architecture:check` enforces these
 boundaries, including static/dynamic literal imports, exports, require, Python
 imports, workspace package dependencies and resolved TypeScript aliases. Computed imports are rejected because their target cannot be checked. See ADR 0015.
+
+Project Files also owns PDF/DOCX upload validation, original binary storage and
+protected `/.documents` text projections. Its document adapter writes original
+and derived files atomically; generic agent edits cannot bypass that ownership.
+Agent Execution exposes bounded discovery and page-image tools using this
+Interface. The web Project Files viewer displays originals and extracted text;
+Workspace only coordinates Library selection. See ADR 0018.

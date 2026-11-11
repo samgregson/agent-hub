@@ -36,6 +36,7 @@ export async function forwardBackendRequest(
     "cache-control",
     "content-security-policy",
     "content-type",
+    "content-disposition",
     "referrer-policy",
     "x-content-type-options",
     "x-request-id",
