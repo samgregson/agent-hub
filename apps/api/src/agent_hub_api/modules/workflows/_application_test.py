@@ -31,6 +31,32 @@ class _Schemas:
 
 
 @pytest.mark.asyncio
+async def test_missing_function_reference_suggests_creation_when_project_has_none() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Missing Function")
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    workflows = WorkflowDefinitionModule(
+        projects,
+        DatasetModule(projects, MemoryDatasetStore()),
+        functions,
+        None,
+        MemoryWorkflowStore(),
+    )
+    graph = WorkflowGraph(
+        (WorkflowNode("prepare", "python", "temp", 1),),
+        (),
+        (WorkflowOutput("result", "prepare", "result"),),
+    )
+    with pytest.raises(WorkflowValidationError) as error:
+        await workflows.create(access, project.id, "Test", graph)
+    assert "no saved Functions" in str(error.value)
+    assert "Create the required Function first" in str(error.value)
+    assert "id and revision" in str(error.value)
+    assert await workflows.list(access, project.id) == ()
+
+
+@pytest.mark.asyncio
 async def test_nested_array_type_mismatch_reports_field_and_types() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")

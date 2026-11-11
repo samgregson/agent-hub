@@ -156,6 +156,10 @@ def test_agent_instructions_describe_function_preview_and_workflow_execution() -
     assert "input_selectors" not in _AGENT_SYSTEM_PROMPT
     assert "preview" in _AGENT_SYSTEM_PROMPT
     assert "durable execution" in _AGENT_SYSTEM_PROMPT
+    assert "they cannot call Plugins or access the eval tools object" in _AGENT_SYSTEM_PROMPT
+    assert (
+        "read-only JavaScript eval interpreter is a different environment" in _AGENT_SYSTEM_PROMPT
+    )
 
 
 def test_agent_instructions_document_the_workflow_graph_json_shape() -> None:
@@ -252,6 +256,25 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         == "Create the proposed Python Function?"
     )
     tools = {registered.name: registered for registered in captured["tools"]}
+    assert "cannot call Plugins" in tools["create_project_function"].description
+    assert "returned id" in tools["create_project_function"].description
+    function_args = {
+        "name": "Preparation",
+        "source": "def calculate(x): return x",
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object"},
+    }
+    request = cast(ToolCallRequest, SimpleNamespace(tool_call={"args": function_args}))
+    assert not captured["interrupt_on"]["create_project_function"]["when"](request)
+    failure = json.loads(await tools["create_project_function"].ainvoke(function_args))
+    assert failure["error"]["code"] == "function_validation"
+    assert await functions.list(owner, project.id) == ()
+    function_args["source"] = "def transform(inputs, parameters): return {}"
+    assert captured["interrupt_on"]["create_project_function"]["when"](request)
+    assert captured["interrupt_on"]["update_project_function"]["when"](request)
+    assert captured["interrupt_on"]["create_project_function"]["when"](
+        cast(ToolCallRequest, SimpleNamespace(tool_call={"args": {}}))
+    )
     discovered_datasets = json.loads(await tools["discover_project_datasets"].ainvoke({}))
     assert discovered_datasets == [
         {
@@ -413,8 +436,11 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         "error": {
             "code": "workflow_validation",
             "message": (
-                "Python Function ID 'normalize_text' is unavailable; use the ID returned by "
-                "discover_project_functions, not the Function name."
+                "Python Function ID 'normalize_text' is unavailable. Call "
+                "discover_project_functions and use the ID and revision of a suitable saved "
+                "Function. If none is suitable, create the Function first. Use the id and "
+                "revision returned by create_project_function as this node's ref_id and version; "
+                "do not use a placeholder or Function name."
             ),
         },
         "nextStep": (

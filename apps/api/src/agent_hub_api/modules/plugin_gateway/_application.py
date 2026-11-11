@@ -691,6 +691,25 @@ def _validate_arguments(schema: Mapping[str, object], arguments: Mapping[str, ob
         ) from None
 
 
+def _model_tool_description(
+    manifest: PluginManifest, plugin_tool: PluginTool, discovered: PluginDiscoveredTool
+) -> str:
+    description = discovered.description or plugin_tool.description or plugin_tool.name
+    description += (
+        f" Workflow MCP target: Plugin ID {manifest.id!r}, tool_name {plugin_tool.name!r}."
+    )
+    if discovered.output_schema is not None:
+        schema = json.dumps(discovered.output_schema, ensure_ascii=False, separators=(",", ":"))
+        if len(schema) <= 3000:
+            description += " Declared structured output schema: " + schema
+        else:
+            properties = discovered.output_schema.get("properties")
+            if isinstance(properties, Mapping):
+                names = [name for name in properties if isinstance(name, str)][:30]
+                description += f" Declared structured output fields: {', '.join(names)}."
+    return description
+
+
 def _agent_tool(
     gateway: PluginGatewayModule,
     project_id: str,
@@ -765,9 +784,7 @@ def _agent_tool(
     return StructuredTool.from_function(
         coroutine=invoke,
         name=f"{manifest.id.replace('-', '_')}__{plugin_tool.name}",
-        description=discovered.description
-        or plugin_tool.description
-        or f"Run {plugin_tool.name} from {manifest.name}.",
+        description=_model_tool_description(manifest, plugin_tool, discovered),
         args_schema=dict(discovered.input_schema or {"type": "object", "properties": {}}),
     )
 
@@ -814,7 +831,7 @@ def _programmatic_tool(
     return StructuredTool.from_function(
         coroutine=invoke,
         name=f"{manifest.id.replace('-', '_')}__{plugin_tool.name}",
-        description=(discovered.description or plugin_tool.description or plugin_tool.name)
+        description=_model_tool_description(manifest, plugin_tool, discovered)
         + " Returns {content, structuredContent}; PTC results are unsaved.",
         args_schema=dict(discovered.input_schema or {"type": "object", "properties": {}}),
     )

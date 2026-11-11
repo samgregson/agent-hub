@@ -190,3 +190,91 @@ def test_batched_hitl_actions_map_and_resume_in_action_order() -> None:
             {"type": "approve"},
         ]
     }
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_batch_resumes_without_echoed_messages() -> None:
+    from typing import Any
+
+    from ag_ui.core import RunAgentInput
+    from langchain.agents import create_agent
+    from langchain.agents.middleware import HumanInTheLoopMiddleware
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import HumanMessage, ToolMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+    from langchain_core.tools import tool
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    executed: list[str] = []
+
+    @tool
+    async def gated(note: str) -> str:
+        """Perform a gated operation."""
+        executed.append(note)
+        return note
+
+    class BatchModel(BaseChatModel):
+        @property
+        def _llm_type(self) -> str:
+            return "approval-test"
+
+        def bind_tools(self, tools: Any, **kwargs: Any) -> Any:
+            return self
+
+        def _generate(self, messages: Any, **kwargs: Any) -> ChatResult:
+            if any(isinstance(message, ToolMessage) for message in messages):
+                message = AIMessage(content="Done")
+            else:
+                message = AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"id": "call-1", "name": "gated", "args": {"note": "one"}},
+                        {"id": "call-2", "name": "gated", "args": {"note": "two"}},
+                    ],
+                )
+            return ChatResult(generations=[ChatGeneration(message=message)])
+
+        async def _agenerate(self, messages: Any, **kwargs: Any) -> ChatResult:
+            return self._generate(messages, **kwargs)
+
+    graph = create_agent(
+        BatchModel(),
+        tools=[gated],
+        middleware=[HumanInTheLoopMiddleware(interrupt_on={"gated": True})],
+        checkpointer=InMemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "batch-thread"}}
+    await graph.ainvoke({"messages": [HumanMessage(content="Go", id="user-1")]}, config)
+    checkpoint = await graph.aget_state(config)
+    mapped = map_langchain_interrupts(checkpoint.interrupts, checkpoint.values["messages"])
+    assert [item.tool_call_id for item in mapped] == ["call-1", "call-2"]
+    agent = AgentHubLangGraphAgent(
+        name="test",
+        graph=graph,
+        enable_legacy_on_interrupt_event=False,
+        emit_interrupt_outcome=True,
+    )
+    request = RunAgentInput.model_validate(
+        {
+            "threadId": "batch-thread",
+            "runId": "resume-1",
+            "messages": [],
+            "tools": [],
+            "context": [],
+            "forwardedProps": {},
+            "resume": [
+                {"interruptId": mapped[1].id, "status": "resolved", "payload": {"approved": False}},
+                {"interruptId": mapped[0].id, "status": "resolved", "payload": {"approved": True}},
+            ],
+        }
+    )
+    events = [event async for event in agent.run(request)]
+    assert not [event for event in events if event.type == "RUN_ERROR"]
+    assert executed == ["one"]
+    final = await graph.aget_state(config)
+    assert not final.interrupts
+    assert [
+        message.tool_call_id
+        for message in final.values["messages"]
+        if isinstance(message, ToolMessage)
+    ] == ["call-2", "call-1"]

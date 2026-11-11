@@ -17,6 +17,7 @@ from langchain.agents.middleware import (
     ModelResponse,
     wrap_model_call,
 )
+from langchain.agents.middleware.types import ToolCallRequest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool
@@ -112,7 +113,10 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "discover, inspect, create, revise, delete, or preview them. Pass input_schema and "
         "output_schema as JSON Schema objects, and pass preview inputs and parameters as objects. "
         "Workflow edges provide named inputs. A preview is transient and creates no durable Run; "
-        "use it when a code or data-shape check is useful.",
+        "use it when a code or data-shape check is useful. Saved Python Functions run in an "
+        "isolated runner: they cannot call Plugins or access the eval tools object. Use them to "
+        "prepare inputs or transform results, and call Plugins through MCP Workflow nodes. "
+        "The read-only JavaScript eval interpreter is a different environment.",
         "Workflow is the durable execution path for Python Functions and MCP tools. Inspect only "
         "the Project assets needed for the request and reuse a matching source or capability. Use "
         "IDs and versions returned by tools. A Dataset Workflow node's records port is an array "
@@ -217,6 +221,27 @@ _WorkflowGraphInput = Annotated[dict[str, Any], WithJsonSchema(WorkflowGraph.too
 _WorkflowChangesInput = Annotated[
     dict[str, Any], WithJsonSchema(WorkflowGraphChanges.tool_schema())
 ]
+
+
+def _function_change_needs_approval(request: ToolCallRequest) -> bool:
+    """Only skip review when the same validator guarantees the write will fail."""
+    args = request.tool_call.get("args", {})
+    name, source = args.get("name"), args.get("source")
+    input_schema, output_schema = args.get("input_schema"), args.get("output_schema")
+    if not (
+        isinstance(name, str)
+        and isinstance(source, str)
+        and isinstance(input_schema, dict)
+        and isinstance(output_schema, dict)
+    ):
+        return True
+    try:
+        FunctionModule.validate_definition(name, source, input_schema, output_schema)
+    except FunctionValidationError:
+        return False
+    except Exception:
+        return True
+    return True
 
 
 def _without_image_data(value: Any) -> Any:
@@ -427,10 +452,12 @@ class PostgresDeepAgentRunner:
                     "create_project_function": {
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Create the proposed Python Function?",
+                        "when": _function_change_needs_approval,
                     },
                     "update_project_function": {
                         "allowed_decisions": ["approve", "reject"],
                         "description": "Update the proposed Python Function?",
+                        "when": _function_change_needs_approval,
                     },
                     "delete_project_function": {
                         "allowed_decisions": ["approve", "reject"],
@@ -1161,7 +1188,10 @@ class PostgresDeepAgentRunner:
             input_schema.description. Describe every input and output property in its own
             description, including units and expected shape when known. Include types, required
             fields, useful numeric/string bounds, and an example that satisfies the contract.
-            Workflow edges provide the named inputs.
+            Workflow edges provide the named inputs. Saved Python Functions run in an isolated
+            runner and cannot call Plugins or access the eval tools object. Use a separate MCP
+            Workflow node to call a Plugin; this Function can prepare inputs or transform results.
+            On success, use the returned id as the Workflow node's ref_id and revision as version.
             """
             try:
                 item = await functions.define(
@@ -1203,6 +1233,8 @@ class PostgresDeepAgentRunner:
             Keep input_schema.description useful as the Function purpose. Describe every input
             and output property, including units and expected shape when known; include types,
             required fields, useful bounds, and examples that satisfy the declared contract.
+            Saved Python Functions cannot call Plugins or access eval tools. Call Plugins through
+            MCP Workflow nodes and use Python Functions to prepare inputs or transform results.
             """
             try:
                 item = await functions.revise(
