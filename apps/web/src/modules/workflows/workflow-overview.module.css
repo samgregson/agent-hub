@@ -7,14 +7,6 @@
   color: var(--text);
 }
 
-.overview:fullscreen {
-  width: 100vw;
-  height: 100vh;
-  overflow: auto;
-  padding: clamp(24px, 4vw, 56px);
-  background: var(--background);
-}
-
 .overview h1,
 .empty h1 {
   margin: 0;
@@ -447,33 +439,49 @@
 }
 
 .graphExperience {
+  min-width: 0;
+}
+
+.graphModal {
+  width: min(96vw, 1680px);
+  height: min(94dvh, 1100px);
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  background: var(--background);
+  color: var(--text);
+}
+
+.graphModal[open] {
   display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
 }
 
-.graphWithInspector {
-  grid-template-columns: minmax(0, 1.6fr) minmax(310px, 0.9fr);
+.graphModal::backdrop {
+  background: rgb(0 0 0 / 72%);
 }
 
-.graphInspector {
-  min-width: 0;
-  max-height: clamp(450px, 57vh, 720px);
-  overflow: auto;
-  padding: 0 16px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-panel);
-  background: var(--surface-raised);
+.graphModal .canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  align-self: stretch;
+  border: 0;
+  border-radius: 0;
 }
 
-.graphInspector .lineageActions {
-  position: sticky;
-  z-index: 2;
-  top: 0;
-  justify-content: flex-end;
-  padding: 12px 0;
-  background: var(--surface-raised);
+.nodePreviewBody {
+  display: grid;
+  gap: 10px;
+}
+
+.nodePreviewBody > button {
+  justify-self: start;
+  font-size: var(--font-size-label);
+  font-weight: 600;
 }
 
 .empty {
@@ -981,23 +989,4 @@
     width: 100vw;
     height: 100dvh;
   }
-}
-
-.graphExperience:fullscreen {
-  display: grid;
-  width: 100vw;
-  height: 100vh;
-  max-height: 100vh;
-  grid-template-rows: minmax(0, 1fr);
-  gap: 0;
-  padding: 16px;
-  background: var(--background);
-}
-
-.graphExperience:fullscreen .canvas,
-.graphExperience:fullscreen .graphInspector {
-  width: 100%;
-  height: 100%;
-  max-height: none;
-  min-height: 0;
 }

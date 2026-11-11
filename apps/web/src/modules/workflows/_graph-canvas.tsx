@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import styles from "./workflow-graph.module.css";
 
@@ -28,8 +29,11 @@ export type GraphCanvasProps = {
   edges: GraphCanvasEdge[];
   selectedNodeId?: string | null;
   onSelectNode?: (nodeId: string | null) => void;
-  onToggleFullscreen?: () => void;
-  isFullscreen?: boolean;
+  onToggleExpanded?: () => void;
+  isExpanded?: boolean;
+  nodePreview?: ReactNode;
+  nodePreviewTitle?: string;
+  onClosePreview?: () => void;
   className?: string;
 };
 
@@ -109,8 +113,11 @@ export function GraphCanvas({
   edges,
   selectedNodeId,
   onSelectNode,
-  onToggleFullscreen,
-  isFullscreen = false,
+  onToggleExpanded,
+  isExpanded = false,
+  nodePreview,
+  nodePreviewTitle,
+  onClosePreview,
   className,
 }: GraphCanvasProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -126,6 +133,7 @@ export function GraphCanvas({
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
   const [panDrag, setPanDrag] = useState<{
     start: Point;
     origin: Point;
@@ -362,7 +370,7 @@ export function GraphCanvas({
   const revealPorts = zoom >= 1.08;
   return (
     <section
-      className={`${styles.canvas} ${className ?? ""}`}
+      className={`${styles.canvas} ${nodePreview ? styles.canvasWithPreview : ""} ${className ?? ""}`}
       aria-label="Workflow graph"
     >
       <div className={styles.toolbar} aria-label="Graph controls">
@@ -416,14 +424,12 @@ export function GraphCanvas({
             type="button"
             className={styles.expandButton}
             aria-label={
-              isFullscreen
-                ? "Exit expanded workflow graph"
-                : "Expand workflow graph"
+              isExpanded ? "Reduce workflow graph" : "Expand workflow graph"
             }
-            title={isFullscreen ? "Exit expanded graph" : "Expand graph"}
-            onClick={onToggleFullscreen}
+            title={isExpanded ? "Reduce graph" : "Expand graph"}
+            onClick={onToggleExpanded}
           >
-            {isFullscreen ? (
+            {isExpanded ? (
               <svg aria-hidden="true" viewBox="0 0 24 24">
                 <path d="M9 4H4v5m0-5 6 6m5 10h5v-5m0 5-6-6M20 9V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6" />
               </svg>
@@ -644,6 +650,53 @@ export function GraphCanvas({
           </p>
         ) : null}
       </div>
+      {nodePreview ? (
+        <aside
+          className={`${styles.nodePreviewPanel} ${isPreviewExpanded ? styles.nodePreviewExpanded : ""}`}
+          aria-label={`${nodePreviewTitle ?? "Workflow step"} preview`}
+          aria-modal="true"
+          role="dialog"
+        >
+          <header className={styles.nodePreviewHeader}>
+            <strong>{nodePreviewTitle ?? "Workflow step"}</strong>
+            <div>
+              <button
+                type="button"
+                className={styles.expandButton}
+                aria-label={
+                  isPreviewExpanded
+                    ? "Reduce step preview"
+                    : "Expand step preview"
+                }
+                title={isPreviewExpanded ? "Reduce preview" : "Expand preview"}
+                onClick={() => setIsPreviewExpanded((expanded) => !expanded)}
+              >
+                {isPreviewExpanded ? (
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M9 4v5H4m0-5 6 6m5 10v-5h5m0 5-6-6M20 9h-5V4m5 0-6 6M4 15h5v5m-5 0 6-6" />
+                  </svg>
+                ) : (
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="M4 9V4h5M4 4l6 6m10 5v5h-5m5 0-6-6M15 4h5v5m0-5-6 6M9 20H4v-5m0 5 6-6" />
+                  </svg>
+                )}
+              </button>
+              <button
+                type="button"
+                className={styles.closePreview}
+                aria-label="Close step preview"
+                onClick={() => {
+                  setIsPreviewExpanded(false);
+                  onClosePreview?.();
+                }}
+              >
+                ×
+              </button>
+            </div>
+          </header>
+          <div className={styles.nodePreviewContent}>{nodePreview}</div>
+        </aside>
+      ) : null}
       <div className={styles.canvasFooter}>
         <span>Drag steps to arrange the graph</span>
         <span>Use arrow controls to move a focused step</span>
