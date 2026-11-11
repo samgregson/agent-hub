@@ -21,7 +21,7 @@
 
 .empty h1 {
   margin: 12px 0 20px;
-  font-size: clamp(32px, 4vw, 54px);
+  font-size: 1.75rem;
   line-height: 1.08;
   letter-spacing: -0.035em;
 }
@@ -40,7 +40,7 @@
 }
 
 .assistantMessage {
-  padding: 8px 0;
+  padding: 12px 0 18px;
 }
 
 .messageMarkdown {
@@ -208,9 +208,9 @@
   max-width: min(80%, 680px);
   margin-right: clamp(0px, 3vw, 40px);
   padding: 11px 15px;
-  border: 1px solid var(--line);
-  border-radius: 16px 16px 4px 16px;
-  background: var(--surface-card);
+  border: 0;
+  border-radius: 12px 12px 2px 12px;
+  background: var(--surface-selected);
   color: var(--text);
 }
 
@@ -565,7 +565,7 @@
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .approvalActions button:hover,
@@ -631,10 +631,9 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   background: var(--surface-card);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
 }
 
 .composer:focus-within {

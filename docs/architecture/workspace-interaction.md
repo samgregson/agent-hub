@@ -177,11 +177,10 @@ inline/fullscreen display modes. See `mcp-app-development.md` for App guidance.
 
 ## Visual direction
 
-The host uses neutral slate surfaces with restrained blue accents. Avoid neon
-colours and green-tinted black panels. Primary actions, focus and selection have
-clear hierarchy; routine navigation and branding stay quiet. Green and rose are
-reserved for semantic success and danger, including file diffs. Use the shared
-colour tokens in `globals.css` so chat, Library, Workflows and dialogs stay
-consistent. Keep text contrast readable, corners modest, and typography lighter
-than the former heavy button and monogram treatment. Plugin Apps continue to
-own their isolated styles and receive the standard dark host theme context.
+The host uses bright neutral surfaces, a softly coloured navigation area and
+restrained dark accents. Buttons share size, border, spacing and states across the workspace. Typography and controls stay
+clear; simple divided lists and generous workspace help the agent conversation
+and project material remain the focus. Use the shared tokens in `globals.css`,
+maintain readable contrast and keyboard focus, and preserve semantic success and
+danger states. Plugin Apps own their isolated styles and receive the standard
+light host theme context.

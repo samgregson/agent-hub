@@ -37,8 +37,8 @@
 }
 .zoomControls button {
   display: inline-grid;
-  min-width: 32px;
-  height: 32px;
+  min-width: var(--control-height);
+  height: var(--control-height);
   place-items: center;
   padding: 0 8px;
   border: 1px solid var(--line);
@@ -50,7 +50,7 @@
   cursor: pointer;
 }
 .zoomControls button:hover {
-  background: var(--surface-hover, var(--surface));
+  background: var(--surface-selected);
 }
 .zoomControls button:focus-visible,
 .nodeBody:focus-visible,

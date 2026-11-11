@@ -2,11 +2,12 @@
   display: grid;
   grid-template-areas: "title title title title" "rail navigator chat artifact";
   grid-template-columns:
-    112px minmax(208px, min(var(--navigator-width, 256px), 34vw))
-    minmax(240px, 1.15fr) minmax(220px, 0.85fr);
+    96px minmax(208px, min(var(--navigator-width, 256px), 34vw))
+    minmax(280px, 1.35fr) minmax(220px, 0.85fr);
   grid-template-rows: 56px minmax(0, 1fr);
   height: 100%;
   background: var(--background);
+  color: var(--text);
 }
 
 .titlebar {
@@ -16,7 +17,7 @@
   gap: 16px;
   padding: 0 20px;
   border-bottom: 1px solid var(--line-subtle);
-  background: var(--surface);
+  background: var(--background);
 }
 
 .mark {
@@ -25,10 +26,10 @@
   height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  color: var(--text-strong);
+  border: 1px solid var(--text-strong);
+  border-radius: 0;
+  background: var(--text-strong);
+  color: var(--background);
   font-weight: 650;
   letter-spacing: -0.04em;
 }
@@ -50,6 +51,36 @@
   min-width: 220px;
   max-width: min(42vw, 420px);
   padding: 0 32px 0 12px;
+}
+
+ .themeToggle {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--text-strong);
+  border-radius: 50%;
+  background: var(--text-strong);
+  color: var(--background);
+  cursor: pointer;
+}
+
+.themeToggle:hover {
+  background: var(--surface-selected);
+  color: var(--text-strong);
+}
+
+.themeToggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .projectControls {
@@ -138,11 +169,10 @@
 }
 
 .foundation {
-  margin-left: auto;
-  color: var(--text-muted);
-  font-size: var(--font-size-meta);
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  color: var(--text-strong);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .mobileNavigationToggle,
@@ -171,9 +201,12 @@
   border-radius: var(--radius-control);
   background: transparent;
   color: var(--text-muted);
-  font-size: var(--font-size-label);
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.075em;
   padding: 8px 10px;
   text-align: left;
+  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -183,11 +216,11 @@
 }
 
 .railButton[aria-pressed="true"] {
-  border-color: var(--line-strong);
+  border-color: transparent;
+  border-left: 3px solid var(--text-strong);
   background: var(--surface-selected);
   color: var(--text-strong);
-  font-weight: 600;
-  box-shadow: inset 2px 0 var(--accent);
+  font-weight: 700;
 }
 
 .navigator,
@@ -375,7 +408,7 @@
 .deleteDialogActions button:last-child {
   border-color: var(--danger-border);
   background: var(--danger-surface);
-  color: white;
+  color: var(--danger);
 }
 
 .workItemOpen span,
@@ -454,7 +487,7 @@
 .newThread,
 .threadButton {
   width: 100%;
-  min-height: 40px;
+  min-height: var(--control-height);
   border: 1px solid transparent;
   border-radius: var(--radius-control);
   background: transparent;
@@ -466,10 +499,11 @@
 
 .newThread {
   margin: 18px 0 16px;
-  padding: 9px 12px;
-  border: 1px solid var(--line-strong);
-  color: var(--accent);
-  font-weight: 700;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  background: var(--surface-card);
+  color: var(--text-strong);
+  font-weight: 600;
 }
 
 .newThread:hover,
@@ -552,18 +586,9 @@
 
 .chat h1 {
   margin: 12px 0 20px;
-  font-size: clamp(32px, 4vw, 54px);
+  font-size: 1.75rem;
   line-height: 1.08;
   letter-spacing: -0.035em;
-}
-
-.eyebrow {
-  color: var(--accent) !important;
-  font:
-    700 10px ui-monospace,
-    monospace !important;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .error {
@@ -821,7 +846,7 @@
   .shell.libraryPreviewOpen {
     grid-template-areas: "title title title" "rail navigator artifact";
     grid-template-columns:
-      112px minmax(208px, min(var(--navigator-width, 256px), 34vw))
+      96px minmax(208px, min(var(--navigator-width, 256px), 34vw))
       minmax(0, 1fr);
   }
 

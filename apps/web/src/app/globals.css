@@ -1,52 +1,82 @@
 :root {
-  color-scheme: dark;
-  --accent: #96b7eb;
-  --accent-hover: #b1ccf4;
-  --accent-ink: #142137;
-  --accent-soft: rgb(150 183 235 / 14%);
-  --background: #17212f;
-  --surface: #1d2938;
-  --surface-nav: #192433;
-  --surface-card: #233142;
-  --surface-raised: #2a3a4d;
-  --surface-selected: #2d425c;
-  --surface-code: #16202d;
-  --text: #e2e9f2;
-  --text-strong: #f4f7fb;
-  --text-subtle: #cbd5e3;
-  --text-muted: #a6b5c8;
-  --muted: #98a9bf;
-  --line: #41536b;
-  --line-subtle: #304157;
-  --line-strong: #5a7090;
-  --danger: #efaaaa;
-  --danger-border: #85545e;
-  --danger-surface: #49303c;
-  --success: #abd2bd;
-  --success-surface: #253c36;
-  --info: #b1bdeb;
+  color-scheme: light;
+  --accent: #181818;
+  --accent-hover: #393939;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(75 48 180 / 8%);
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-nav: #ffffff;
+  --surface-card: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-selected: #f3f3f3;
+  --surface-code: #f3f3f4;
+  --text: #252525;
+  --text-strong: #111111;
+  --text-subtle: #424242;
+  --text-muted: #595959;
+  --muted: #6a6a6a;
+  --line: #d0d0d2;
+  --line-subtle: #e8e8e9;
+  --line-strong: #76767b;
+  --danger: #a13748;
+  --danger-border: #b77880;
+  --danger-surface: #f7e6e7;
+  --success: #2f6d57;
+  --success-surface: #e0f0e8;
+  --info: #405d89;
   --status-success: var(--success);
   --status-danger: var(--danger);
-  --focus-ring: #b1ccf4;
+  --focus-ring: #5b37c6;
   --font-size-meta: 0.75rem;
   --font-size-label: 0.8125rem;
   --font-size-body: 0.9375rem;
   --font-size-code: 0.78rem;
   --font-size-heading: 1.5rem;
   --font-size-display: clamp(1.75rem, 5vw, 3.25rem);
-  --control-height: 2.5rem;
-  --radius-control: 0.5rem;
-  --radius-panel: 0.75rem;
+  --control-height: 2.25rem;
+  --radius-control: 0.125rem;
+  --radius-panel: 0.25rem;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.875rem;
   --space-4: 1.25rem;
   --space-5: 1.75rem;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: Inter, "Avenir Next", "Segoe UI", sans-serif;
   background: var(--background);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #f4f4f4;
+  --accent-hover: #dddddd;
+  --accent-ink: #111111;
+  --accent-soft: rgb(255 255 255 / 8%);
+  --background: #101010;
+  --surface: #151515;
+  --surface-nav: #101010;
+  --surface-card: #151515;
+  --surface-raised: #1d1d1d;
+  --surface-selected: #252525;
+  --surface-code: #202020;
+  --text: #ededed;
+  --text-strong: #ffffff;
+  --text-subtle: #d0d0d0;
+  --text-muted: #b0b0b0;
+  --muted: #a0a0a0;
+  --line: #454545;
+  --line-subtle: #303030;
+  --line-strong: #858585;
+  --danger: #ff8585;
+  --danger-border: #a85e5e;
+  --danger-surface: #351d1d;
+  --success: #7ac7a1;
+  --success-surface: #1d3328;
+  --info: #9ab9f0;
+  --focus-ring: #ffffff;
 }
 
 * {
@@ -103,4 +133,25 @@ input,
 select {
   color: inherit;
   font: inherit;
+}
+
+/* A consistent baseline for native controls that do not use the shared Button. */
+:where(button:not([class])) {
+  min-height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text-strong);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+:where(button:not([class])):hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-selected);
+}
+:where(button:not([class])):disabled {
+  opacity: 0.5;
+  cursor: default;
 }
