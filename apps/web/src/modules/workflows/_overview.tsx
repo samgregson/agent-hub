@@ -721,6 +721,8 @@ export function WorkflowOverview({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const nodeInspectorRef = useRef<HTMLDivElement>(null);
+  const overviewRef = useRef<HTMLElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const reviewRequestId = useRef(0);
   const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(
     null,
@@ -742,6 +744,14 @@ export function WorkflowOverview({
   const [workflowInputText, setWorkflowInputText] = useState<
     Record<string, string>
   >({});
+
+  useEffect(() => {
+    const syncFullscreen = () =>
+      setIsFullscreen(document.fullscreenElement === overviewRef.current);
+    document.addEventListener("fullscreenchange", syncFullscreen);
+    return () =>
+      document.removeEventListener("fullscreenchange", syncFullscreen);
+  }, []);
 
   useEffect(() => {
     if (selectedNodeId && window.matchMedia("(max-width: 720px)").matches) {
@@ -1330,7 +1340,11 @@ export function WorkflowOverview({
   }
 
   return (
-    <section aria-label="Workflow overview" className={styles.overview}>
+    <section
+      aria-label="Workflow overview"
+      className={styles.overview}
+      ref={overviewRef}
+    >
       <header className={styles.header}>
         <div>
           {workflows.length > 1 ? (
@@ -1360,6 +1374,21 @@ export function WorkflowOverview({
           </p>
         </div>
         <div className={styles.headerActions}>
+          <button
+            className={styles.secondaryButton}
+            onClick={() => {
+              const root = overviewRef.current;
+              if (!root) return;
+              if (document.fullscreenElement === root) {
+                void document.exitFullscreen();
+              } else {
+                void root.requestFullscreen();
+              }
+            }}
+            type="button"
+          >
+            {isFullscreen ? "Exit full screen" : "Full screen"}
+          </button>
           <button
             className={styles.secondaryButton}
             onClick={() => setEditingDefinitionId(workflow.id)}

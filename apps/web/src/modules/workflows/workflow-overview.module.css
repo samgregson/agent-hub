@@ -7,6 +7,14 @@
   color: var(--text);
 }
 
+.overview:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  overflow: auto;
+  padding: clamp(24px, 4vw, 56px);
+  background: var(--background);
+}
+
 .overview h1,
 .empty h1 {
   margin: 0;
