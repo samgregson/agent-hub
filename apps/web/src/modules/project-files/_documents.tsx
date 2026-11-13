@@ -19,67 +19,23 @@ export interface ProjectDocument {
   converter: string;
 }
 
-export function DocumentUpload({
-  projectId,
-  onUploaded,
-}: {
-  projectId: string;
-  onUploaded: (document: ProjectDocument) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  async function upload(file: File) {
-    if (file.size > 10_000_000) {
-      setError("Documents must be 10 MB or smaller.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await fetch(
-        `/api/projects/${encodeURIComponent(projectId)}/files/documents?filename=${encodeURIComponent(file.name)}`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/octet-stream" },
-          body: file,
-        },
-      );
-      const body = await response.json();
-      if (!response.ok)
-        throw new Error(
-          typeof body.detail === "string"
-            ? body.detail
-            : "Document upload failed.",
-        );
-      onUploaded(body as ProjectDocument);
-    } catch (error) {
-      setError(
-        error instanceof Error ? error.message : "Document upload failed.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className={styles.documentUpload}>
-      <label>
-        Upload PDF or DOCX
-        <input
-          aria-label="Upload PDF or DOCX"
-          type="file"
-          accept=".pdf,.docx"
-          disabled={busy}
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void upload(file);
-            event.target.value = "";
-          }}
-        />
-      </label>
-      {busy ? <p role="status">Uploading and extracting text…</p> : null}
-      {error ? <p role="alert">{error}</p> : null}
-    </div>
+export async function uploadProjectDocument(projectId: string, file: File) {
+  if (file.size > 10_000_000)
+    throw new Error("Documents must be 10 MB or smaller.");
+  const response = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/files/documents?filename=${encodeURIComponent(file.name)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: file,
+    },
   );
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok)
+    throw new Error(
+      typeof body.detail === "string" ? body.detail : "Document upload failed.",
+    );
+  return body as ProjectDocument;
 }
 
 export function DocumentPreview({

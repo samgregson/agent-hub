@@ -2650,6 +2650,254 @@ test("a batch of approvals resumes only after every docked decision", async ({
   await expect(page.getByText("Approval batch completed.")).toBeVisible();
 });
 
+test("a retried tool call can be approved without refreshing", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-retry-approval",
+    name: "Approval",
+    createdAt: "2026-10-16T00:00:00.000Z",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const thread = {
+    id: "thread-retry-approval",
+    projectId: project.id,
+    title: "Approval",
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+  let resumed = false;
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        runId: string;
+        resume?: Array<{ interruptId: string }>;
+      };
+      if (input.resume) {
+        resumed = input.resume[0]?.interruptId === "interrupt-retry";
+        return route.fulfill({
+          contentType: "text/event-stream",
+          body: sse([
+            { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+            {
+              type: "RUN_FINISHED",
+              threadId: thread.id,
+              runId: input.runId,
+              outcome: { type: "success" },
+            },
+          ]),
+        });
+      }
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "old",
+            toolCallName: "create_project_function",
+            parentMessageId: "first-message",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "old",
+            delta: '{"name":"first"}',
+          },
+          { type: "TOOL_CALL_END", toolCallId: "old" },
+          {
+            type: "TOOL_CALL_RESULT",
+            messageId: "old-result",
+            toolCallId: "old",
+            content: "Invalid proposal",
+          },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "retry",
+            toolCallName: "create_project_function",
+            parentMessageId: "retry-message",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "retry",
+            delta: '{"name":"retry"}',
+          },
+          { type: "TOOL_CALL_END", toolCallId: "retry" },
+          {
+            type: "MESSAGES_SNAPSHOT",
+            messages: [
+              {
+                id: "first-message",
+                role: "assistant",
+                content: "",
+                toolCalls: [
+                  {
+                    id: "old",
+                    type: "function",
+                    function: {
+                      name: "create_project_function",
+                      arguments: '{"name":"first"}',
+                    },
+                  },
+                ],
+              },
+              {
+                id: "old-result",
+                role: "tool",
+                toolCallId: "old",
+                content: "Invalid proposal",
+              },
+              {
+                id: "retry-message",
+                role: "assistant",
+                content: "",
+                toolCalls: [
+                  {
+                    id: "retry",
+                    type: "function",
+                    function: {
+                      name: "create_project_function",
+                      arguments: '{"name":"retry"}',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "interrupt-retry",
+                  reason: "tool_call",
+                  toolCallId: "retry",
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto("/");
+  await page.getByLabel("Message").fill("Create a function");
+  await page.getByRole("button", { name: "Send" }).click();
+  const approval = page.getByRole("region", {
+    name: "Approve new Python Function",
+  });
+  await expect(approval).toContainText("retry");
+  await expect(approval.getByRole("button", { name: "Approve" })).toBeEnabled();
+  await approval.getByRole("button", { name: "Approve" }).click();
+  await expect.poll(() => resumed).toBe(true);
+});
+
+test("a pending approval restored from thread history can be approved", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-restored-approval",
+    name: "Approval",
+    createdAt: "2026-10-16T00:00:00.000Z",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const thread = {
+    id: "thread-restored-approval",
+    projectId: project.id,
+    title: "Approval",
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+  const interrupt = {
+    id: "interrupt-restored",
+    reason: "tool_call",
+    toolCallId: "tool-restored",
+  };
+  let resumed = false;
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    async (route) => {
+      const input = route.request().postDataJSON() as {
+        runId: string;
+        resume?: Array<{ interruptId: string; payload: { approved: boolean } }>;
+      };
+      resumed =
+        input.resume?.[0]?.interruptId === interrupt.id &&
+        input.resume[0].payload.approved === true;
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: { type: "success" },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: {
+          approvals: [],
+          interrupts: [interrupt],
+          messages: [
+            {
+              id: "message-restored",
+              role: "assistant",
+              content: null,
+              toolCalls: [
+                {
+                  id: interrupt.toolCallId,
+                  type: "function",
+                  function: {
+                    name: "create_project_function",
+                    arguments: "{}",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto("/");
+  const approval = page.getByRole("region", {
+    name: "Approve new Python Function",
+  });
+  await expect(approval.getByRole("button", { name: "Approve" })).toBeEnabled();
+  await approval.getByRole("button", { name: "Approve" }).click();
+  await expect.poll(() => resumed).toBe(true);
+});
+
 test("composer blocks sending while an approval is pending", async ({
   page,
 }) => {

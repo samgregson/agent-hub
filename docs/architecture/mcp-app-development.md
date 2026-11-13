@@ -24,7 +24,11 @@ Keep domain recipes in a Plugin-owned `AGENT_GUIDE.md`. Serve the same guide as 
 Markdown MCP resource and through a clearly described read-only guide tool. Keep
 the tool description short; load the full recipe only when needed. Guides must
 explain source selection, input shapes, stable identifiers, output locations,
-follow-up edits, Workflow composition, size bounds and failure recovery.
+follow-up edits, Workflow composition, size bounds and failure recovery. Describe
+the interactive App's user-facing controls, how a user opens a captured result,
+prerequisites, and which changes are transient or saved. Distinguish these user
+actions from operations available to the agent; do not imply that an agent can
+operate an App UI unless a tool explicitly provides that capability.
 
 Examples must use real tool names and distinguish a browser-local file from an
 authorized Project File. The guide cannot enable Plugins, change Project scope,

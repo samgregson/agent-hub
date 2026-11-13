@@ -62,6 +62,10 @@ async def test_preview_is_safe_project_authorized_and_does_not_create_an_artifac
         host_path = await client.get(
             f"/api/projects/{project.id}/files", params={"path": "/etc/passwd"}
         )
+        download = await client.get(
+            f"/api/projects/{project.id}/files/download",
+            params={"path": "/project/notes/check.md"},
+        )
 
     assert index.status_code == 200
     assert index.json()["files"][0]["path"] == "/project/notes/check.md"
@@ -72,6 +76,9 @@ async def test_preview_is_safe_project_authorized_and_does_not_create_an_artifac
         "version": 1,
     }
     assert host_path.status_code == 422
+    assert download.status_code == 200
+    assert download.content == b"# Beam check\n<script>no</script>"
+    assert download.headers["content-disposition"] == "attachment; filename*=UTF-8''check.md"
     assert [file.path for file in await files.list(project.id)] == ["/notes/check.md"]
 
 
@@ -94,8 +101,12 @@ async def test_preview_does_not_reveal_another_subjects_project() -> None:
         response = await client.get(
             f"/api/projects/{project.id}/files", params={"path": "/project/private.md"}
         )
+        download = await client.get(
+            f"/api/projects/{project.id}/files/download", params={"path": "/project/private.md"}
+        )
 
     assert response.status_code == 404
+    assert download.status_code == 404
 
 
 @pytest.mark.asyncio

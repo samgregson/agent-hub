@@ -53,12 +53,21 @@ export function Menu({
 export function MenuItem({
   children,
   destructive = false,
+  href,
   onSelect,
 }: {
   children: ReactNode;
   destructive?: boolean;
-  onSelect: () => void;
+  href?: string;
+  onSelect?: () => void;
 }) {
+  if (href) {
+    return (
+      <a className={styles.item} href={href} role="menuitem">
+        {children}
+      </a>
+    );
+  }
   return (
     <button
       className={destructive ? styles.destructiveItem : styles.item}

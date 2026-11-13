@@ -1,7 +1,13 @@
 from collections.abc import AsyncGenerator, Sequence
 from typing import Any, cast
 
-from ag_ui.core import BaseEvent, ResumeEntry, RunAgentInput, ToolCallStartEvent
+from ag_ui.core import (
+    BaseEvent,
+    ResumeEntry,
+    RunAgentInput,
+    ToolCallResultEvent,
+    ToolCallStartEvent,
+)
 from ag_ui.core import Interrupt as AGUIInterrupt
 from ag_ui_langgraph import LangGraphAgent
 from ag_ui_langgraph.interrupts import lg_interrupts_to_agui
@@ -113,6 +119,12 @@ class AgentHubLangGraphAgent(LangGraphAgent):  # type: ignore[misc]
                     "args": None,
                 }
             )
+        elif isinstance(dispatched, ToolCallResultEvent):
+            self._visible_tool_calls = [
+                call
+                for call in self._visible_tool_calls
+                if call.get("id") != dispatched.tool_call_id
+            ]
         return dispatched
 
     async def run(self, input: RunAgentInput) -> AsyncGenerator[BaseEvent, None]:

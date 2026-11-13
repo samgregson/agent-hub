@@ -22,8 +22,30 @@ test("upload documents, inspect original pages, read Markdown and retain warning
     .getByRole("button", { name: "Library", exact: true })
     .first()
     .click();
-  const upload = page.getByLabel("Upload PDF or DOCX", { exact: true });
-  await upload.setInputFiles("../../tests/fixtures/documents/bridge.pdf");
+  const upload = page.getByLabel("Upload files", { exact: true });
+  await upload.setInputFiles([
+    {
+      name: "loads.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("id,value\nbeam,0.96\n"),
+    },
+    {
+      name: "bridge.pdf",
+      mimeType: "application/pdf",
+      buffer: readFileSync("../../tests/fixtures/documents/bridge.pdf"),
+    },
+  ]);
+  await expect(page.getByLabel("Library items")).toContainText(
+    "/project/loads.csv",
+  );
+  await page
+    .getByRole("button", { name: "/project/loads.csv actions" })
+    .click();
+  const downloadPath = await page
+    .getByRole("menuitem", { name: "Download", exact: true })
+    .getAttribute("href");
+  const downloaded = await request.get(downloadPath!);
+  expect(await downloaded.text()).toBe("id,value\nbeam,0.96\n");
   const viewer = page.getByRole("region", { name: "Document viewer" });
   await expect(viewer.getByRole("heading", { name: "bridge.pdf" })).toBeVisible(
     { timeout: 30000 },

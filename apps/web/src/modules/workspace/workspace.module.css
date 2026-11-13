@@ -515,6 +515,51 @@
   text-align: left;
 }
 
+.libraryUpload {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--text-strong);
+  font-size: var(--font-size-label);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.libraryUpload:hover {
+  background: var(--surface-raised);
+}
+.libraryUpload:focus-within {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.libraryUpload:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+.libraryUpload input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.libraryUpload input:disabled {
+  cursor: default;
+}
+
+.libraryUploadHint {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-meta);
+}
+
 .newThread {
   margin: 18px 0 16px;
   padding: 0 var(--space-3);

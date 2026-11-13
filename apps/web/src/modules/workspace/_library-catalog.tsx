@@ -5,7 +5,10 @@ import { useEffect, useState } from "react";
 import type { ArtifactCatalog, ProjectFileCatalog } from "@/contracts";
 import { Collection, CollectionItem, Menu, MenuItem } from "@/shared/ui";
 
-import { DocumentUpload, type ProjectDocument } from "@/modules/project-files";
+import {
+  uploadProjectDocument,
+  type ProjectDocument,
+} from "@/modules/project-files";
 
 import styles from "./workspace.module.css";
 
@@ -125,10 +128,20 @@ export function LibraryCatalog({
     setUploading(true);
     setUploadError(null);
     const errors: string[] = [];
+    let uploaded = false;
     for (const file of Array.from(files)) {
       try {
+        if (/\.(pdf|docx)$/i.test(file.name)) {
+          const document = await uploadProjectDocument(projectId, file);
+          uploaded = true;
+          onOpenProjectFile(document.filePath);
+          continue;
+        }
         const bytes = await file.arrayBuffer();
-        const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        const content = new TextDecoder("utf-8", {
+          fatal: true,
+          ignoreBOM: true,
+        }).decode(bytes);
         const response = await fetch(
           `/api/projects/${encodeURIComponent(projectId)}/files`,
           {
@@ -143,32 +156,14 @@ export function LibraryCatalog({
             typeof body.detail === "string" ? body.detail : "Upload failed",
           );
         }
-        const saved = (await response.json()) as {
-          path: string;
-          version: number;
-        };
-        setResult((current) =>
-          current.projectId !== projectId || current.items === null
-            ? current
-            : {
-                ...current,
-                items: [
-                  ...current.items,
-                  {
-                    kind: "projectFile" as const,
-                    label: saved.path,
-                    path: saved.path,
-                    version: saved.version,
-                  },
-                ].sort((a, b) => a.label.localeCompare(b.label)),
-              },
-        );
+        uploaded = true;
       } catch (error) {
         errors.push(
           `${file.name}: ${error instanceof Error ? error.message : "Upload failed"}`,
         );
       }
     }
+    if (uploaded) setUploadRevision((n) => n + 1);
     if (errors.length) setUploadError(errors.join("; "));
     setUploading(false);
   }
@@ -326,9 +321,10 @@ export function LibraryCatalog({
 
   return (
     <section aria-label="Library items">
-      <label>
-        Upload Project files (UTF-8 text)
+      <label className={styles.libraryUpload}>
+        Upload files
         <input
+          aria-label="Upload files"
           type="file"
           multiple
           disabled={uploading}
@@ -339,20 +335,15 @@ export function LibraryCatalog({
           }}
         />
       </label>
-      {uploading ? <p>Uploading…</p> : null}
+      <p className={styles.libraryUploadHint}>
+        IFC, CSV, PDF, DOCX and other UTF-8 files
+      </p>
+      {uploading ? <p role="status">Uploading files…</p> : null}
       {uploadError ? (
         <p className={styles.error} role="alert">
           {uploadError}
         </p>
       ) : null}
-      <DocumentUpload
-        key={projectId}
-        projectId={projectId}
-        onUploaded={(document) => {
-          setUploadRevision((n) => n + 1);
-          onOpenProjectFile(document.filePath);
-        }}
-      />
       <button
         className={styles.newThread}
         onClick={() => setAddingDataset((current) => !current)}
@@ -402,6 +393,19 @@ export function LibraryCatalog({
           <CollectionItem
             actions={
               <Menu label={`${item.label} actions`}>
+                {item.kind === "projectFile" || item.kind === "dataset" ? (
+                  <MenuItem
+                    href={`/api/projects/${encodeURIComponent(projectId)}/files/download?path=${encodeURIComponent(item.path)}`}
+                  >
+                    Download
+                  </MenuItem>
+                ) : item.kind === "document" ? (
+                  <MenuItem
+                    href={`/api/projects/${encodeURIComponent(projectId)}/files/documents/${encodeURIComponent(item.id)}/original`}
+                  >
+                    Download original
+                  </MenuItem>
+                ) : null}
                 <MenuItem
                   destructive
                   onSelect={() => {

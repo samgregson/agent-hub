@@ -1,5 +1,6 @@
 import pytest
-from ag_ui.core import ResumeEntry
+from ag_ui.core import EventType, ResumeEntry, ToolCallResultEvent, ToolCallStartEvent
+from ag_ui_langgraph import LangGraphAgent
 from langchain_core.messages import AIMessage
 from langgraph.types import Interrupt
 
@@ -72,6 +73,34 @@ def test_stream_fallback_resumes_with_langchain_hitl_decisions() -> None:
     assert mapped.metadata is not None
     assert mapped.metadata["agentHubLangChainHITL"]["rawInterruptId"] == "interrupt-1"
     assert command.resume == {"decisions": [{"type": "approve"}]}
+
+
+def test_stream_approval_binds_retry_not_completed_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(LangGraphAgent, "_dispatch_event", lambda _self, event: event)
+    adapter = object.__new__(AgentHubLangGraphAgent)
+    adapter._visible_tool_calls = []
+    for event in [
+        ToolCallStartEvent(
+            type=EventType.TOOL_CALL_START,
+            tool_call_id="old",
+            tool_call_name="foundation_protected_action",
+        ),
+        ToolCallResultEvent(
+            type=EventType.TOOL_CALL_RESULT,
+            message_id="result",
+            tool_call_id="old",
+            content="failed",
+        ),
+        ToolCallStartEvent(
+            type=EventType.TOOL_CALL_START,
+            tool_call_id="retry",
+            tool_call_name="foundation_protected_action",
+        ),
+    ]:
+        adapter._dispatch_event(event)
+
+    [mapped] = adapter._interrupts_to_agui([hitl_interrupt()])
+    assert mapped.tool_call_id == "retry"
 
 
 @pytest.mark.parametrize(

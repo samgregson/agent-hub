@@ -49,9 +49,19 @@ is used for Python Function Map, not MCP Map. Keep
 identifiers in the upstream data and join them back to results in the same order;
 identifiers are not numeric calculation inputs. Map results include individual
 execution records; expose these for inspection as well as downstream `outputs`.
+For the area example, `items` could be `[{"inputs":{"width":2,"height":3}},
+{"inputs":{"width":3,"height":4}}]`; bind the source text and `"area"` as
+shared `source` and `function` inputs. The Map `result` is an ordered array of
+complete calculation results, with each result's named values under `outputs`.
+Prepare those values for the next tool's input schema before binding them.
 A standalone successful tool result can be opened as a report Artifact. In a
-saved Workflow Run, select a successful Map item and choose **Open MCP App** to
-view its captured calculation report without rerunning the tool.
+saved Workflow Run, find the calculation step's **Results by item** and choose
+**Preview** for a successful item to inspect its captured inputs, outputs and
+report App (use **Open MCP App** if the App is not already shown). This works
+for individual items after execution; the pre-run review may show only a
+representative first item. The report is read-only and reopening it does not
+rerun the calculation. The agent can create or run the Workflow and describe
+these controls; it cannot click them through the Plugin's tools.
 
 Source is limited to 64,000 UTF-8 bytes, inputs to 32,000 bytes and output to
 768,000 bytes; each execution is limited to 12 seconds after it acquires the runner. On a tool

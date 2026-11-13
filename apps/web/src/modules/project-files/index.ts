@@ -3,6 +3,6 @@ export { ProjectFilePreview } from "./_preview";
 
 export {
   DocumentPreview,
-  DocumentUpload,
+  uploadProjectDocument,
   type ProjectDocument,
 } from "./_documents";

@@ -185,7 +185,8 @@ def create_ifc_viewer_server() -> FastMCP:
     ) -> ToolResult:
         """Read get_ifc_guide first. Create a portable IFC view with metadata overlays keyed by IFC GlobalId.
 
-        Bind calculation/Map outputs as [{globalId, values: {status, utilisation, ...}}].
+        Transform calculation/Map outputs into [{globalId, values: {...}}] before
+        binding them to metadata; raw calculation results are not metadata rows.
         Each object may occur once; unknown IDs are rejected. Values are finite JSON
         scalars. colour_by names an overlay key. colour_scale optionally sets
         ordered inclusive numeric maxima and hex colours for one overlay key;

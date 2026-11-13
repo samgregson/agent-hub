@@ -1,6 +1,7 @@
 from typing import Annotated
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 
 from agent_hub_api.contracts import ProjectFileCatalog, ProjectFilePreview, ProjectFileSummary
@@ -93,6 +94,33 @@ def create_project_files_router(
                 )
                 for file in files
             ]
+        )
+
+    @router.get("/download")
+    async def download_file(
+        project_id: str,
+        context: Context,
+        path: Annotated[str, Query(min_length=10, max_length=1032)],
+    ) -> Response:
+        if not path.startswith("/project/"):
+            raise HTTPException(status_code=422, detail="Project files require a /project/ path")
+        try:
+            file = await project_files.preview(
+                ProjectFileAccess(subject=context.subject),
+                project_id,
+                path.removeprefix("/project"),
+            )
+        except (InvalidProjectFilePath, ProjectFileNotFound) as error:
+            raise HTTPException(status_code=404, detail="Project file not found") from error
+        return Response(
+            content=file.content.encode("utf-8"),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": "attachment; filename*=UTF-8''"
+                + quote(file.path.rsplit("/", 1)[-1], safe=""),
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+            },
         )
 
     @router.get("", response_model=ProjectFilePreview)

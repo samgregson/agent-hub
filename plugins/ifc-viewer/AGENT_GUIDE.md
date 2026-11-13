@@ -36,7 +36,8 @@ text; this Plugin never resolves Agent Hub paths or holds storage credentials.
 
 Leave eval before creating or changing durable state. For a reusable saved view,
 propose a normal Workflow whose Project File node supplies its `content` port to
-`prepare_ifc_view.ifc_text`. Bind metadata rows (or calculated rows) to `metadata`
+`prepare_ifc_view.ifc_text`. Bind metadata rows, including any transformed
+calculation results, to `metadata`
 and a key to `colour_by`. Workflow creation, preparation and execution use the
 normal host tools and approval controls. Do not route them through eval and do
 not copy IFC text back into model context just to save it.
@@ -60,6 +61,18 @@ Function/Map steps, preserve `globalId` in calculated outputs, and assemble
 File to `ifc_text`. Units, methods and provenance must be explicit when relevant.
 The host orchestrates the graph; this Plugin never calls another Plugin.
 
+The shapes must match at each edge. For example, a Map `result` containing
+`[{"outputs":{"area":6}, ...}, {"outputs":{"area":12}, ...}]` (other
+result fields omitted) is not itself valid viewer metadata. A separate Function
+can combine those results with the corresponding, ordered object IDs and return
+`{"metadata":[{"globalId":"id-1","values":{"area":6}},
+{"globalId":"id-2","values":{"area":12}}]}`. Bind its `result` port with
+`source_path: "/metadata"` to the viewer's `metadata` input. The IDs here are
+illustrative: use actual IFC GlobalIds, verify the collections match, and
+handle missing, duplicate or unmatched records explicitly. If external rows
+must be joined to objects, inspect their columns and join on a validated common
+key; CSV files do not have a fixed schema.
+
 For a beam-check Workflow, keep the engineering method in a saved host Function:
 
 1. Bind the Project File `content` to both IFC tools' `ifc_text` inputs.
@@ -82,6 +95,14 @@ MCP App, with expand/restore controls; it does not rerun the tool or create a
 Library Artifact. Output data remains available, including the full IFC text.
 If the Plugin is disabled or its captured version is unavailable, the data remains
 readable and the host explains why the interactive App cannot open.
+
+In the viewer, the user can orbit, zoom and fit the model; select an object in
+the model or object selector; inspect its properties and metadata; and change
+overlay values or the colouring key. These interactions are local to the view.
+The user can export view inputs, but preview edits do not automatically update
+the saved Run or create an Artifact. Opening a browser-local IFC in the viewer
+does not upload it to the Project. The agent cannot operate these controls via
+its tool calls; it can prepare a view or explain how the user can inspect it.
 
 The current `ifc.view` contains the original IFC text and a separate metadata
 overlay. Returning the full IFC is intentional: it can be inspected, passed to
