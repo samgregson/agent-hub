@@ -716,9 +716,8 @@ export function WorkflowOverview({
   );
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const nodeInspectorRef = useRef<HTMLDivElement>(null);
-  const graphExperienceRef = useRef<HTMLDivElement>(null);
-  const [isGraphFullscreen, setIsGraphFullscreen] = useState(false);
+  const graphModalRef = useRef<HTMLDialogElement>(null);
+  const [isGraphExpanded, setIsGraphExpanded] = useState(false);
   const reviewRequestId = useRef(0);
   const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(
     null,
@@ -741,23 +740,9 @@ export function WorkflowOverview({
   >({});
 
   useEffect(() => {
-    const syncFullscreen = () =>
-      setIsGraphFullscreen(
-        document.fullscreenElement === graphExperienceRef.current,
-      );
-    document.addEventListener("fullscreenchange", syncFullscreen);
-    return () =>
-      document.removeEventListener("fullscreenchange", syncFullscreen);
-  }, []);
-
-  useEffect(() => {
-    if (selectedNodeId && window.matchMedia("(max-width: 720px)").matches) {
-      nodeInspectorRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    }
-  }, [selectedNodeId]);
+    const dialog = graphModalRef.current;
+    if (isGraphExpanded && dialog && !dialog.open) dialog.showModal();
+  }, [isGraphExpanded]);
 
   function discardReview() {
     reviewRequestId.current += 1;
@@ -1031,6 +1016,92 @@ export function WorkflowOverview({
             }),
         ]
     : [];
+  const nodePreview = selectedCanvasNode ? (
+    <div className={styles.nodePreviewBody}>
+      {selectedNode?.kind === "dataset" || selectedNode?.kind === "file" ? (
+        <button onClick={onOpenLibrary} type="button">
+          Open Library
+        </button>
+      ) : selectedNode?.kind === "python" ? (
+        <button onClick={() => onOpenFunction(selectedNode)} type="button">
+          Open Function
+        </button>
+      ) : null}
+      {selectedNode?.shape === "map" ? (
+        <WorkflowMapResults
+          items={selectedNodeProgress?.items}
+          node={selectedNode}
+          projectId={projectId}
+          target={snapshotTargets[selectedNode.id] ?? {}}
+        />
+      ) : selectedNode?.kind === "mcp" &&
+        selectedNodeAppUrl &&
+        selectedNodeProgress?.status === "succeeded" &&
+        isRecord(selectedNodeProgress.output) ? (
+        <WorkflowNodeAppPreview
+          appUrl={selectedNodeAppUrl}
+          title={selectedNode.toolName ?? selectedNode.id}
+          inputs={
+            isRecord(selectedNodeProgress.inputs)
+              ? selectedNodeProgress.inputs
+              : {}
+          }
+          output={selectedNodeProgress.output}
+        />
+      ) : selectedNode?.kind === "python" ? (
+        <WorkflowFunctionPreview
+          capturedTarget={selectedNodeTarget}
+          functionId={selectedNode.refId}
+          projectId={projectId}
+          version={selectedNode.version}
+        />
+      ) : (
+        <WorkflowNodePreview
+          capturedTarget={
+            selectedNode ? snapshotTargets[selectedNode.id] : undefined
+          }
+          inputSources={
+            selectedNode
+              ? selectedInputSources
+              : [
+                  {
+                    label: "Binding source",
+                    value: selectedNodeOutput,
+                    provenance: selectedCanvasNode.kind,
+                  },
+                ]
+          }
+          kindLabel={selectedCanvasNode.kind}
+          node={
+            selectedNode ?? {
+              id: selectedCanvasNode.id,
+              kind: selectedCanvasNode.kind,
+              refId: selectedCanvasNode.title,
+              version: workflow?.version ?? 0,
+            }
+          }
+          output={selectedNodeOutput}
+          outputError={selectedNodeProgress?.error}
+          outputState={selectedOutputState}
+        />
+      )}
+    </div>
+  ) : null;
+  const renderGraphCanvas = (isExpanded: boolean) => (
+    <GraphCanvas
+      isExpanded={isExpanded}
+      onToggleExpanded={() => setIsGraphExpanded((expanded) => !expanded)}
+      nodePreview={nodePreview}
+      nodePreviewTitle={selectedCanvasNode?.title}
+      onClosePreview={() => setSelectedNodeId(null)}
+      edges={canvasGraph.edges}
+      nodes={canvasGraph.nodes}
+      onSelectNode={setSelectedNodeId}
+      selectedNodeId={selectedNodeId}
+      version={selectedRun?.definitionVersion ?? workflow?.version ?? 0}
+      workflowId={workflow?.id ?? ""}
+    />
+  );
   const reviewedBindings =
     reviewedRun &&
     reviewedRun.projectId === projectId &&
@@ -1399,109 +1470,19 @@ export function WorkflowOverview({
               : "No Run yet"}
           </span>
         </div>
-        <div
-          className={`${styles.graphExperience} ${selectedCanvasNode ? styles.graphWithInspector : ""}`}
-          ref={graphExperienceRef}
-        >
-          <GraphCanvas
-            isFullscreen={isGraphFullscreen}
-            onToggleFullscreen={() => {
-              const root = graphExperienceRef.current;
-              if (!root) return;
-              if (document.fullscreenElement === root) {
-                void document.exitFullscreen();
-              } else {
-                void root.requestFullscreen();
-              }
-            }}
-            edges={canvasGraph.edges}
-            nodes={canvasGraph.nodes}
-            onSelectNode={setSelectedNodeId}
-            selectedNodeId={selectedNodeId}
-            version={selectedRun?.definitionVersion ?? workflow.version}
-            workflowId={workflow.id}
-          />
-          {selectedCanvasNode ? (
-            <div className={styles.graphInspector} ref={nodeInspectorRef}>
-              <div className={styles.lineageActions}>
-                {selectedNode?.kind === "dataset" ||
-                selectedNode?.kind === "file" ? (
-                  <button onClick={onOpenLibrary} type="button">
-                    Open Library
-                  </button>
-                ) : selectedNode?.kind === "python" ? (
-                  <button
-                    onClick={() => onOpenFunction(selectedNode)}
-                    type="button"
-                  >
-                    Open Function
-                  </button>
-                ) : null}
-                <button onClick={() => setSelectedNodeId(null)} type="button">
-                  Close preview
-                </button>
-              </div>
-              {selectedNode?.shape === "map" ? (
-                <WorkflowMapResults
-                  items={selectedNodeProgress?.items}
-                  node={selectedNode}
-                  projectId={projectId}
-                  target={snapshotTargets[selectedNode.id] ?? {}}
-                />
-              ) : selectedNode?.kind === "mcp" &&
-                selectedNodeAppUrl &&
-                selectedNodeProgress?.status === "succeeded" &&
-                isRecord(selectedNodeProgress.output) ? (
-                <WorkflowNodeAppPreview
-                  appUrl={selectedNodeAppUrl}
-                  title={selectedNode.toolName ?? selectedNode.id}
-                  inputs={
-                    isRecord(selectedNodeProgress.inputs)
-                      ? selectedNodeProgress.inputs
-                      : {}
-                  }
-                  output={selectedNodeProgress.output}
-                />
-              ) : selectedNode?.kind === "python" ? (
-                <WorkflowFunctionPreview
-                  capturedTarget={selectedNodeTarget}
-                  functionId={selectedNode.refId}
-                  projectId={projectId}
-                  version={selectedNode.version}
-                />
-              ) : (
-                <WorkflowNodePreview
-                  capturedTarget={
-                    selectedNode ? snapshotTargets[selectedNode.id] : undefined
-                  }
-                  inputSources={
-                    selectedNode
-                      ? selectedInputSources
-                      : [
-                          {
-                            label: "Binding source",
-                            value: selectedNodeOutput,
-                            provenance: selectedCanvasNode.kind,
-                          },
-                        ]
-                  }
-                  kindLabel={selectedCanvasNode.kind}
-                  node={
-                    selectedNode ?? {
-                      id: selectedCanvasNode.id,
-                      kind: selectedCanvasNode.kind,
-                      refId: selectedCanvasNode.title,
-                      version: workflow.version,
-                    }
-                  }
-                  output={selectedNodeOutput}
-                  outputError={selectedNodeProgress?.error}
-                  outputState={selectedOutputState}
-                />
-              )}
-            </div>
-          ) : null}
+        <div className={styles.graphExperience}>
+          {!isGraphExpanded ? renderGraphCanvas(false) : null}
         </div>
+        {isGraphExpanded ? (
+          <dialog
+            ref={graphModalRef}
+            className={styles.graphModal}
+            aria-label="Expanded Workflow graph"
+            onClose={() => setIsGraphExpanded(false)}
+          >
+            {renderGraphCanvas(true)}
+          </dialog>
+        ) : null}
       </section>
 
       {reviewedRun?.projectId === projectId &&

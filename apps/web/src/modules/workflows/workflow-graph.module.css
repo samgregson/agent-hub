@@ -1,4 +1,5 @@
 .canvas {
+  position: relative;
   display: flex;
   min-height: 450px;
   height: clamp(450px, 57vh, 720px);
@@ -463,4 +464,92 @@
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.7;
+}
+
+.canvasWithPreview::after {
+  position: absolute;
+  z-index: 4;
+  inset: 54px 0 36px;
+  background: rgb(0 0 0 / 32%);
+  content: "";
+}
+
+.nodePreviewPanel {
+  position: absolute;
+  z-index: 5;
+  top: 66px;
+  right: 50%;
+  bottom: 48px;
+  display: grid;
+  width: min(600px, calc(100% - 32px));
+  transform: translateX(50%);
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 24%);
+}
+
+.nodePreviewExpanded {
+  inset: 0;
+  right: 0;
+  width: auto;
+  transform: none;
+  border: 0;
+}
+
+.nodePreviewHeader {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 10px 6px 16px;
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--surface-raised);
+}
+
+.nodePreviewHeader > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nodePreviewHeader strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodePreviewHeader button,
+.nodePreviewBody > button {
+  display: inline-grid;
+  min-width: var(--control-height);
+  height: var(--control-height);
+  place-items: center;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.nodePreviewHeader button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.nodePreviewHeader .closePreview {
+  font-size: 21px;
+}
+
+.nodePreviewContent {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
 }
