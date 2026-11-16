@@ -1,5 +1,6 @@
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Annotated
 
 from ag_ui.core import RunAgentInput, RunErrorEvent
@@ -7,6 +8,7 @@ from ag_ui.encoder import EventEncoder
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.types import Receive, Scope, Send
 
 from agent_hub_api.contracts import AgentRun as AgentRunResponse
 from agent_hub_api.contracts import ScratchFilePreview
@@ -32,6 +34,20 @@ from agent_hub_api.modules.project_files import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class AgentStreamingResponse(StreamingResponse):
+    """Close the event stream even when the client disconnects during a send."""
+
+    def __init__(
+        self, content: AsyncGenerator[str, None], *, media_type: str, headers: dict[str, str]
+    ) -> None:
+        self._agent_content = content
+        super().__init__(content, media_type=media_type, headers=headers)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        async with aclosing(self._agent_content):
+            await super().__call__(scope, receive, send)
 
 
 class ThreadHistoryResponse(BaseModel):
@@ -236,10 +252,11 @@ def create_agent_transport_router(
 
         encoder = EventEncoder(accept=request.headers.get("accept") or "")
 
-        async def encoded_events() -> AsyncIterator[str]:
+        async def encoded_events() -> AsyncGenerator[str, None]:
             try:
-                async for event in events:
-                    yield encoder.encode(event)
+                async with aclosing(events):
+                    async for event in events:
+                        yield encoder.encode(event)
             except Exception:
                 logger.exception(
                     "Agent Run stream failed",
@@ -252,7 +269,7 @@ def create_agent_transport_router(
                     )
                 )
 
-        return StreamingResponse(
+        return AgentStreamingResponse(
             encoded_events(),
             media_type=encoder.get_content_type(),
             headers={"Cache-Control": "no-cache, no-transform"},

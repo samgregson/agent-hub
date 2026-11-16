@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -90,6 +91,23 @@ class ProgramModel(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=message)])
 
 
+class ParallelEvalModel(ProgramModel):
+    def _generate(
+        self, messages: list[BaseMessage], stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> ChatResult:
+        if not any(isinstance(message, ToolMessage) for message in messages):
+            message = AIMessage(
+                content="",
+                tool_calls=[
+                    {"id": f"eval-{index}", "name": "eval", "args": {"code": self.code}}
+                    for index in range(3)
+                ],
+            )
+        else:
+            message = AIMessage(content="Finished.")
+        return ChatResult(generations=[ChatGeneration(message=message)])
+
+
 @dataclass
 class PtcClient:
     calls: list[tuple[str, Mapping[str, object]]] = field(default_factory=list)
@@ -118,7 +136,9 @@ class PtcClient:
         raise AssertionError("No UI resource should be read")
 
 
-async def setup_program(code: str, after: str | None = None) -> Any:
+async def setup_program(
+    code: str, after: str | None = None, model: BaseChatModel | None = None
+) -> Any:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="sam")
     project = await projects.create(access, "PTC")
@@ -162,7 +182,7 @@ async def setup_program(code: str, after: str | None = None) -> Any:
         runs,
     )
     runner._checkpointer = InMemorySaver()
-    runner._model = ProgramModel(code=code, after=after)
+    runner._model = model or ProgramModel(code=code, after=after)
     agent = await runner._agent_for(
         project.id, thread_id="ptc-thread", run_id="ptc-run", subject="sam"
     )
@@ -176,6 +196,22 @@ def eval_result(result: dict[str, Any]) -> Any:
     text = str(message.content)
     assert "<error" not in text, text
     return json.loads(text.split("<result>", 1)[1].split("</result>", 1)[0])
+
+
+@pytest.mark.asyncio
+async def test_parallel_eval_calls_complete_without_sharing_or_closing_context() -> None:
+    code = "const files = await tools.listProjectFiles({limit:10}); JSON.stringify(files);"
+    _, _, _, _, _, _, agent = await setup_program(code, model=ParallelEvalModel(code=code))
+    result = await asyncio.wait_for(
+        agent.graph.ainvoke(
+            {"messages": [HumanMessage(content="Inspect the Project files.")]},
+            config={"configurable": {"thread_id": "ptc-thread"}},
+        ),
+        timeout=5,
+    )
+    calls = [message for message in result["messages"] if isinstance(message, ToolMessage)]
+    assert len(calls) == 3
+    assert all("<error" not in str(message.content) for message in calls)
 
 
 @pytest.mark.asyncio

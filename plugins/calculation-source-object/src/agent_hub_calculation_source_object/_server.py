@@ -167,7 +167,7 @@ def create_calculation_source_object_server() -> FastMCP:
 
     @mcp.tool(annotations={"readOnlyHint": True, "idempotentHint": True})
     def get_calculation_guide() -> ToolResult:
-        """Read the calculation authoring, output and Workflow composition guide."""
+        """Learn to author reusable engineering calculations with inspectable reports and Workflow bindings."""
         return ToolResult(content=_GUIDE_PATH.read_text(encoding="utf-8"))
 
     @mcp.tool(
@@ -184,7 +184,12 @@ def create_calculation_source_object_server() -> FastMCP:
             Field(description="Finite numeric values keyed by calculation parameter names."),
         ],
     ) -> dict[str, object]:
-        """Execute one CalculationSourceObject Python source and return its captured report data.
+        """Run a reusable engineering calculation and produce an inspectable report for user review.
+
+        Prefer this tool for calculations that users need to inspect or review when its
+        single-file source and numeric input constraints fit. Use ordinary Python Functions
+        separately for data preparation, joining or transformations. The captured App report
+        shows calculation details, source and inputs; Workflow Map supports individual cases.
 
         Read get_calculation_guide for a working source example and Workflow bindings.
         Provide a single .cso.py source file, the decorated calculation function name, and

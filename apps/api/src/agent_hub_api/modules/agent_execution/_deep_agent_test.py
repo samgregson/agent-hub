@@ -243,10 +243,7 @@ async def test_agent_workflow_edits_are_approval_gated_and_readable(
         "approve",
         "reject",
     ]
-    assert captured["interrupt_on"]["prepare_project_workflow_run"]["allowed_decisions"] == [
-        "approve",
-        "reject",
-    ]
+    assert "prepare_project_workflow_run" not in captured["interrupt_on"]
     assert captured["interrupt_on"]["execute_project_workflow_run"]["allowed_decisions"] == [
         "approve",
         "reject",

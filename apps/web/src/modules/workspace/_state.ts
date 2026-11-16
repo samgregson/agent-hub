@@ -41,6 +41,7 @@ export type WorkspaceAction =
   | { path: string | null; type: "openProjectFile" }
   | { proposal: FileProposal; type: "openFileProposal" }
   | { path: string | null; threadId: string; type: "openScratchFile" }
+  | { type: "closePreview" }
   | { type: "showChat" }
   | { threadId: string | null; type: "selectThread" };
 
@@ -80,6 +81,22 @@ export function workspaceReducer(
   }
 
   if (state.selectedProjectId === null) return state;
+  if (action.type === "closePreview") {
+    return {
+      ...state,
+      projects: {
+        ...state.projects,
+        [state.selectedProjectId]: {
+          ...state.projects[state.selectedProjectId],
+          selectedArtifactId: null,
+          selectedFilePath: null,
+          selectedFileProposal: null,
+          selectedScratchThreadId: null,
+          mobileSurface: "chat",
+        },
+      },
+    };
+  }
   if (action.type === "selectThread") {
     return {
       ...state,

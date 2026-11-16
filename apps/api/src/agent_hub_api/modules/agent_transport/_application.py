@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 
 from ag_ui.core import BaseEvent, RunAgentInput
@@ -85,7 +85,7 @@ class AgentTransportModule:
 
     async def start(
         self, access: AgentThreadAccess, input_data: RunAgentInput
-    ) -> AsyncIterator[BaseEvent]:
+    ) -> AsyncGenerator[BaseEvent, None]:
         await self._authorize(access)
         try:
             return await self._execution.start(

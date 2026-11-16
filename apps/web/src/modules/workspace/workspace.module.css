@@ -247,6 +247,28 @@
   overflow: auto;
 }
 
+.closePreview {
+  display: block;
+  min-height: var(--control-height);
+  margin: 0 0 16px auto;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: var(--font-size-label);
+  cursor: pointer;
+}
+
+.closePreview:hover {
+  background: var(--surface-selected);
+}
+
+.closePreview:focus-visible {
+  outline: 2px solid var(--text-strong);
+  outline-offset: 2px;
+}
+
 .shell.explorerOpen {
   grid-template-areas: "title title title" "rail navigator artifact";
   grid-template-columns: 112px minmax(0, 1fr) 0;
@@ -671,6 +693,10 @@
 }
 
 @media (max-width: 1024px) {
+  .closePreview {
+    display: none;
+  }
+
   .shell {
     grid-template-areas: "title" "chat";
     grid-template-columns: minmax(0, 1fr);

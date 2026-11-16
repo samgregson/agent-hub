@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -953,6 +953,64 @@ async def test_execute_maps_repeat_safe_mcp_tool_over_captured_records(
     assert {cast(int, arguments["value"]) for _, arguments in gateway.calls} == set(range(2, 7))
     assert gateway.maximum_active_calls >= 2
     assert gateway.maximum_active_calls <= 4
+
+
+@pytest.mark.asyncio
+async def test_mcp_map_invalid_input_identifies_missing_required_argument() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Map diagnostic")
+    datasets = DatasetModule(projects, MemoryDatasetStore())
+    functions = FunctionModule(projects, MemoryFunctionStore())
+
+    class Gateway:
+        async def tool_version(self, *_: object) -> str:
+            return "v1"
+
+        async def input_schema(self, *_: object) -> dict[str, object]:
+            return {
+                "type": "object",
+                "properties": {"value": {"type": "number"}, "function": {"type": "string"}},
+                "required": ["value", "function"],
+                "additionalProperties": False,
+            }
+
+        async def output_schema(
+            self, *_: object, require_repeat_safe: bool = False
+        ) -> dict[str, object]:
+            return {"type": "object"}
+
+    gateway = cast(PluginGatewayModule, Gateway())
+    definitions = WorkflowDefinitionModule(
+        projects, datasets, functions, gateway, MemoryWorkflowStore()
+    )
+    graph = WorkflowGraph(
+        (WorkflowNode("mapped", "mcp", "plugin", "v1", shape="map", tool_name="calculate"),),
+        (
+            WorkflowEdge(
+                None, None, "mapped", "items", source_kind="workflowInput", source_input="items"
+            ),
+        ),
+        (WorkflowOutput("result", "mapped", "result"),),
+        (WorkflowInput("items", {"type": "array", "items": {"type": "object"}}),),
+    )
+    definition = await definitions.create(access, project.id, "Map", graph)
+    runs = WorkflowRunModule(definitions, datasets, functions, gateway, MemoryWorkflowRunStore())
+    prepared = await runs.prepare(
+        access,
+        project.id,
+        definition.id,
+        "request",
+        expected_version=1,
+        workflow_inputs={"items": [{"value": 2, "unexpected": "private-value"}]},
+    )
+    completed = await runs.execute(access, project.id, prepared.id)
+    error = cast(dict[str, Any], completed.execution["error"])
+    assert error["code"] == "invalid_mcp_input"
+    message = error["itemDiagnostics"][0]["diagnostic"]["message"]
+    assert "Missing required arguments: function" in message
+    assert "Unexpected argument names: unexpected" in message
+    assert "private-value" not in message
 
 
 @pytest.mark.asyncio

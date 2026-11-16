@@ -1,5 +1,6 @@
 """Native PTC with an explicit read-only capability set and no persistent interpreter state."""
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Sequence
@@ -37,9 +38,11 @@ class _ReadOnlyInterpreter(CodeInterpreterMiddleware[Any, Any]):
         eval_tool = cast(StructuredTool, super()._build_tool())
         original = eval_tool.coroutine
         assert original is not None
+        lock = asyncio.Lock()
 
         async def invoke(runtime: ToolRuntime[None, Any], code: str) -> Any:
-            result = await original(runtime, code)
+            async with lock:
+                result = await original(runtime, code)
             if (
                 isinstance(result.content, str)
                 and '<error type="TypeError">not a function' in result.content

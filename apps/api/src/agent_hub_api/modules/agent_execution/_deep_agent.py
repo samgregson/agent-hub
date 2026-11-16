@@ -185,7 +185,10 @@ _AGENT_SYSTEM_PROMPT = "\n\n".join(
         "output object; Workflow output schema properties are inside the result value, not "
         "separate "
         "ports. Map invokes a one-item Function or repeat-safe MCP tool for each item; use a "
-        "single node when the target accepts a collection. For MCP Map, bind an array of "
+        "single node when the target accepts a collection. A Map result is an array of complete "
+        "per-item outputs: bind the whole result with an empty source_path when the downstream "
+        "input expects that array. JSON Pointers do not select a field from every array item; "
+        "use a Map binding or a Function for that transformation. For MCP Map, bind an array of "
         "argument objects to items; each object is merged with shared named inputs to form "
         "a complete tool call, and overlapping keys are rejected. For Python Function Map, "
         "map_input identifies the Function argument that receives each item. "
@@ -487,10 +490,6 @@ class PostgresDeepAgentRunner:
                 "description": "Revise this Workflow Definition?",
             }
             if workflow_runs is not None:
-                interrupt_on["prepare_project_workflow_run"] = {
-                    "allowed_decisions": ["approve", "reject"],
-                    "description": "Prepare this Workflow Run snapshot?",
-                }
                 interrupt_on["execute_project_workflow_run"] = {
                     "allowed_decisions": ["approve", "reject"],
                     "description": "Execute this Workflow Run?",

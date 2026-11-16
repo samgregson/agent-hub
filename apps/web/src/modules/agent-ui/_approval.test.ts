@@ -11,8 +11,23 @@ import {
   isApprovalOnlyTool,
   proposedFileContent,
   resolvedApprovalReview,
+  savedToolResultArtifactId,
   unifiedFileDiff,
 } from "./_approval";
+
+test("saved tool results expose their Project artifact for preview", () => {
+  assert.equal(
+    savedToolResultArtifactId(
+      'Completed.\nSaved structured result: {"artifactId":"artifact-1"}',
+    ),
+    "artifact-1",
+  );
+  assert.equal(savedToolResultArtifactId("No saved result"), null);
+  assert.equal(
+    savedToolResultArtifactId("Saved structured result: invalid"),
+    null,
+  );
+});
 
 test("protected Project file tools use an approval card", () => {
   assert.equal(approvalLabel("write_file"), "Approve Project File change");

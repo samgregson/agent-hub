@@ -128,6 +128,22 @@ test("opening a proposed file shows the right panel without selecting the saved 
   assert.equal(state.projects["project-a"].selectedFileProposal, null);
 });
 
+test("closing a preview clears its selection and returns to the main surface", () => {
+  let state = workspaceReducer(createWorkspaceState(), {
+    projectId: "project-a",
+    type: "selectProject",
+  });
+  state = workspaceReducer(state, {
+    path: "/scratch/notes.md",
+    threadId: "thread-a",
+    type: "openScratchFile",
+  });
+  state = workspaceReducer(state, { type: "closePreview" });
+  assert.equal(state.projects["project-a"].selectedFilePath, null);
+  assert.equal(state.projects["project-a"].selectedScratchThreadId, null);
+  assert.equal(state.projects["project-a"].mobileSurface, "chat");
+});
+
 test("activity changes are ignored until a Project is selected", () => {
   const state = createWorkspaceState();
   assert.equal(

@@ -558,7 +558,8 @@ class WorkflowDefinitionModule:
                 ):
                     raise WorkflowValidationError(
                         f"Workflow has conflicting bindings for input {edge.target_node}."
-                        f"{edge.target_port}{edge.target_path}."
+                        f"{edge.target_port}{edge.target_path}. Remove the existing binding before "
+                        "adding a replacement, or use non-overlapping target paths."
                     )
                 existing.append(edge)
             except WorkflowValidationError as error:
@@ -973,16 +974,22 @@ def _schema_at_path(
             items = current.get("items")
             if not isinstance(items, Mapping) or not token.isdecimal():
                 raise WorkflowValidationError(
-                    f"Binding field path {pointer!r} does not select an array item."
+                    f"Binding field path {pointer!r} does not select an array item. "
+                    "A JSON Pointer into an array needs a numeric index; use an empty "
+                    "source_path to pass the whole array. Selecting a field from every "
+                    "item requires a Map binding or a transformation Function."
                 )
             current = items
             continue
         properties = current.get("properties")
-        if not isinstance(properties, Mapping) or token not in properties:
-            raise WorkflowValidationError(
-                f"Binding field path {pointer!r} refers to an unknown field."
-            )
-        selected = properties[token]
+        if isinstance(properties, Mapping) and token in properties:
+            selected = properties[token]
+        else:
+            selected = current.get("additionalProperties")
+            if not isinstance(selected, Mapping):
+                raise WorkflowValidationError(
+                    f"Binding field path {pointer!r} refers to an unknown field."
+                )
         if not isinstance(selected, Mapping):
             raise WorkflowValidationError("Binding field path refers to an invalid schema.")
         current = selected
@@ -1034,6 +1041,20 @@ def _project_file_path(value: str) -> str:
 
 
 def _compatible(source: Mapping[str, object], target: Mapping[str, object]) -> bool:
+    source_choices = source.get("anyOf")
+    if isinstance(source_choices, list) and source_choices:
+        base = {key: value for key, value in source.items() if key != "anyOf"}
+        return all(
+            isinstance(choice, Mapping) and _compatible({**base, **choice}, target)
+            for choice in source_choices
+        )
+    target_choices = target.get("anyOf")
+    if isinstance(target_choices, list) and target_choices:
+        base = {key: value for key, value in target.items() if key != "anyOf"}
+        return any(
+            isinstance(choice, Mapping) and _compatible(source, {**base, **choice})
+            for choice in target_choices
+        )
     source_types = _schema_types(source.get("type"))
     target_types = _schema_types(target.get("type"))
     if target_types and (
@@ -1080,6 +1101,15 @@ def _compatibility_detail(
     source: Mapping[str, object], target: Mapping[str, object], path: str = ""
 ) -> str:
     """Identify the first mismatch using the same compatibility rules as validation."""
+    source_choices = source.get("anyOf")
+    if isinstance(source_choices, list) and source_choices:
+        base = {key: value for key, value in source.items() if key != "anyOf"}
+        for choice in source_choices:
+            if isinstance(choice, Mapping) and not _compatible({**base, **choice}, target):
+                return _compatibility_detail({**base, **choice}, target, path)
+    target_choices = target.get("anyOf")
+    if isinstance(target_choices, list) and target_choices:
+        return f"At {path or '/'}: source does not match any allowed target schema."
     source_types = _schema_types(source.get("type"))
     target_types = _schema_types(target.get("type"))
     if target_types and (

@@ -8,6 +8,10 @@ const approvalOnlyTools = new Set([
   "create_project_function",
   "update_project_function",
   "delete_project_function",
+  "create_project_workflow",
+  "revise_project_workflow",
+  "prepare_project_workflow_run",
+  "execute_project_workflow_run",
 ]);
 
 export function isFunctionApprovalTool(toolName: string): boolean {
@@ -180,6 +184,13 @@ export interface ProposedFileReview {
 }
 
 export function approvalLabel(toolName: string): string {
+  if (toolName === "create_project_workflow") return "Approve new Workflow";
+  if (toolName === "revise_project_workflow")
+    return "Approve Workflow revision";
+  if (toolName === "prepare_project_workflow_run")
+    return "Approve Workflow Run preparation";
+  if (toolName === "execute_project_workflow_run")
+    return "Approve Workflow Run execution";
   if (toolName === "create_project_function")
     return "Approve new Python Function";
   if (toolName === "update_project_function")
@@ -197,6 +208,22 @@ export function approvalLabel(toolName: string): string {
   if (toolName === "delete_project_dataset") return "Approve Dataset deletion";
   if (toolName.includes("dataset")) return "Approve Dataset change";
   return "Approve protected action";
+}
+
+export function savedToolResultArtifactId(result: unknown): string | null {
+  if (typeof result !== "string") return null;
+  const marker = "Saved structured result: ";
+  const position = result.lastIndexOf(marker);
+  if (position < 0) return null;
+  try {
+    const value: unknown = JSON.parse(result.slice(position + marker.length));
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+      return null;
+    const id = (value as Record<string, unknown>).artifactId;
+    return typeof id === "string" && id ? id : null;
+  } catch {
+    return null;
+  }
 }
 
 export function isApprovalOnlyTool(toolName: string): boolean {

@@ -1547,6 +1547,7 @@ test("Functions is a dedicated Project destination and survives navigation", asy
 test("Library opens a registered Dataset in its table viewer and saves through Dataset commands", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
   const project = {
     createdAt: "2026-10-07T00:00:00.000Z",
     id: "project-123",
@@ -1600,6 +1601,9 @@ test("Library opens a registered Dataset in its table viewer and saves through D
   await page.route(`**/api/projects/${project.id}/datasets`, async (route) =>
     route.fulfill({ json: [currentDataset] }),
   );
+  await page.route(`**/api/projects/${project.id}/workflows`, async (route) =>
+    route.fulfill({ json: [] }),
+  );
   await page.route(
     `**/api/projects/${project.id}/datasets/${dataset.id}`,
     async (route) => {
@@ -1637,6 +1641,18 @@ test("Library opens a registered Dataset in its table viewer and saves through D
   await page.getByRole("button", { name: "Load cases", exact: true }).click();
   const viewer = page.getByRole("region", { name: "Dataset viewer" });
   await expect(viewer).toContainText("LC-1");
+  await page.getByRole("button", { name: "Workflow graph" }).click();
+  await expect(viewer).toBeHidden();
+  const workflowSurface = page.locator("main[data-theme] > section");
+  const workflowBounds = await workflowSurface.boundingBox();
+  expect(workflowBounds?.x).toBeLessThan(180);
+  expect(workflowBounds?.width).toBeGreaterThan(1100);
+  await page.getByRole("button", { name: "Library", exact: true }).click();
+  await expect(viewer).toBeVisible();
+  await page.getByRole("button", { name: "Close preview" }).click();
+  await expect(viewer).toBeHidden();
+  await page.getByRole("button", { name: "Load cases", exact: true }).click();
+  await expect(viewer).toBeVisible();
   await expect(viewer).toContainText("12.5");
   await expect(
     viewer.getByRole("columnheader", { name: "load" }),
@@ -2896,6 +2912,187 @@ test("a pending approval restored from thread history can be approved", async ({
   await expect(approval.getByRole("button", { name: "Approve" })).toBeEnabled();
   await approval.getByRole("button", { name: "Approve" }).click();
   await expect.poll(() => resumed).toBe(true);
+});
+
+test("a saved standalone tool result can be opened from the conversation", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-result-link",
+    name: "Review",
+    createdAt: "2026-10-16T00:00:00.000Z",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const thread = {
+    id: "thread-result-link",
+    projectId: project.id,
+    title: "Review",
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+  let previewRequested = false;
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    (route) => {
+      const input = route.request().postDataJSON() as { runId: string };
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "calc",
+            toolCallName: "calculation__run_calculation",
+          },
+          { type: "TOOL_CALL_ARGS", toolCallId: "calc", delta: "{}" },
+          { type: "TOOL_CALL_END", toolCallId: "calc" },
+          {
+            type: "TOOL_CALL_RESULT",
+            messageId: "calc-result",
+            toolCallId: "calc",
+            content:
+              'Completed.\nSaved structured result: {"artifactId":"result-123"}',
+          },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: { type: "success" },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/artifacts/result-123")) {
+      previewRequested = true;
+      return route.fulfill({ status: 404, json: {} });
+    }
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto("/");
+  await page.getByLabel("Message").fill("Run a calculation");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByText("Process", { exact: true }).click();
+  await page.getByText("Calculation Run Calculation").click();
+  await page.getByRole("button", { name: "Open result preview" }).click();
+  await expect.poll(() => previewRequested).toBe(true);
+});
+
+test("workflow approval presents its steps and bindings without requiring JSON", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-workflow-review",
+    name: "Review",
+    createdAt: "2026-10-16T00:00:00.000Z",
+    updatedAt: "2026-10-16T00:00:00.000Z",
+  };
+  const thread = {
+    id: "thread-workflow-review",
+    projectId: project.id,
+    title: "Review",
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route(
+    `**/api/projects/${project.id}/threads/${thread.id}/agent`,
+    (route) => {
+      const input = route.request().postDataJSON() as { runId: string };
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: sse([
+          { type: "RUN_STARTED", threadId: thread.id, runId: input.runId },
+          {
+            type: "TOOL_CALL_START",
+            toolCallId: "workflow-call",
+            toolCallName: "create_project_workflow",
+          },
+          {
+            type: "TOOL_CALL_ARGS",
+            toolCallId: "workflow-call",
+            delta: JSON.stringify({
+              name: "Reviewable workflow",
+              graph_json: {
+                nodes: [
+                  { id: "input", kind: "file", ref_id: "/project/source.csv" },
+                  {
+                    id: "calculate",
+                    kind: "mcp",
+                    ref_id: "calculation",
+                    tool_name: "run_calculation",
+                    shape: "map",
+                  },
+                ],
+                edges: [
+                  {
+                    source_node: "input",
+                    source_port: "content",
+                    target_node: "calculate",
+                    target_port: "items",
+                  },
+                ],
+                outputs: [
+                  { name: "results", node: "calculate", port: "result" },
+                ],
+              },
+            }),
+          },
+          { type: "TOOL_CALL_END", toolCallId: "workflow-call" },
+          {
+            type: "RUN_FINISHED",
+            threadId: thread.id,
+            runId: input.runId,
+            outcome: {
+              type: "interrupt",
+              interrupts: [
+                {
+                  id: "workflow-interrupt",
+                  reason: "tool_call",
+                  toolCallId: "workflow-call",
+                },
+              ],
+            },
+          },
+        ]),
+      });
+    },
+  );
+  await page.route("**/api/projects/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    if (path.endsWith("/runs")) return route.fulfill({ json: [] });
+    return route.fulfill({ json: {} });
+  });
+  await page.goto("/");
+  await page.getByLabel("Message").fill("Create a workflow");
+  await page.getByRole("button", { name: "Send" }).click();
+  const approval = page.getByRole("region", { name: "Approve new Workflow" });
+  await expect(approval).toContainText("Reviewable workflow");
+  await expect(approval).toContainText("results");
+  await approval.getByText("calculate", { exact: true }).click();
+  await expect(approval).toContainText("run_calculation");
+  await expect(approval).toContainText("items ← input · content");
+  await expect(approval.getByRole("button", { name: "Approve" })).toBeEnabled();
 });
 
 test("composer blocks sending while an approval is pending", async ({

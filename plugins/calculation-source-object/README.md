@@ -12,7 +12,7 @@ docker compose up --build calculation-source-object
 
 The service is available to Agent Hub at `http://calculation-source-object:8000/mcp` and locally at `http://localhost:8003/mcp`.
 
-Enable **Calculation Source Object** for a Project. An agent can call `run_calculation` with:
+Enable **Engineering calculations (Calculation Source Object)** for a Project. An agent can call `run_calculation` with:
 
 - `source`: the complete `.cso.py` source as text, supplied directly or from a Project File through a Workflow binding;
 - `function`: the decorated calculation function name;

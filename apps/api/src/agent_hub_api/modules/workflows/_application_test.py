@@ -57,6 +57,109 @@ async def test_missing_function_reference_suggests_creation_when_project_has_non
 
 
 @pytest.mark.asyncio
+async def test_dynamic_numeric_output_can_bind_a_named_numeric_input() -> None:
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="owner")
+    project = await projects.create(access, "Dynamic outputs")
+    functions = FunctionModule(projects, MemoryFunctionStore())
+    source = await functions.define(
+        access,
+        project.id,
+        "Source",
+        "def transform(inputs, parameters): return {}",
+        {"type": "object", "properties": {}},
+        {
+            "type": "object",
+            "properties": {
+                "values": {
+                    "type": "object",
+                    "additionalProperties": {"anyOf": [{"type": "integer"}, {"type": "number"}]},
+                }
+            },
+        },
+    )
+    target = await functions.define(
+        access,
+        project.id,
+        "Target",
+        "def transform(inputs, parameters): return {}",
+        {"type": "object", "properties": {"value": {"type": "number"}}, "required": ["value"]},
+        {"type": "object"},
+    )
+    workflows = WorkflowDefinitionModule(
+        projects,
+        DatasetModule(projects, MemoryDatasetStore()),
+        functions,
+        None,
+        MemoryWorkflowStore(),
+    )
+    graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "python", source.id, source.revision),
+            WorkflowNode("target", "python", target.id, target.revision),
+        ),
+        (WorkflowEdge("source", "result", "target", "value", source_path="/values/pressure"),),
+        (WorkflowOutput("result", "target", "result"),),
+    )
+    await workflows.create(access, project.id, "Use named output", graph)
+
+    object_target = await functions.define(
+        access,
+        project.id,
+        "Object target",
+        "def transform(inputs, parameters): return {}",
+        {
+            "type": "object",
+            "properties": {
+                "values": {
+                    "type": "object",
+                    "properties": {"pressure": {"type": "number"}},
+                    "required": ["pressure"],
+                }
+            },
+            "required": ["values"],
+        },
+        {"type": "object"},
+    )
+    object_graph = WorkflowGraph(
+        (
+            WorkflowNode("source", "python", source.id, source.revision),
+            WorkflowNode("target", "python", object_target.id, object_target.revision),
+        ),
+        (WorkflowEdge("source", "result", "target", "values", source_path="/values"),),
+        (WorkflowOutput("result", "target", "result"),),
+    )
+    await workflows.create(access, project.id, "Use dynamic object", object_graph)
+
+    mixed = await functions.define(
+        access,
+        project.id,
+        "Mixed source",
+        "def transform(inputs, parameters): return {}",
+        {"type": "object", "properties": {}},
+        {
+            "type": "object",
+            "properties": {
+                "values": {
+                    "type": "object",
+                    "additionalProperties": {"anyOf": [{"type": "number"}, {"type": "string"}]},
+                }
+            },
+        },
+    )
+    incompatible = WorkflowGraph(
+        (
+            WorkflowNode("source", "python", mixed.id, mixed.revision),
+            WorkflowNode("target", "python", target.id, target.revision),
+        ),
+        graph.edges,
+        graph.outputs,
+    )
+    with pytest.raises(WorkflowValidationError, match="source types.*string"):
+        await workflows.create(access, project.id, "Reject mixed output", incompatible)
+
+
+@pytest.mark.asyncio
 async def test_nested_array_type_mismatch_reports_field_and_types() -> None:
     projects = create_memory_project_module()
     access = ProjectAccess(subject="owner")

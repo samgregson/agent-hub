@@ -32,6 +32,7 @@ import {
 } from "react";
 
 import type { AgentRun } from "@/contracts";
+import { WorkflowProposalPreview } from "@/modules/workflows";
 
 import {
   restoreInterruptMetadata,
@@ -49,6 +50,7 @@ import {
   functionApprovalTechnicalDetails,
   isFunctionDefinitionApproval,
   readableFunctionExample,
+  savedToolResultArtifactId,
   unifiedFileDiff,
   type ProposedFileReview,
 } from "./_approval";
@@ -382,6 +384,11 @@ function ToolCall({
             </details>
           </>
         ) : null}
+        {(toolName === "create_project_workflow" ||
+          toolName === "revise_project_workflow") &&
+        waitingForDecision ? (
+          <WorkflowProposalPreview args={args} />
+        ) : null}
         {approval.prompt ? <p>{approval.prompt}</p> : null}
         {waitingForDecision ? (
           <>
@@ -571,6 +578,8 @@ function formatProcessValue(value: unknown) {
 }
 
 function ProcessEntry({ call }: { call: ProcessCall }) {
+  const openArtifact = useContext(OpenArtifactContext);
+  const artifactId = savedToolResultArtifactId(call.result);
   const status = call.isError
     ? "Failed"
     : call.approval?.approved === false
@@ -592,6 +601,15 @@ function ProcessEntry({ call }: { call: ProcessCall }) {
         <span className={styles.processEntryStatus}>{status}</span>
       </summary>
       <div className={styles.processEntryDetails}>
+        {artifactId ? (
+          <button
+            className={styles.approvalLink}
+            onClick={() => openArtifact(artifactId)}
+            type="button"
+          >
+            Open result preview
+          </button>
+        ) : null}
         {call.argsText ? (
           <div>
             <span className={styles.processFieldLabel}>Input</span>

@@ -610,12 +610,30 @@ def create_postgres_plugin_gateway(
     )
     calculation_source_object = PluginManifest(
         id="calculation-source-object",
-        name="Calculation Source Object",
+        name="Engineering calculations (Calculation Source Object)",
         version="0.1.0",
         endpoint="http://calculation-source-object:8000/mcp",
         tools=(
-            PluginTool(name="get_calculation_guide", read_only=True, repeat_safe=True),
-            PluginTool(name="run_calculation", read_only=True, repeat_safe=True),
+            PluginTool(
+                name="get_calculation_guide",
+                read_only=True,
+                repeat_safe=True,
+                description=(
+                    "Read how to author and run reusable engineering calculations and inspect "
+                    "their reports, including Workflow bindings."
+                ),
+            ),
+            PluginTool(
+                name="run_calculation",
+                read_only=True,
+                repeat_safe=True,
+                description=(
+                    "Run a reusable engineering calculation with numeric inputs and produce "
+                    "named results and an inspectable calculation report for user review. "
+                    "Prefer for reviewable calculations when its single-file source and numeric "
+                    "input constraints fit; Workflow Map supports multiple cases."
+                ),
+            ),
         ),
         app_resource_uri="ui://agent-hub-calculation-source-object/report.html",
         app_tool_names=(),

@@ -1,4 +1,6 @@
+import asyncio
 from collections.abc import AsyncIterator
+from typing import cast
 
 import pytest
 from ag_ui.core import (
@@ -11,8 +13,10 @@ from ag_ui.core import (
     RunStartedEvent,
     ToolCall,
 )
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import ClientDisconnect
 
 from agent_hub_api.modules.agent_execution import (
     AgentThreadState,
@@ -24,7 +28,7 @@ from agent_hub_api.modules.agent_transport import (
     AgentTransportModule,
     create_agent_transport_router,
 )
-from agent_hub_api.modules.identity import create_identity_module
+from agent_hub_api.modules.identity import RequestContext, create_identity_module
 from agent_hub_api.modules.project_files import create_memory_project_files
 from agent_hub_api.modules.projects import ProjectAccess, create_memory_project_module
 from agent_hub_api.settings import Settings
@@ -79,6 +83,58 @@ class UnconfiguredRunner(DeterministicRunner):
     async def load_thread_state(self, thread_id: str, *, project_id: str) -> AgentThreadState:
         del thread_id, project_id
         raise RuntimeError("AGENT_HUB_OPENAI_API_KEY is required to run the agent")
+
+
+class WaitingRunner(DeterministicRunner):
+    async def run(
+        self, input_data: RunAgentInput, *, project_id: str, subject: str | None = None
+    ) -> AsyncIterator[BaseEvent]:
+        yield RunStartedEvent(thread_id=input_data.thread_id, run_id=input_data.run_id)
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_disconnected_response_closes_run_and_allows_retry() -> None:
+    settings = Settings(environment="test", fixed_identity_subject="subject-a")
+    projects = create_memory_project_module()
+    access = ProjectAccess(subject="subject-a")
+    project = await projects.create(access, "Disconnect test")
+    thread = await projects.create_thread(access, project.id, "Conversation")
+    execution = create_memory_agent_execution(WaitingRunner())
+    router = create_agent_transport_router(
+        create_identity_module(settings),
+        AgentTransportModule(projects, execution, create_memory_project_files(projects)),
+    )
+    endpoint = next(route.endpoint for route in router.routes if route.path.endswith("/agent"))
+    response = cast(
+        StreamingResponse,
+        await endpoint(
+            project.id,
+            thread.id,
+            RunAgentInput.model_validate(run_body(thread.id)),
+            Request({"type": "http", "method": "POST", "path": "/", "headers": []}),
+            RequestContext(subject="subject-a", request_id="request-1"),
+        ),
+    )
+
+    async def send(message: dict[str, object]) -> None:
+        if message["type"] == "http.response.body":
+            raise OSError("Client disconnected")
+
+    async def receive() -> dict[str, object]:
+        await asyncio.Event().wait()
+        return {"type": "http.disconnect"}
+
+    with pytest.raises(ClientDisconnect):
+        await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    assert (await execution.list_runs(thread.id))[0].status.value == "cancelled"
+    retry = await execution.start(
+        RunAgentInput.model_validate(run_body(thread.id, "run-2")),
+        project_id=project.id,
+        request_id="request-2",
+    )
+    await anext(retry)
+    await retry.aclose()
 
 
 class ScratchPreviewRunner(DeterministicRunner):

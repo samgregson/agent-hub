@@ -150,6 +150,8 @@ export function ProjectWorkspace() {
     selectedActivity,
   );
   const isWorkflowActivity = selectedActivity === "workflows";
+  const showPreview =
+    isLibraryPreviewOpen && !isWorkflowActivity && !isExplorerActivity;
   const selectedThreads = workspace.selectedProjectId
     ? (threadsByProject[workspace.selectedProjectId] ?? [])
     : [];
@@ -419,7 +421,7 @@ export function ProjectWorkspace() {
   return (
     <main
       data-theme={isDarkMode ? "dark" : "light"}
-      className={`${styles.shell} ${selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""} ${isWorkflowActivity ? styles.workflowOpen : ""} ${isLibraryPreviewOpen ? styles.libraryPreviewOpen : ""}`}
+      className={`${styles.shell} ${showPreview && selectedWorkspace?.mobileSurface === "artifact" ? styles.mobileArtifactOpen : ""} ${isExplorerActivity ? styles.explorerOpen : ""} ${isWorkflowActivity ? styles.workflowOpen : ""} ${showPreview ? styles.libraryPreviewOpen : ""}`}
       style={{ "--navigator-width": `${navigatorWidth}px` } as CSSProperties}
     >
       <header className={styles.titlebar}>
@@ -806,6 +808,15 @@ export function ProjectWorkspace() {
       </section>
 
       <aside className={styles.artifact}>
+        {showPreview ? (
+          <button
+            className={styles.closePreview}
+            onClick={() => dispatch({ type: "closePreview" })}
+            type="button"
+          >
+            Close preview
+          </button>
+        ) : null}
         <button
           className={styles.mobileReturnToChat}
           onClick={() => dispatch({ type: "showChat" })}

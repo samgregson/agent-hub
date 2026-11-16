@@ -722,13 +722,13 @@ class WorkflowRunModule:
                     "error": "mcp_outcome_unknown",
                 }
                 return None, "mcp_outcome_unknown"
-            try:
-                Draft202012Validator(input_schema).validate(dict(inputs))
-            except JsonSchemaValidationError:
+            errors = list(Draft202012Validator(input_schema).iter_errors(dict(inputs)))
+            if errors:
                 execution_nodes[node.id] = {
                     "status": "failed",
                     "inputs": dict(inputs),
                     "error": "invalid_mcp_input",
+                    "diagnostic": _mcp_input_diagnostic(errors),
                 }
                 return None, "invalid_mcp_input"
             execution_nodes[node.id] = {
@@ -866,10 +866,10 @@ class WorkflowRunModule:
             }
             await checkpoint()
             diagnostic: dict[str, str] | None = None
-            try:
-                Draft202012Validator(input_schema).validate(call_arguments)
-            except JsonSchemaValidationError:
+            errors = list(Draft202012Validator(input_schema).iter_errors(call_arguments))
+            if errors:
                 code = "invalid_mcp_input"
+                diagnostic = _mcp_input_diagnostic(errors)
             else:
                 try:
                     async with call_semaphore:
@@ -1088,7 +1088,9 @@ class WorkflowRunModule:
         ):
             raise WorkflowValidationError("This step has no captured MCP App.")
         plugin_id, tool_name, version = (
-            target.get("pluginId"), target.get("toolName"), target.get("version")
+            target.get("pluginId"),
+            target.get("toolName"),
+            target.get("version"),
         )
         if not all(isinstance(value, str) for value in (plugin_id, tool_name, version)):
             raise WorkflowValidationError("The captured App version is unavailable.")
@@ -1194,6 +1196,38 @@ def _validate_workflow_inputs(
         return cast(dict[str, object], json.loads(json.dumps(dict(values))))
     except (TypeError, ValueError) as error:
         raise WorkflowValidationError("Workflow Inputs must contain only JSON values.") from error
+
+
+def _mcp_input_diagnostic(errors: list[JsonSchemaValidationError]) -> dict[str, str]:
+    messages = [_mcp_schema_error(error) for error in errors[:5]]
+    if len(errors) > 5:
+        messages.append(f"{len(errors) - 5} further schema errors omitted.")
+    return {"source": "host", "message": " ".join(messages)}
+
+
+def _mcp_schema_error(error: JsonSchemaValidationError) -> str:
+    path = "/" + "/".join(str(part).replace("~", "~0").replace("/", "~1") for part in error.path)
+    message = f"MCP input is invalid at {path} ({error.validator})."
+    if error.validator == "required" and isinstance(error.instance, Mapping):
+        required = error.validator_value
+        if isinstance(required, list):
+            missing = [
+                name for name in required if isinstance(name, str) and name not in error.instance
+            ]
+            if missing:
+                message += " Missing required arguments: " + ", ".join(missing) + "."
+    elif error.validator == "type" and isinstance(error.schema, Mapping):
+        expected = error.schema.get("type")
+        if isinstance(expected, (str, list)):
+            message += f" Expected type: {expected}."
+    elif (error.validator == "additionalProperties" and isinstance(error.instance, Mapping)
+          and isinstance(error.schema, Mapping) and not error.schema.get("patternProperties")):
+        properties = error.schema.get("properties", {})
+        if isinstance(properties, Mapping):
+            unexpected = [str(name) for name in error.instance if name not in properties]
+            if unexpected:
+                message += " Unexpected argument names: " + ", ".join(unexpected) + "."
+    return message
 
 
 def _select_binding_value(value: object, pointer: str, *, each_item: bool) -> object:

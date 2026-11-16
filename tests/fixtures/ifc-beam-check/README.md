@@ -1,8 +1,8 @@
 # IFC engineering Workflow smoke
 
 `beams.ifc`, `beam-forces.csv` and `beam_utilisation.cso.py` provide a
-three-beam live-smoke input. Enable both **IFC Viewer** and **Calculation
-Source Object** for the Project, and upload all three files. The calculation
+three-beam live-smoke input. Enable both **IFC Viewer** and **Engineering
+calculations (Calculation Source Object)** for the Project, and upload all three files. The calculation
 Plugin executes `beam_utilisation` for each CSV row; its named `outputs` carry
 the utilisation to the IFC view. The files are inputs to the example, not
 application-specific assumptions. The CSV supplies illustrative demands and

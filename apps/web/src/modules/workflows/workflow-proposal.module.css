@@ -1,0 +1,37 @@
+.proposal {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  font-size: var(--font-size-label);
+}
+
+.proposal p {
+  margin: 0;
+  color: var(--text-muted);
+}
+.nodes {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.nodes details {
+  border: 1px solid var(--line-subtle);
+  padding: 8px 10px;
+}
+.nodes summary {
+  cursor: pointer;
+}
+.nodes summary span {
+  margin-left: 8px;
+  color: var(--text-muted);
+}
+.nodes details[open] > p,
+.nodes details[open] > ul {
+  margin-top: 8px;
+}
+.nodes ul {
+  padding-left: 20px;
+  overflow-wrap: anywhere;
+}

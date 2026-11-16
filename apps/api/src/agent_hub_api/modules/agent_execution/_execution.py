@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -162,7 +162,7 @@ class AgentExecutionModule:
         project_id: str,
         request_id: str,
         subject: str | None = None,
-    ) -> AsyncIterator[BaseEvent]:
+    ) -> AsyncGenerator[BaseEvent, None]:
         approval_decisions: tuple[ApprovalDecision, ...] = ()
         if input_data.resume:
             thread_state = await self._runner.load_thread_state(
@@ -224,7 +224,7 @@ class AgentExecutionModule:
         project_id: str,
         request_id: str,
         subject: str | None,
-    ) -> AsyncIterator[BaseEvent]:
+    ) -> AsyncGenerator[BaseEvent, None]:
         terminal_status = AgentRunStatus.SUCCEEDED
         terminal_error: ErrorEnvelope | None = None
         try:
