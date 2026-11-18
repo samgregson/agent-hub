@@ -1,5 +1,6 @@
 from agent_hub_api.modules.agent_execution._deep_agent import PostgresDeepAgentRunner
 from agent_hub_api.modules.agent_execution._execution import (
+    AgentEventStream,
     AgentExecutionModule,
     AgentRun,
     AgentRunAlreadyActive,
@@ -16,6 +17,7 @@ from agent_hub_api.modules.agent_execution._execution import (
 
 __all__ = [
     "AgentExecutionModule",
+    "AgentEventStream",
     "AgentRun",
     "AgentRunAlreadyActive",
     "AgentRunStatus",

@@ -94,7 +94,8 @@ class WaitingRunner(DeterministicRunner):
 
 
 @pytest.mark.asyncio
-async def test_disconnected_response_closes_run_and_allows_retry() -> None:
+@pytest.mark.parametrize("disconnect_at", ["http.response.start", "http.response.body", "waiting"])
+async def test_disconnected_response_closes_run_and_allows_retry(disconnect_at: str) -> None:
     settings = Settings(environment="test", fixed_identity_subject="subject-a")
     projects = create_memory_project_module()
     access = ProjectAccess(subject="subject-a")
@@ -117,16 +118,23 @@ async def test_disconnected_response_closes_run_and_allows_retry() -> None:
         ),
     )
 
+    started = asyncio.Event()
+
     async def send(message: dict[str, object]) -> None:
-        if message["type"] == "http.response.body":
+        if message["type"] == disconnect_at:
             raise OSError("Client disconnected")
+        if message["type"] == "http.response.body":
+            started.set()
 
     async def receive() -> dict[str, object]:
-        await asyncio.Event().wait()
+        await started.wait()
         return {"type": "http.disconnect"}
 
-    with pytest.raises(ClientDisconnect):
-        await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    if disconnect_at == "waiting":
+        await response({"type": "http", "asgi": {"spec_version": "2.3"}}, receive, send)
+    else:
+        with pytest.raises(ClientDisconnect):
+            await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
     assert (await execution.list_runs(thread.id))[0].status.value == "cancelled"
     retry = await execution.start(
         RunAgentInput.model_validate(run_body(thread.id, "run-2")),

@@ -1,5 +1,5 @@
 import asyncio
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -148,6 +148,39 @@ class AgentRunStore(Protocol):
     async def reconcile_non_terminal(self, *, now: datetime) -> int: ...
 
 
+class AgentEventStream(AsyncIterator[BaseEvent], Protocol):
+    async def aclose(self) -> None: ...
+
+
+class _RunEventStream:
+    def __init__(
+        self,
+        events: AsyncGenerator[BaseEvent, None],
+        cancel_unstarted: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._events = events
+        self._cancel_unstarted = cancel_unstarted
+        self._started = False
+        self._closed = False
+
+    def __aiter__(self) -> Self:
+        return self
+
+    async def __anext__(self) -> BaseEvent:
+        if self._closed:
+            raise StopAsyncIteration
+        self._started = True
+        return await anext(self._events)
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if not self._started:
+            await self._cancel_unstarted()
+        await self._events.aclose()
+
+
 class AgentExecutionModule:
     """Owns durable Run lifecycle around a replaceable AG-UI event producer."""
 
@@ -162,7 +195,7 @@ class AgentExecutionModule:
         project_id: str,
         request_id: str,
         subject: str | None = None,
-    ) -> AsyncGenerator[BaseEvent, None]:
+    ) -> AgentEventStream:
         approval_decisions: tuple[ApprovalDecision, ...] = ()
         if input_data.resume:
             thread_state = await self._runner.load_thread_state(
@@ -215,7 +248,10 @@ class AgentExecutionModule:
             raise DuplicateAgentRun
         if create_result is CreateAgentRunResult.THREAD_ACTIVE:
             raise AgentRunAlreadyActive
-        return self._stream(run, input_data, project_id, request_id, subject)
+        return _RunEventStream(
+            self._stream(run, input_data, project_id, request_id, subject),
+            lambda: self._persist_cancelled(run),
+        )
 
     async def _stream(
         self,

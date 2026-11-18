@@ -102,6 +102,166 @@ test("the browser-facing Project API forwards work item deletion", async ({
   expect(artifactResponse.status()).toBe(404);
 });
 
+test("a chat run continues while viewing workflows", async ({ page }) => {
+  const project = {
+    id: "project-navigation-run",
+    name: "Navigation test",
+    createdAt: "2026-09-15T00:00:00.000Z",
+    updatedAt: "2026-09-15T00:00:00.000Z",
+  };
+  const thread = {
+    id: "thread-navigation-run",
+    projectId: project.id,
+    title: "Existing chat",
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+  await page.addInitScript(() => {
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof Request
+            ? input.url
+            : input.href;
+      if (!url.endsWith("/agent") || init?.method !== "POST")
+        return nativeFetch(input, init);
+      const body = JSON.parse(String(init.body)) as {
+        runId: string;
+        threadId: string;
+      };
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const send = (event: object) =>
+            controller.enqueue(
+              new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`),
+            );
+          send({
+            type: "RUN_STARTED",
+            threadId: body.threadId,
+            runId: body.runId,
+          });
+          Object.assign(window, {
+            finishTestRun: () => {
+              send({
+                type: "TEXT_MESSAGE_START",
+                messageId: "answer",
+                role: "assistant",
+              });
+              send({
+                type: "TEXT_MESSAGE_CONTENT",
+                messageId: "answer",
+                delta: "Finished while viewing workflows",
+              });
+              send({ type: "TEXT_MESSAGE_END", messageId: "answer" });
+              send({
+                type: "RUN_FINISHED",
+                threadId: body.threadId,
+                runId: body.runId,
+              });
+              controller.close();
+            },
+          });
+        },
+      });
+      return new Response(stream, {
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+  });
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route("**/api/projects/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/agent")) return route.fallback();
+    if (path.endsWith("/threads")) return route.fulfill({ json: [thread] });
+    if (path.endsWith("/history"))
+      return route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    return route.fulfill({ json: [] });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await page.getByLabel("Message").fill("Start analysis");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.waitForFunction(() => "finishTestRun" in window);
+  await page
+    .getByRole("button", { name: "Workflow graph", exact: true })
+    .click();
+  await page.evaluate(() =>
+    (window as unknown as { finishTestRun: () => void }).finishTestRun(),
+  );
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await expect(
+    page.getByText("Finished while viewing workflows"),
+  ).toBeVisible();
+});
+
+test("a new Thread can be created after deleting the last one", async ({
+  page,
+}) => {
+  const project = {
+    id: "project-empty-chats",
+    name: "Empty chats test",
+    createdAt: "2026-09-15T00:00:00.000Z",
+    updatedAt: "2026-09-15T00:00:00.000Z",
+  };
+  const initialThread = {
+    id: "thread-original",
+    projectId: project.id,
+    title: "Only Thread",
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  };
+  let threads = [initialThread];
+  await page.route("**/api/projects", (route) =>
+    route.fulfill({ json: [project] }),
+  );
+  await page.route("**/api/projects/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const method = route.request().method();
+    if (path.endsWith("/threads") && method === "GET") {
+      await route.fulfill({ json: threads });
+    } else if (path.endsWith("/threads") && method === "POST") {
+      const created = {
+        ...initialThread,
+        id: "thread-new",
+        title: "New Thread 1",
+      };
+      threads = [created];
+      await route.fulfill({ json: created, status: 201 });
+    } else if (
+      path.endsWith(`/threads/${initialThread.id}`) &&
+      method === "DELETE"
+    ) {
+      threads = [];
+      await route.fulfill({ status: 204 });
+    } else if (path.endsWith("/history")) {
+      await route.fulfill({
+        json: { approvals: [], interrupts: [], messages: [] },
+      });
+    } else {
+      await route.fulfill({ json: [] });
+    }
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Chats", exact: true }).click();
+  await page.getByRole("button", { name: "Only Thread actions" }).click();
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("menuitem", { name: "Delete" }).click();
+  await expect(
+    page.getByRole("button", { name: "Only Thread", exact: true }),
+  ).toBeHidden();
+  await page.getByRole("button", { name: "+ New Thread" }).click();
+  await expect(
+    page.getByRole("button", { name: "New Thread 1", exact: true }),
+  ).toBeVisible();
+});
+
 test("user can create a Project", async ({ page }) => {
   const project = {
     createdAt: "2026-09-15T00:00:00.000Z",

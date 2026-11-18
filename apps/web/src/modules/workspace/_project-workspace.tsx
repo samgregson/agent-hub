@@ -742,6 +742,38 @@ export function ProjectWorkspace() {
       ) : null}
 
       <section className={styles.chat}>
+        {selectedProject && selectedThread ? (
+          <div
+            hidden={
+              selectedActivity !== "chats" && selectedActivity !== "artifacts"
+            }
+            style={{ height: "100%" }}
+          >
+            <AgentChat
+              key={`${selectedProject.id}:${selectedThread.id}`}
+              onOpenFileProposal={(proposal) =>
+                dispatch({ proposal, type: "openFileProposal" })
+              }
+              onOpenArtifact={(artifactId) =>
+                dispatch({ artifactId, type: "openArtifact" })
+              }
+              onOpenVirtualFile={(path) => {
+                if (path.startsWith("/scratch/")) {
+                  dispatch({
+                    path,
+                    threadId: selectedThread.id,
+                    type: "openScratchFile",
+                  });
+                  return;
+                }
+                dispatch({ path, type: "openProjectFile" });
+              }}
+              onUserMessage={(message) => void handleFirstUserMessage(message)}
+              projectId={selectedProject.id}
+              threadId={selectedThread.id}
+            />
+          </div>
+        ) : null}
         {selectedProject && selectedActivity === "workflows" ? (
           <WorkflowOverview
             onOpenChats={() => handleSelectActivity("chats")}
@@ -757,31 +789,8 @@ export function ProjectWorkspace() {
           />
         ) : selectedProject &&
           selectedThread &&
-          (selectedActivity === "chats" || selectedActivity === "artifacts") ? (
-          <AgentChat
-            key={selectedThread.id}
-            onOpenFileProposal={(proposal) =>
-              dispatch({ proposal, type: "openFileProposal" })
-            }
-            onOpenArtifact={(artifactId) =>
-              dispatch({ artifactId, type: "openArtifact" })
-            }
-            onOpenVirtualFile={(path) => {
-              if (path.startsWith("/scratch/")) {
-                dispatch({
-                  path,
-                  threadId: selectedThread.id,
-                  type: "openScratchFile",
-                });
-                return;
-              }
-              dispatch({ path, type: "openProjectFile" });
-            }}
-            onUserMessage={(message) => void handleFirstUserMessage(message)}
-            projectId={selectedProject.id}
-            threadId={selectedThread.id}
-          />
-        ) : (
+          (selectedActivity === "chats" ||
+            selectedActivity === "artifacts") ? null : (
           <div className={styles.chatPlaceholder}>
             <h1>{selectedProject?.name ?? "Choose a Project"}</h1>
             <p>
@@ -932,15 +941,13 @@ function ProjectNavigator({
       <strong>{activityLabels[selectedActivity]}</strong>
       {selectedActivity === "chats" && project ? (
         <>
-          {threads.length > 0 ? (
-            <button
-              className={styles.newThread}
-              onClick={onCreateThread}
-              type="button"
-            >
-              + New Thread
-            </button>
-          ) : null}
+          <button
+            className={styles.newThread}
+            onClick={onCreateThread}
+            type="button"
+          >
+            + New Thread
+          </button>
           <div className={styles.threadList}>
             {threads.map((thread) => (
               <div className={styles.threadRow} key={thread.id}>

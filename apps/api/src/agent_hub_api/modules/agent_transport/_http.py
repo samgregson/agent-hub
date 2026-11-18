@@ -12,7 +12,7 @@ from starlette.types import Receive, Scope, Send
 
 from agent_hub_api.contracts import AgentRun as AgentRunResponse
 from agent_hub_api.contracts import ScratchFilePreview
-from agent_hub_api.modules.agent_execution import AgentRun, ScratchFileNotFound
+from agent_hub_api.modules.agent_execution import AgentEventStream, AgentRun, ScratchFileNotFound
 from agent_hub_api.modules.agent_transport._application import (
     AgentThreadAccess,
     AgentThreadNotFound,
@@ -40,13 +40,19 @@ class AgentStreamingResponse(StreamingResponse):
     """Close the event stream even when the client disconnects during a send."""
 
     def __init__(
-        self, content: AsyncGenerator[str, None], *, media_type: str, headers: dict[str, str]
+        self,
+        content: AsyncGenerator[str, None],
+        *,
+        events: AgentEventStream,
+        media_type: str,
+        headers: dict[str, str],
     ) -> None:
         self._agent_content = content
+        self._events = events
         super().__init__(content, media_type=media_type, headers=headers)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        async with aclosing(self._agent_content):
+        async with aclosing(self._events), aclosing(self._agent_content):
             await super().__call__(scope, receive, send)
 
 
@@ -271,6 +277,7 @@ def create_agent_transport_router(
 
         return AgentStreamingResponse(
             encoded_events(),
+            events=events,
             media_type=encoder.get_content_type(),
             headers={"Cache-Control": "no-cache, no-transform"},
         )
